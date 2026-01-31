@@ -1,0 +1,10 @@
+Topic: Computer Networks. This document focuses on computer networks basics.
+
+Definition KEY_003: KEY_003 refers to a core concept in computer networks with practical
+implications.
+
+This section provides examples, common pitfalls, and brief intuition.
+
+Related mention 1: KEY_004 is discussed briefly as a contrasting idea.
+
+Related mention 2: KEY_005 is discussed briefly as a contrasting idea.

@@ -1,0 +1,18 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic-settings
+sqlalchemy
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0+cpu
+langchain
+langchain-community
+langchain-openai
+langchain-google-genai
+chromadb
+pdfplumber
+tiktoken
+sentence-transformers
+charset-normalizer
+rank-bm25
+numpy

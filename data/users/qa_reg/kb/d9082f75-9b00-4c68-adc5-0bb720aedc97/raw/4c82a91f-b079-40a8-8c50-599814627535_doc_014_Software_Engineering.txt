@@ -1,0 +1,10 @@
+Topic: Software Engineering. This document focuses on software engineering basics.
+
+Definition KEY_014: KEY_014 refers to a core concept in software engineering with practical
+implications.
+
+This section provides examples, common pitfalls, and brief intuition.
+
+Related mention 1: KEY_015 is discussed briefly as a contrasting idea.
+
+Related mention 2: KEY_016 is discussed briefly as a contrasting idea.

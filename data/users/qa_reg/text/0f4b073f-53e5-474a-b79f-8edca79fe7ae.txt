@@ -1,0 +1,10 @@
+Topic: Database Systems. This document focuses on database systems basics.
+
+Definition KEY_021: KEY_021 refers to a core concept in database systems with practical
+implications.
+
+This section provides examples, common pitfalls, and brief intuition.
+
+Related mention 1: KEY_022 is discussed briefly as a contrasting idea.
+
+Related mention 2: KEY_023 is discussed briefly as a contrasting idea.
