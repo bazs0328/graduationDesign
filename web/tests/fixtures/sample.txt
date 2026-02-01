@@ -1,0 +1,4 @@
+Linear algebra studies vectors, matrices, and linear transformations.
+A matrix is a rectangular array of numbers. The determinant can indicate whether a matrix is invertible.
+Eigenvalues and eigenvectors reveal important properties of linear transformations.
+Probability theory models random events and uncertainty. Conditional probability and Bayes' theorem are core ideas.

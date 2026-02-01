@@ -4,5 +4,7 @@ backend/__pycache__
 backend/app/__pycache__
 web/node_modules
 web/dist
+web/playwright-report
+web/test-results
 .env
 tmp/

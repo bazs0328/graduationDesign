@@ -89,6 +89,7 @@ class QARecord(Base):
 
     id = Column(String, primary_key=True, index=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=True, index=True)
     doc_id = Column(String, ForeignKey("documents.id"))
     question = Column(Text, nullable=False)
     answer = Column(Text, nullable=False)

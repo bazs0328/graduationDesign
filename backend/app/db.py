@@ -29,6 +29,19 @@ def ensure_schema():
         conn.execute(text("UPDATE documents SET status = 'ready' WHERE status IS NULL"))
         conn.commit()
 
+        result = conn.execute(text("PRAGMA table_info(qa_records)"))
+        cols = {row[1] for row in result}
+        if "kb_id" not in cols:
+            conn.execute(text("ALTER TABLE qa_records ADD COLUMN kb_id VARCHAR"))
+            conn.execute(
+                text(
+                    "UPDATE qa_records "
+                    "SET kb_id = (SELECT kb_id FROM documents WHERE documents.id = qa_records.doc_id) "
+                    "WHERE kb_id IS NULL AND doc_id IS NOT NULL"
+                )
+            )
+            conn.commit()
+
 
 def get_db():
     db = SessionLocal()

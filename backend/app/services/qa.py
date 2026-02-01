@@ -43,7 +43,7 @@ def answer_question(
         fetch_k=fetch_k,
     )
     if not docs:
-        return "I could not find relevant context for that question.", []
+        return "无法找到与该问题相关的内容。", []
 
     sources, context = build_sources_and_context(docs)
 

@@ -1,0 +1,14 @@
+---
+description: 执行任务时使用 feat 分支，验收通过后合并并清理
+alwaysApply: true
+---
+
+# Git 任务分支流程
+
+## 执行任务时
+- **自动新建 feat 分支**：开始做 TODO 中的某项任务或用户指定的开发任务时，先基于当前默认分支（如 main）创建新分支，命名规范：`feat/简短描述`（如 `feat/qa-session-sources`、`feat/keypoints-explanation`）。
+- 后续所有该任务相关的提交都在此 feat 分支上进行。
+
+## 验收通过后
+- **自动 merge**：任务验收通过后，将 feat 分支合并回默认分支（如 main）。
+- **自动清理分支**：合并完成后删除该 feat 分支（本地与远程若存在则一并清理）。

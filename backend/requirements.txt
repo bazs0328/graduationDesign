@@ -3,14 +3,13 @@ uvicorn[standard]
 python-multipart
 pydantic-settings
 sqlalchemy
-langchain
+langchain-core
+langchain-text-splitters
 langchain-community
 langchain-openai
 langchain-google-genai
 chromadb
 pdfplumber
-tiktoken
 charset-normalizer
 rank-bm25
-numpy
 dashscope

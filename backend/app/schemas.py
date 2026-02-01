@@ -107,6 +107,19 @@ class QuizSubmitResponse(BaseModel):
     explanations: List[str]
 
 
+class ProgressByKb(BaseModel):
+    kb_id: str
+    kb_name: Optional[str] = None
+    total_docs: int
+    total_quizzes: int
+    total_attempts: int
+    total_questions: int
+    total_summaries: int
+    total_keypoints: int
+    avg_score: float
+    last_activity: Optional[datetime]
+
+
 class ProgressResponse(BaseModel):
     total_docs: int
     total_quizzes: int
@@ -116,6 +129,7 @@ class ProgressResponse(BaseModel):
     total_keypoints: int
     avg_score: float
     last_activity: Optional[datetime]
+    by_kb: List[ProgressByKb] = []
 
 
 class KeypointsRequest(BaseModel):
@@ -170,3 +184,20 @@ class ChatMessageOut(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RecommendationAction(BaseModel):
+    type: str
+    reason: Optional[str] = None
+
+
+class RecommendationItem(BaseModel):
+    doc_id: str
+    doc_name: Optional[str] = None
+    actions: List[RecommendationAction]
+
+
+class RecommendationsResponse(BaseModel):
+    kb_id: str
+    kb_name: Optional[str] = None
+    items: List[RecommendationItem]
