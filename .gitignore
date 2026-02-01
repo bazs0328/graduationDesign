@@ -1,6 +1,8 @@
+.venv
 backend/.venv
 backend/data
 **/__pycache__
+.pytest_cache
 web/node_modules
 web/dist
 web/playwright-report

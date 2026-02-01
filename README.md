@@ -62,7 +62,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml exec backend bash
 ```
 3) 回归测试（在同一容器内执行）
 ```bash
-python3 /app/scripts/qa_regression.py \
+python3 /app/tests/qa_regression.py \
   --user-id qa_reg --kb-name qa_reg_kb_qwen \
   --doc-count 30 --queries 40 --top-k 5 --fetch-k 20 \
   --mode hybrid --min-recall 0.7
@@ -81,7 +81,7 @@ python3 /app/scripts/qa_regression.py \
 ## Regression (Docker)
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm backend \
-  python3 /app/scripts/qa_regression.py \
+  python3 /app/tests/qa_regression.py \
   --user-id qa_reg --kb-name qa_reg_kb_qwen \
   --doc-count 30 --queries 40 --top-k 5 --fetch-k 20 \
   --mode hybrid --min-recall 0.7

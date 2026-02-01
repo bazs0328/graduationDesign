@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-import App from '../App.vue'
-import { apiGet, apiPost } from '../api'
+import App from '@/App.vue'
+import { apiGet, apiPost } from '@/api'
 
-vi.mock('../api', () => ({
+vi.mock('@/api', () => ({
   apiGet: vi.fn(),
   apiPost: vi.fn()
 }))

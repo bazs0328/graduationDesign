@@ -2,7 +2,6 @@
 from unittest.mock import patch
 
 from app.models import ChatMessage
-from app.services.qa import answer_question
 
 
 def _mock_answer(*args, **kwargs):

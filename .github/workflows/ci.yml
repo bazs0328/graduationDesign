@@ -79,7 +79,7 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.dev.yml logs backend
           exit 1
       - name: Run smoke
-        run: bash scripts/dev_smoke.sh
+        run: bash tests/smoke/dev_smoke.sh
       - name: Shutdown
         if: always()
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v

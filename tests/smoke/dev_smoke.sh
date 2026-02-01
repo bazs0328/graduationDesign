@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API_BASE="${API_BASE:-http://localhost:8000}"
 USER_ID="${SMOKE_USER_ID:-smoke}"
 DOC_FILE="${SMOKE_DOC_FILE:-/tmp/smoke_doc.txt}"

@@ -9,10 +9,11 @@ from pathlib import Path
 _test_data_dir = tempfile.mkdtemp(prefix="gradtutor_test_")
 os.environ["DATA_DIR"] = _test_data_dir
 
-# Ensure backend is on path
-_backend = Path(__file__).resolve().parent.parent
+# Ensure backend is on path (conftest lives in tests/backend/)
+_project_root = Path(__file__).resolve().parent.parent.parent
+_backend = _project_root / "backend"
 if str(_backend) not in sys.path:
-    sys.path.insert(0, str(_backend.parent))
+    sys.path.insert(0, str(_backend))
 
 from fastapi.testclient import TestClient
 
