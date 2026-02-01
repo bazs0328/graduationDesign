@@ -6,29 +6,29 @@
         <section class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-6">
           <div class="flex items-center gap-3">
             <PenTool class="w-6 h-6 text-primary" />
-            <h2 class="text-xl font-bold">Quiz Generator</h2>
+            <h2 class="text-xl font-bold">测验生成</h2>
           </div>
 
           <div class="space-y-4">
             <div class="space-y-2">
-              <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Target Document</label>
+              <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">目标文档</label>
               <select v-model="selectedDocId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
-                <option disabled value="">Select...</option>
+                <option disabled value="">请选择</option>
                 <option v-for="doc in docs" :key="doc.id" :value="doc.id">{{ doc.filename }}</option>
               </select>
             </div>
 
             <div class="grid grid-cols-2 gap-4">
               <div class="space-y-2">
-                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Count</label>
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">题目数量</label>
                 <input type="number" min="1" max="20" v-model.number="quizCount" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm" />
               </div>
               <div class="space-y-2">
-                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Difficulty</label>
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">难度</label>
                 <select v-model="quizDifficulty" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
-                  <option value="easy">Easy</option>
-                  <option value="medium">Medium</option>
-                  <option value="hard">Hard</option>
+                  <option value="easy">简单</option>
+                  <option value="medium">中等</option>
+                  <option value="hard">困难</option>
                 </select>
               </div>
             </div>
@@ -40,13 +40,13 @@
             >
               <Sparkles v-if="!busy.quiz" class="w-5 h-5" />
               <RefreshCw v-else class="w-5 h-5 animate-spin" />
-              {{ busy.quiz ? 'Generating Questions...' : 'Generate New Quiz' }}
+              {{ busy.quiz ? '正在生成题目…' : '生成新测验' }}
             </button>
           </div>
         </section>
 
         <div v-if="quizResult" class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4 text-center">
-          <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground">Last Result</h3>
+          <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground">上次结果</h3>
           <div class="relative inline-flex items-center justify-center">
             <svg class="w-24 h-24">
               <circle class="text-muted/20" stroke-width="8" stroke="currentColor" fill="transparent" r="40" cx="48" cy="48" />
@@ -64,7 +64,7 @@
             <span class="absolute text-2xl font-black">{{ Math.round(quizResult.score * 100) }}%</span>
           </div>
           <p class="text-sm font-medium">
-            {{ quizResult.correct }} / {{ quizResult.total }} Correct
+            {{ quizResult.correct }} / {{ quizResult.total }} 正确
           </p>
         </div>
       </aside>
@@ -73,7 +73,7 @@
       <section class="lg:col-span-2 space-y-6">
         <div v-if="busy.quiz" class="bg-card border border-border rounded-xl p-12 flex flex-col items-center justify-center space-y-4">
           <div class="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-          <p class="text-muted-foreground animate-pulse font-medium">AI is crafting questions based on your document...</p>
+          <p class="text-muted-foreground animate-pulse font-medium">正在根据文档生成题目…</p>
         </div>
 
         <div v-else-if="quiz" class="space-y-6">
@@ -115,7 +115,7 @@
                 </div>
 
                 <div v-if="quizResult" class="mt-4 p-4 bg-accent/30 rounded-lg space-y-2">
-                  <p class="text-xs font-bold uppercase tracking-widest text-primary">Explanation</p>
+                  <p class="text-xs font-bold uppercase tracking-widest text-primary">解析</p>
                   <p class="text-sm leading-relaxed text-muted-foreground">{{ quizResult.explanations[idx] }}</p>
                 </div>
               </div>
@@ -129,14 +129,14 @@
               @click="submitQuiz"
               :disabled="busy.submit || Object.keys(quizAnswers).length < quiz.questions.length"
             >
-              {{ busy.submit ? 'Scoring...' : 'Submit All Answers' }}
+              {{ busy.submit ? '正在批改…' : '提交全部答案' }}
             </button>
             <button
               v-else
               class="px-12 py-4 bg-secondary text-secondary-foreground rounded-xl font-black text-lg shadow-lg hover:scale-105 active:scale-95 transition-all"
               @click="generateQuiz"
             >
-              Try Another Quiz
+              再测一次
             </button>
           </div>
         </div>
@@ -146,8 +146,8 @@
             <PenTool class="w-12 h-12 text-primary opacity-50" />
           </div>
           <div class="space-y-2">
-            <h2 class="text-2xl font-bold">Ready to test your knowledge?</h2>
-            <p class="text-muted-foreground max-w-sm mx-auto">Select a document and set your preferences to generate a custom AI quiz.</p>
+            <h2 class="text-2xl font-bold">准备好检验掌握程度了吗？</h2>
+            <p class="text-muted-foreground max-w-sm mx-auto">选择文档并设置偏好，即可生成专属测验。</p>
           </div>
         </div>
       </section>
@@ -156,11 +156,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { PenTool, Sparkles, RefreshCw, CheckCircle2, XCircle } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
 
-const userId = ref(localStorage.getItem('gradtutor_user') || '')
+const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
+const resolvedUserId = computed(() => userId.value || 'default')
 const docs = ref([])
 const selectedDocId = ref('')
 const quiz = ref(null)
@@ -175,7 +176,7 @@ const busy = ref({
 
 async function refreshDocs() {
   try {
-    docs.value = await apiGet(`/api/docs?user_id=${encodeURIComponent(userId.value)}`)
+    docs.value = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}`)
   } catch (err) {
     console.error(err)
   }
@@ -192,7 +193,7 @@ async function generateQuiz() {
       doc_id: selectedDocId.value,
       count: quizCount.value,
       difficulty: quizDifficulty.value,
-      user_id: userId.value
+      user_id: resolvedUserId.value
     })
     quiz.value = res
   } catch (err) {
@@ -210,7 +211,7 @@ async function submitQuiz() {
     const res = await apiPost('/api/quiz/submit', {
       quiz_id: quiz.value.quiz_id,
       answers,
-      user_id: userId.value
+      user_id: resolvedUserId.value
     })
     quizResult.value = res
   } catch (err) {
@@ -221,8 +222,6 @@ async function submitQuiz() {
 }
 
 onMounted(async () => {
-  if (userId.value) {
-    await refreshDocs()
-  }
+  await refreshDocs()
 })
 </script>

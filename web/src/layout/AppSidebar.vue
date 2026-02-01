@@ -23,7 +23,7 @@
 
     <div class="p-4 border-t border-border space-y-4">
       <div v-if="!collapsed" class="space-y-1">
-        <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">User ID</label>
+        <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">用户 ID</label>
         <div class="flex gap-2">
           <input
             type="text"
@@ -60,12 +60,12 @@ const collapsed = ref(false)
 const userIdLocal = ref(localStorage.getItem('gradtutor_user') || '')
 
 const navItems = [
-  { name: 'Home', path: '/', icon: Home },
-  { name: 'Upload', path: '/upload', icon: Upload },
-  { name: 'Summary', path: '/summary', icon: FileText },
-  { name: 'Q&A', path: '/qa', icon: MessageSquare },
-  { name: 'Quiz', path: '/quiz', icon: PenTool },
-  { name: 'Progress', path: '/progress', icon: BarChart2 }
+  { name: '首页', path: '/', icon: Home },
+  { name: '上传', path: '/upload', icon: Upload },
+  { name: '摘要', path: '/summary', icon: FileText },
+  { name: '问答', path: '/qa', icon: MessageSquare },
+  { name: '测验', path: '/quiz', icon: PenTool },
+  { name: '进度', path: '/progress', icon: BarChart2 }
 ]
 
 function updateUserId() {

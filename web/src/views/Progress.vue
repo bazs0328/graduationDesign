@@ -21,10 +21,10 @@
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div class="flex items-center gap-3">
               <Database class="w-6 h-6 text-primary" />
-              <h2 class="text-2xl font-bold">Knowledge Base Stats</h2>
+              <h2 class="text-2xl font-bold">知识库统计</h2>
             </div>
             <select v-model="selectedKbId" class="bg-background border border-input rounded-lg px-4 py-2 outline-none focus:ring-2 focus:ring-primary text-sm min-w-[200px]">
-              <option disabled value="">Select a Knowledge Base...</option>
+              <option disabled value="">选择知识库…</option>
               <option v-for="kb in kbs" :key="kb.id" :value="kb.id">{{ kb.name }}</option>
             </select>
           </div>
@@ -36,7 +36,7 @@
             </div>
           </div>
           <div v-else class="py-12 text-center text-muted-foreground border-2 border-dashed border-border rounded-xl">
-            <p>Select a knowledge base to see detailed statistics</p>
+            <p>选择知识库以查看详细统计</p>
           </div>
         </section>
 
@@ -45,7 +45,7 @@
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-3">
               <Sparkles class="w-6 h-6 text-primary" />
-              <h2 class="text-2xl font-bold">Smart Recommendations</h2>
+              <h2 class="text-2xl font-bold">智能推荐</h2>
             </div>
             <button @click="fetchRecommendations" class="p-2 hover:bg-accent rounded-lg transition-colors" :disabled="busy.recommendations">
               <RefreshCw class="w-5 h-5" :class="{ 'animate-spin': busy.recommendations }" />
@@ -57,7 +57,7 @@
               <div class="flex items-start justify-between">
                 <div class="flex items-center gap-2">
                   <FileText class="w-5 h-5 text-primary" />
-                  <h4 class="font-bold truncate max-w-[150px]">{{ item.doc_name || 'Document' }}</h4>
+                  <h4 class="font-bold truncate max-w-[150px]">{{ item.doc_name || '文档' }}</h4>
                 </div>
               </div>
               <div class="flex flex-wrap gap-2">
@@ -74,7 +74,7 @@
             </div>
           </div>
           <div v-else class="py-12 text-center text-muted-foreground bg-accent/20 rounded-xl">
-            <p>No recommendations available for this knowledge base.</p>
+            <p>该知识库暂无推荐。</p>
           </div>
         </section>
       </div>
@@ -83,13 +83,13 @@
       <section class="bg-card border border-border rounded-xl p-6 shadow-sm flex flex-col h-[750px]">
         <div class="flex items-center gap-3 mb-6">
           <Activity class="w-6 h-6 text-primary" />
-          <h2 class="text-xl font-bold">Recent Activity</h2>
+          <h2 class="text-xl font-bold">最近动态</h2>
         </div>
 
         <div class="flex-1 overflow-y-auto space-y-6 pr-2">
           <div v-if="activity.length === 0" class="h-full flex flex-col items-center justify-center text-muted-foreground opacity-30">
             <Clock class="w-12 h-12 mb-2" />
-            <p>No recent activity</p>
+            <p>暂无最近动态</p>
           </div>
           <div v-for="(item, idx) in activity" :key="idx" class="relative pl-6 border-l-2 border-border pb-6 last:pb-0">
             <div class="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-background border-2 border-primary"></div>
@@ -98,7 +98,7 @@
               <p v-if="item.doc_name" class="text-xs text-primary font-medium">{{ item.doc_name }}</p>
               <p v-if="item.detail" class="text-xs text-muted-foreground">{{ item.detail }}</p>
               <div v-if="item.score !== null" class="mt-2 inline-flex items-center gap-2 px-2 py-1 bg-secondary rounded text-[10px] font-bold">
-                SCORE: {{ Math.round(item.score * 100) }}% ({{ item.total }} Qs)
+                得分：{{ Math.round(item.score * 100) }}%（{{ item.total }} 题）
               </div>
               <p class="text-[10px] text-muted-foreground pt-1">{{ new Date(item.timestamp).toLocaleString() }}</p>
             </div>
@@ -126,7 +126,8 @@ import {
 } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
 
-const userId = ref(localStorage.getItem('gradtutor_user') || '')
+const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
+const resolvedUserId = computed(() => userId.value || 'default')
 const progress = ref(null)
 const activity = ref([])
 const recommendations = ref([])
@@ -139,10 +140,10 @@ const busy = ref({
 const topStats = computed(() => {
   if (!progress.value) return []
   return [
-    { label: 'Documents', value: progress.value.total_docs, icon: FileText, color: 'bg-blue-500/10 text-blue-500' },
-    { label: 'Quizzes', value: progress.value.total_attempts, icon: PenTool, color: 'bg-orange-500/10 text-orange-500' },
-    { label: 'Questions', value: progress.value.total_questions, icon: MessageSquare, color: 'bg-green-500/10 text-green-500' },
-    { label: 'Avg Score', value: `${Math.round(progress.value.avg_score * 100)}%`, icon: TrendingUp, color: 'bg-purple-500/10 text-purple-500' }
+    { label: '文档数', value: progress.value.total_docs, icon: FileText, color: 'bg-blue-500/10 text-blue-500' },
+    { label: '测验数', value: progress.value.total_attempts, icon: PenTool, color: 'bg-orange-500/10 text-orange-500' },
+    { label: '问答数', value: progress.value.total_questions, icon: MessageSquare, color: 'bg-green-500/10 text-green-500' },
+    { label: '平均分', value: `${Math.round(progress.value.avg_score * 100)}%`, icon: TrendingUp, color: 'bg-purple-500/10 text-purple-500' }
   ]
 })
 
@@ -154,16 +155,16 @@ const kbProgress = computed(() => {
 const kbStatItems = computed(() => {
   if (!kbProgress.value) return []
   return [
-    { label: 'Docs', value: kbProgress.value.total_docs },
-    { label: 'Quizzes', value: kbProgress.value.total_attempts },
-    { label: 'Questions', value: kbProgress.value.total_questions },
-    { label: 'Avg Score', value: `${Math.round(kbProgress.value.avg_score * 100)}%` }
+    { label: '文档', value: kbProgress.value.total_docs },
+    { label: '测验', value: kbProgress.value.total_attempts },
+    { label: '问答', value: kbProgress.value.total_questions },
+    { label: '平均分', value: `${Math.round(kbProgress.value.avg_score * 100)}%` }
   ]
 })
 
 async function fetchProgress() {
   try {
-    progress.value = await apiGet(`/api/progress?user_id=${encodeURIComponent(userId.value)}`)
+    progress.value = await apiGet(`/api/progress?user_id=${encodeURIComponent(resolvedUserId.value)}`)
   } catch (err) {
     console.error(err)
   }
@@ -171,7 +172,7 @@ async function fetchProgress() {
 
 async function fetchActivity() {
   try {
-    const res = await apiGet(`/api/activity?user_id=${encodeURIComponent(userId.value)}`)
+    const res = await apiGet(`/api/activity?user_id=${encodeURIComponent(resolvedUserId.value)}`)
     activity.value = res.items || []
   } catch (err) {
     console.error(err)
@@ -182,7 +183,7 @@ async function fetchRecommendations() {
   if (!selectedKbId.value) return
   busy.value.recommendations = true
   try {
-    const res = await apiGet(`/api/recommendations?user_id=${encodeURIComponent(userId.value)}&kb_id=${encodeURIComponent(selectedKbId.value)}&limit=6`)
+    const res = await apiGet(`/api/recommendations?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(selectedKbId.value)}&limit=6`)
     recommendations.value = res.items || []
   } catch (err) {
     console.error(err)
@@ -193,7 +194,7 @@ async function fetchRecommendations() {
 
 async function refreshKbs() {
   try {
-    kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(userId.value)}`)
+    kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(resolvedUserId.value)}`)
   } catch (err) {
     console.error(err)
   }
@@ -201,31 +202,29 @@ async function refreshKbs() {
 
 function activityLabel(item) {
   switch (item.type) {
-    case 'document_upload': return 'Uploaded document'
-    case 'summary_generated': return 'Summary generated'
-    case 'keypoints_generated': return 'Keypoints generated'
-    case 'question_asked': return 'Question asked'
-    case 'quiz_attempt': return 'Quiz attempt'
+    case 'document_upload': return '上传了文档'
+    case 'summary_generated': return '生成了摘要'
+    case 'keypoints_generated': return '生成了要点'
+    case 'question_asked': return '进行了提问'
+    case 'quiz_attempt': return '完成了测验'
     default: return item.type
   }
 }
 
 function actionLabel(type) {
   switch (type) {
-    case 'summary': return 'Summary'
-    case 'keypoints': return 'Keypoints'
-    case 'quiz': return 'Quiz'
-    case 'qa': return 'Q&A'
+    case 'summary': return '摘要'
+    case 'keypoints': return '要点'
+    case 'quiz': return '测验'
+    case 'qa': return '问答'
     default: return type
   }
 }
 
 onMounted(async () => {
-  if (userId.value) {
-    await fetchProgress()
-    await fetchActivity()
-    await refreshKbs()
-  }
+  await fetchProgress()
+  await fetchActivity()
+  await refreshKbs()
 })
 
 watch(selectedKbId, () => {

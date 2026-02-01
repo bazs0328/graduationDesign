@@ -16,9 +16,11 @@
       </header>
       <div class="flex-1 overflow-y-auto p-8">
         <router-view v-slot="{ Component }">
-          <transition name="fade" mode="out-in">
-            <component :is="Component" />
-          </transition>
+          <keep-alive>
+            <transition name="fade" mode="out-in">
+              <component :is="Component" />
+            </transition>
+          </keep-alive>
         </router-view>
       </div>
     </main>
@@ -33,10 +35,10 @@ import AppSidebar from './AppSidebar.vue'
 
 const route = useRoute()
 const isDark = ref(false)
-const userId = ref(localStorage.getItem('gradtutor_user') || 'Guest')
+const userId = ref(localStorage.getItem('gradtutor_user') || '游客')
 
 const currentRouteName = computed(() => {
-  return route.name || 'Dashboard'
+  return route.meta?.title || route.name || '控制台'
 })
 
 function toggleTheme() {
@@ -51,7 +53,7 @@ onMounted(() => {
 
 // Listen for storage changes to update userId
 window.addEventListener('storage', () => {
-  userId.value = localStorage.getItem('gradtutor_user') || 'Guest'
+  userId.value = localStorage.getItem('gradtutor_user') || '游客'
 })
 </script>
 
