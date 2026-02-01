@@ -75,10 +75,12 @@ class QAResponse(BaseModel):
 
 
 class QuizGenerateRequest(BaseModel):
-    doc_id: str
+    doc_id: Optional[str] = None
     count: int = Field(default=5, ge=1, le=20)
     difficulty: str = Field(default="medium")
     user_id: Optional[str] = None
+    style_prompt: Optional[str] = None
+    reference_questions: Optional[str] = None
 
 
 class QuizQuestion(BaseModel):

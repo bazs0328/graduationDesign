@@ -1,0 +1,21 @@
+---
+description: 测试约定（pytest 后端、vitest/Playwright 前端、smoke），来源 araguaci/cursor-skills
+globs: tests/**/*.{py,js,ts}, web/tests/**/*
+alwaysApply: false
+---
+
+# 测试约定
+
+## 后端（pytest）
+- 测试文件 `test_*.py`；fixtures 在 conftest.py。
+- 使用 `pytest.raises` 验证异常；mock 外部调用（LLM、向量库）。
+- 运行：`pytest -q` 或 `pytest tests/backend/`。
+
+## 前端
+- 单元测试用 Vitest（`web/tests/unit/`）；E2E 用 Playwright（`web/tests/e2e/`）。
+- 组件测试覆盖交互与边界状态。
+- 运行：`cd web && npm test` / `npm run test:e2e`。
+
+## Smoke
+- 关键接口加入 `tests/smoke/dev_smoke.sh`；失败返回非零退出码。
+- 新 API 上线前补充 smoke 验证。

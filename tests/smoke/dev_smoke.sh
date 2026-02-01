@@ -270,6 +270,27 @@ if [[ "$submit_json" == *"detail"* ]]; then
   fail "Quiz submit failed: ${submit_json}"
 fi
 
+log "Quiz mimic (style_prompt)..."
+mimic_json=$(curl -sS -H "Content-Type: application/json" \
+  -d "{\"doc_id\":\"${doc_id}\",\"user_id\":\"${USER_ID}\",\"count\":2,\"difficulty\":\"medium\",\"style_prompt\":\"Exam-style multiple choice.\"}" \
+  "${API_BASE}/api/quiz/generate" || true)
+if [[ "$mimic_json" == *"detail"* ]]; then
+  fail "Quiz mimic (style_prompt) failed: ${mimic_json}"
+fi
+mimic_quiz_id=$(python3 - <<PY
+import json,sys
+try:
+    obj=json.loads('''${mimic_json}''')
+    print(obj.get('quiz_id',''))
+except Exception:
+    print('')
+PY
+)
+if [[ -z "$mimic_quiz_id" ]]; then
+  fail "Quiz mimic did not return quiz_id: ${mimic_json}"
+fi
+log "mimic quiz_id=${mimic_quiz_id}"
+
 log "Fetching progress..."
 progress_json=$(curl -sS "${API_BASE}/api/progress?user_id=${USER_ID}" || true)
 if [[ "$progress_json" == *"detail"* ]]; then

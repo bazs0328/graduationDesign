@@ -13,20 +13,41 @@ from app.services.quiz import generate_quiz
 router = APIRouter()
 
 
+def _has_quiz_input(payload: QuizGenerateRequest) -> bool:
+    """At least one of doc_id, reference_questions, or style_prompt must be provided."""
+    return bool(
+        (payload.doc_id and payload.doc_id.strip())
+        or (payload.reference_questions and payload.reference_questions.strip())
+        or (payload.style_prompt and payload.style_prompt.strip())
+    )
+
+
 @router.post("/quiz/generate", response_model=QuizGenerateResponse)
 def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
     resolved_user_id = ensure_user(db, payload.user_id)
-    doc = db.query(Document).filter(Document.id == payload.doc_id).first()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    if payload.user_id and doc.user_id != resolved_user_id:
-        raise HTTPException(status_code=404, detail="Document not found")
-    if doc.status != "ready":
-        raise HTTPException(status_code=409, detail="Document is still processing")
+    if not _has_quiz_input(payload):
+        raise HTTPException(
+            status_code=400,
+            detail="At least one of doc_id, reference_questions, or style_prompt is required.",
+        )
+
+    if payload.doc_id:
+        doc = db.query(Document).filter(Document.id == payload.doc_id).first()
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if payload.user_id and doc.user_id != resolved_user_id:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if doc.status != "ready":
+            raise HTTPException(status_code=409, detail="Document is still processing")
 
     try:
         questions = generate_quiz(
-            resolved_user_id, payload.doc_id, payload.count, payload.difficulty
+            resolved_user_id,
+            payload.doc_id,
+            payload.count,
+            payload.difficulty,
+            style_prompt=payload.style_prompt,
+            reference_questions=payload.reference_questions,
         )
         parsed = [QuizQuestion(**q) for q in questions]
     except ValueError as exc:

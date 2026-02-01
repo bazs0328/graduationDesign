@@ -1,21 +1,23 @@
 # 测试目录结构
 
-所有测试相关文件集中在此目录（前端单元测试因 Vitest 需在 web 项目内，位于 `web/tests/unit/`）。
+后端 pytest 在此目录；前端单元与 E2E 测试在 `web/tests/` 下。
 
 ## 目录说明
 
 | 目录/文件 | 说明 |
 |-----------|------|
 | `backend/` | 后端 pytest 集成测试 |
-| `frontend/e2e/` | Playwright E2E 测试（需在 web 下运行 `npm run test:e2e`） |
-| `frontend/fixtures/` | E2E 测试用 fixture 文件 |
 | `smoke/` | Smoke 测试脚本 |
 | `qa_regression.py` | QA 回归测试 |
 | `loadtest_qa.sh` | QA 压测脚本 |
 
-## 前端单元测试
+## 前端测试（web/tests/）
 
-Vitest 单元测试位于 `web/tests/unit/`，在 web 下运行 `npm test`。
+| 目录 | 说明 |
+|------|------|
+| `web/tests/unit/` | Vitest 单元测试 |
+| `web/tests/e2e/` | Playwright E2E 测试 |
+| `web/tests/fixtures/` | E2E 测试用 fixture 文件 |
 
 ## 运行方式
 

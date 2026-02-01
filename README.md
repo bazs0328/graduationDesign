@@ -71,6 +71,13 @@ python3 /app/tests/qa_regression.py \
 - 只保留 `backend/.env`，根目录不再放 `.env`
 - LLM/Embedding 配置统一在 `backend/.env`
 
+## API (Quiz)
+- **POST /api/quiz/generate**: Generates MCQ quiz. Requires at least one of:
+  - `doc_id` — generate from document content (existing behavior).
+  - `reference_questions` — generate questions in the same style/difficulty as the given text (paste or from reference exam).
+  - `style_prompt` — generate questions matching a style/template description (e.g. exam-style wording).
+- Optional: `count`, `difficulty`, `user_id`. When `doc_id` is omitted, pass `reference_questions` and/or `style_prompt` for mimic-style generation. Submit with **POST /api/quiz/submit** as before.
+
 ## Notes
 - Uploaded files are stored per user in `backend/data/users/<user_id>/uploads`.
 - Parsed text is stored in `backend/data/users/<user_id>/text`.

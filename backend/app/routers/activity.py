@@ -86,13 +86,14 @@ def get_activity(limit: int = 20, user_id: str | None = None, db: Session = Depe
 
     for attempt in attempt_query.order_by(QuizAttempt.created_at.desc()).limit(limit).all():
         doc_id = quiz_doc.get(attempt.quiz_id)
+        detail = "Quiz submitted (style mimic)" if doc_id is None else "Quiz submitted"
         items.append(
             ActivityItem(
                 type="quiz_attempt",
                 timestamp=attempt.created_at,
                 doc_id=doc_id,
-                doc_name=doc_name.get(doc_id),
-                detail="Quiz submitted",
+                doc_name=doc_name.get(doc_id) if doc_id else None,
+                detail=detail,
                 score=attempt.score,
                 total=attempt.total,
             )
