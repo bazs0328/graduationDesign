@@ -293,4 +293,117 @@ if [[ "$activity_ok" != "ok" ]]; then
   fail "Activity failed: ${activity_json}"
 fi
 
+log "Getting or creating KB..."
+kb_json=$(curl -sS "${API_BASE}/api/kb?user_id=${USER_ID}" || true)
+KB_ID=""
+if [[ "$kb_json" == *"detail"* ]]; then
+  fail "KB list failed: ${kb_json}"
+fi
+KB_ID=$(KB_JSON="${kb_json}" python3 - <<'PY'
+import json, os
+data = os.environ.get("KB_JSON", "")
+try:
+    items = json.loads(data)
+except Exception:
+    print("")
+    raise SystemExit(0)
+if isinstance(items, list) and items:
+    print(items[0].get("id", ""))
+else:
+    print("")
+PY
+)
+if [[ -z "$KB_ID" ]]; then
+  log "No KB found; creating smoke_kb..."
+  create_kb_json=$(curl -sS -H "Content-Type: application/json" \
+    -d "{\"name\":\"smoke_kb\",\"user_id\":\"${USER_ID}\"}" \
+    "${API_BASE}/api/kb" || true)
+  if [[ "$create_kb_json" == *"detail"* ]] && [[ "$create_kb_json" != *"id"* ]]; then
+    fail "Create KB failed: ${create_kb_json}"
+  fi
+  KB_ID=$(KB_JSON="${create_kb_json}" python3 - <<'PY'
+import json, os
+data = os.environ.get("KB_JSON", "")
+try:
+    obj = json.loads(data)
+    print(obj.get("id", ""))
+except Exception:
+    print("")
+PY
+)
+fi
+if [[ -z "$KB_ID" ]]; then
+  fail "Could not get or create KB"
+fi
+log "kb_id=${KB_ID}"
+
+log "Creating chat session..."
+session_json=$(curl -sS -H "Content-Type: application/json" \
+  -d "{\"user_id\":\"${USER_ID}\",\"doc_id\":\"${doc_id}\"}" \
+  "${API_BASE}/api/chat/sessions" || true)
+if [[ "$session_json" == *"detail"* ]] && [[ "$session_json" != *"id"* ]]; then
+  fail "Create session failed: ${session_json}"
+fi
+session_id=$(SESSION_JSON="${session_json}" python3 - <<'PY'
+import json, os
+data = os.environ.get("SESSION_JSON", "")
+try:
+    obj = json.loads(data)
+    print(obj.get("id", ""))
+except Exception:
+    print("")
+PY
+)
+if [[ -z "$session_id" ]]; then
+  fail "Create session did not return session_id: ${session_json}"
+fi
+log "session_id=${session_id}"
+
+log "Fetching session messages..."
+messages_json=$(curl -sS "${API_BASE}/api/chat/sessions/${session_id}/messages?user_id=${USER_ID}" || true)
+messages_ok=$(MESSAGES_JSON="${messages_json}" python3 - <<'PY'
+import json, os
+data = os.environ.get("MESSAGES_JSON", "")
+try:
+    obj = json.loads(data)
+except Exception:
+    print("invalid_json")
+    raise SystemExit(0)
+if isinstance(obj, dict) and "detail" in obj:
+    print("error")
+elif isinstance(obj, list):
+    print("ok")
+else:
+    print("not_list")
+PY
+)
+if [[ "$messages_ok" != "ok" ]]; then
+  fail "Get messages failed: ${messages_json}"
+fi
+
+log "Fetching recommendations..."
+rec_json=$(curl -sS "${API_BASE}/api/recommendations?user_id=${USER_ID}&kb_id=${KB_ID}&limit=5" || true)
+if [[ "$rec_json" == *"detail"* ]] && [[ "$rec_json" != *"items"* ]]; then
+  fail "Recommendations failed: ${rec_json}"
+fi
+rec_ok=$(REC_JSON="${rec_json}" python3 - <<'PY'
+import json, os
+data = os.environ.get("REC_JSON", "")
+try:
+    obj = json.loads(data)
+except Exception:
+    print("invalid_json")
+    raise SystemExit(0)
+if isinstance(obj, dict) and "detail" in obj and "items" not in obj:
+    print("error")
+elif isinstance(obj, dict) and "items" in obj:
+    print("ok")
+else:
+    print("missing_items")
+PY
+)
+if [[ "$rec_ok" != "ok" ]]; then
+  fail "Recommendations malformed: ${rec_json}"
+fi
+
 log "Smoke test complete."

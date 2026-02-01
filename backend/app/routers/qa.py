@@ -96,6 +96,7 @@ def ask_question(payload: QARequest, db: Session = Depends(get_db)):
     record = QARecord(
         id=str(uuid4()),
         user_id=resolved_user_id,
+        kb_id=kb_id,
         doc_id=doc_id,
         question=payload.question,
         answer=answer,

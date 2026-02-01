@@ -225,6 +225,68 @@
       </div>
 
       <div class="card">
+        <h2>Knowledge Base Breakdown</h2>
+        <label>Choose a knowledge base</label>
+        <select v-model="selectedKbId">
+          <option disabled value="">Select...</option>
+          <option v-for="kb in kbs" :key="kb.id" :value="kb.id">
+            {{ kb.name }}
+          </option>
+        </select>
+        <div v-if="kbProgress" class="list" style="margin-top: 12px">
+          <div class="list-item">Documents: {{ kbProgress.total_docs }}</div>
+          <div class="list-item">Quizzes: {{ kbProgress.total_quizzes }}</div>
+          <div class="list-item">Attempts: {{ kbProgress.total_attempts }}</div>
+          <div class="list-item">Questions asked: {{ kbProgress.total_questions }}</div>
+          <div class="list-item">Summaries: {{ kbProgress.total_summaries }}</div>
+          <div class="list-item">Keypoints: {{ kbProgress.total_keypoints }}</div>
+          <div class="list-item">Average score: {{ kbProgress.avg_score }}</div>
+          <div class="list-item">
+            Last activity:
+            {{ kbProgress.last_activity ? new Date(kbProgress.last_activity).toLocaleString() : 'N/A' }}
+          </div>
+        </div>
+        <p v-else class="muted" style="margin-top: 12px">No KB stats yet.</p>
+        <div v-if="progress && progress.by_kb && progress.by_kb.length" class="list" style="margin-top: 16px">
+          <div v-for="kbStat in progress.by_kb" :key="kbStat.kb_id" class="list-item">
+            <strong>{{ kbStat.kb_name || kbStat.kb_id }}</strong>
+            <p class="muted">
+              Docs: {{ kbStat.total_docs }} | Quizzes: {{ kbStat.total_quizzes }} | Attempts:
+              {{ kbStat.total_attempts }} | Questions: {{ kbStat.total_questions }}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Recommendations</h2>
+        <p class="muted">Personalized next steps for the selected knowledge base.</p>
+        <button
+          style="margin-top: 8px"
+          class="secondary"
+          :disabled="busy.recommendations"
+          @click="fetchRecommendations"
+        >
+          {{ busy.recommendations ? 'Loading...' : 'Refresh' }}
+        </button>
+        <div v-if="recommendations.length" class="list" style="margin-top: 12px">
+          <div v-for="item in recommendations" :key="item.doc_id" class="list-item">
+            <strong>{{ item.doc_name || item.doc_id }}</strong>
+            <p class="muted" v-if="item.doc_id">Doc ID: {{ item.doc_id }}</p>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px">
+              <span v-for="action in item.actions" :key="action.type" class="badge">
+                {{ actionLabel(action.type) }}
+              </span>
+            </div>
+            <p v-for="action in item.actions" :key="`${item.doc_id}-${action.type}`" class="muted">
+              {{ actionLabel(action.type) }}: {{ action.reason }}
+            </p>
+          </div>
+        </div>
+        <p v-else class="muted" style="margin-top: 12px">No recommendations yet.</p>
+      </div>
+
+      <div class="card">
         <h2>Recent Activity</h2>
         <div v-if="activity.length" class="list">
           <div v-for="(item, idx) in activity" :key="idx" class="list-item">
@@ -244,7 +306,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { apiGet, apiPost } from './api'
 
 const tabs = ['Upload', 'Summary', 'Q&A', 'Quiz', 'Progress']
@@ -274,7 +336,14 @@ const quizCount = ref(5)
 const quizDifficulty = ref('medium')
 const progress = ref(null)
 const activity = ref([])
+const recommendations = ref([])
 const statusMessage = ref('')
+
+const kbProgress = computed(() => {
+  if (!progress.value || !Array.isArray(progress.value.by_kb)) return null
+  if (!selectedKbId.value) return null
+  return progress.value.by_kb.find((item) => item.kb_id === selectedKbId.value) || null
+})
 
 const busy = ref({
   upload: false,
@@ -283,7 +352,8 @@ const busy = ref({
   qa: false,
   quiz: false,
   submit: false,
-  kb: false
+  kb: false,
+  recommendations: false
 })
 
 function onFileChange(event) {
@@ -456,6 +526,7 @@ async function fetchProgress() {
   try {
     progress.value = await apiGet(`/api/progress?user_id=${encodeURIComponent(userId.value)}`)
     await fetchActivity()
+    await fetchRecommendations()
   } catch (err) {
     statusMessage.value = err.message
   }
@@ -467,6 +538,26 @@ async function fetchActivity() {
     activity.value = res.items || []
   } catch (err) {
     statusMessage.value = err.message
+  }
+}
+
+async function fetchRecommendations() {
+  if (!selectedKbId.value) {
+    recommendations.value = []
+    return
+  }
+  busy.value.recommendations = true
+  try {
+    const res = await apiGet(
+      `/api/recommendations?user_id=${encodeURIComponent(userId.value)}&kb_id=${encodeURIComponent(
+        selectedKbId.value
+      )}&limit=6`
+    )
+    recommendations.value = res.items || []
+  } catch (err) {
+    statusMessage.value = err.message
+  } finally {
+    busy.value.recommendations = false
   }
 }
 
@@ -484,6 +575,21 @@ function activityLabel(item) {
       return 'Quiz attempt'
     default:
       return item.type
+  }
+}
+
+function actionLabel(type) {
+  switch (type) {
+    case 'summary':
+      return 'Summary'
+    case 'keypoints':
+      return 'Keypoints'
+    case 'quiz':
+      return 'Quiz'
+    case 'qa':
+      return 'Q&A'
+    default:
+      return type
   }
 }
 
@@ -522,5 +628,6 @@ onMounted(async () => {
 
 watch(selectedKbId, async () => {
   await refreshDocs()
+  await fetchRecommendations()
 })
 </script>
