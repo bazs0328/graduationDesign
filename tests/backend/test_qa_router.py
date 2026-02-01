@@ -23,6 +23,24 @@ def test_qa_without_doc_or_kb_returns_400(client):
     assert "doc_id" in data["detail"] or "kb_id" in data["detail"]
 
 
+def test_qa_with_kb_id_success(client, seeded_session):
+    """POST /api/qa with kb_id only returns answer and sources (mocked)."""
+    with patch("app.routers.qa.answer_question", side_effect=_mock_answer):
+        resp = client.post(
+            "/api/qa",
+            json={
+                "kb_id": seeded_session["kb_id"],
+                "user_id": seeded_session["user_id"],
+                "question": "What is a matrix?",
+            },
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["answer"] == "mock answer from LLM"
+    assert isinstance(data["sources"], list)
+    assert len(data["sources"]) > 0
+
+
 def test_qa_with_invalid_session_id_returns_404(client, seeded_session):
     """POST /api/qa with non-existent session_id returns 404."""
     with patch("app.routers.qa.answer_question", side_effect=_mock_answer):

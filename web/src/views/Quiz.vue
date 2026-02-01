@@ -11,10 +11,10 @@
 
           <div class="space-y-4">
             <div class="space-y-2">
-              <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">目标文档</label>
-              <select v-model="selectedDocId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
+              <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">目标知识库</label>
+              <select v-model="selectedKbId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
                 <option disabled value="">请选择</option>
-                <option v-for="doc in docs" :key="doc.id" :value="doc.id">{{ doc.filename }}</option>
+                <option v-for="kb in kbs" :key="kb.id" :value="kb.id">{{ kb.name || kb.id }}</option>
               </select>
             </div>
 
@@ -35,7 +35,7 @@
 
             <button
               class="w-full bg-primary text-primary-foreground rounded-lg py-3 font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
-              :disabled="!selectedDocId || busy.quiz"
+              :disabled="!selectedKbId || busy.quiz"
               @click="generateQuiz"
             >
               <Sparkles v-if="!busy.quiz" class="w-5 h-5" />
@@ -73,7 +73,7 @@
       <section class="lg:col-span-2 space-y-6">
         <div v-if="busy.quiz" class="bg-card border border-border rounded-xl p-12 flex flex-col items-center justify-center space-y-4">
           <div class="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-          <p class="text-muted-foreground animate-pulse font-medium">正在根据文档生成题目…</p>
+          <p class="text-muted-foreground animate-pulse font-medium">正在根据知识库生成题目…</p>
         </div>
 
         <div v-else-if="quiz" class="space-y-6">
@@ -147,7 +147,7 @@
           </div>
           <div class="space-y-2">
             <h2 class="text-2xl font-bold">准备好检验掌握程度了吗？</h2>
-            <p class="text-muted-foreground max-w-sm mx-auto">选择文档并设置偏好，即可生成专属测验。</p>
+            <p class="text-muted-foreground max-w-sm mx-auto">选择知识库并设置偏好，即可生成专属测验。</p>
           </div>
         </div>
       </section>
@@ -162,8 +162,8 @@ import { apiGet, apiPost } from '../api'
 
 const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
 const resolvedUserId = computed(() => userId.value || 'default')
-const docs = ref([])
-const selectedDocId = ref('')
+const kbs = ref([])
+const selectedKbId = ref('')
 const quiz = ref(null)
 const quizAnswers = ref({})
 const quizResult = ref(null)
@@ -174,23 +174,23 @@ const busy = ref({
   submit: false
 })
 
-async function refreshDocs() {
+async function refreshKbs() {
   try {
-    docs.value = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(resolvedUserId.value)}`)
   } catch (err) {
     console.error(err)
   }
 }
 
 async function generateQuiz() {
-  if (!selectedDocId.value) return
+  if (!selectedKbId.value) return
   busy.value.quiz = true
   quiz.value = null
   quizAnswers.value = {}
   quizResult.value = null
   try {
     const res = await apiPost('/api/quiz/generate', {
-      doc_id: selectedDocId.value,
+      kb_id: selectedKbId.value,
       count: quizCount.value,
       difficulty: quizDifficulty.value,
       user_id: resolvedUserId.value
@@ -222,6 +222,6 @@ async function submitQuiz() {
 }
 
 onMounted(async () => {
-  await refreshDocs()
+  await refreshKbs()
 })
 </script>

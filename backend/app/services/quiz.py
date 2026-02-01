@@ -47,13 +47,22 @@ QUIZ_MIMIC_HUMAN_TEMPLATE = (
 def _build_context(
     user_id: str,
     doc_id: Optional[str],
+    kb_id: Optional[str],
     reference_questions: Optional[str],
 ) -> str:
-    """Build context from doc_id (vectorstore) or reference_questions or placeholder."""
+    """Build context from doc_id or kb_id (vectorstore), reference_questions, or placeholder."""
     if doc_id:
         vectorstore = get_vectorstore(user_id)
         docs = vectorstore.similarity_search(
             "key concepts and definitions", k=6, filter={"doc_id": doc_id}
+        )
+        if not docs:
+            raise ValueError("No relevant context found for quiz generation")
+        return "\n\n".join(doc.page_content for doc in docs)
+    if kb_id:
+        vectorstore = get_vectorstore(user_id)
+        docs = vectorstore.similarity_search(
+            "key concepts and definitions", k=6, filter={"kb_id": kb_id}
         )
         if not docs:
             raise ValueError("No relevant context found for quiz generation")
@@ -91,11 +100,14 @@ def generate_quiz(
     doc_id: Optional[str],
     count: int,
     difficulty: str,
+    kb_id: Optional[str] = None,
     style_prompt: Optional[str] = None,
     reference_questions: Optional[str] = None,
 ) -> List[dict]:
-    context = _build_context(user_id, doc_id, reference_questions)
-    context_is_from_reference = not doc_id and bool(reference_questions and reference_questions.strip())
+    context = _build_context(user_id, doc_id, kb_id, reference_questions)
+    context_is_from_reference = not doc_id and not kb_id and bool(
+        reference_questions and reference_questions.strip()
+    )
     extra = _build_extra_instructions(
         style_prompt, reference_questions, context_is_from_reference
     )

@@ -6,6 +6,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from app.core.knowledge_bases import ensure_kb
 from app.core.users import ensure_user
 from app.db import get_db
 from app.models import Document, Quiz, QuizAttempt
@@ -25,11 +26,11 @@ router = APIRouter()
 
 
 def _has_quiz_input(payload: QuizGenerateRequest) -> bool:
-    """At least one of doc_id, reference_questions, or style_prompt must be provided."""
+    """At least one of doc_id, kb_id, or reference_questions must be provided."""
     return bool(
         (payload.doc_id and payload.doc_id.strip())
+        or (payload.kb_id and payload.kb_id.strip())
         or (payload.reference_questions and payload.reference_questions.strip())
-        or (payload.style_prompt and payload.style_prompt.strip())
     )
 
 
@@ -39,7 +40,7 @@ def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
     if not _has_quiz_input(payload):
         raise HTTPException(
             status_code=400,
-            detail="At least one of doc_id, reference_questions, or style_prompt is required.",
+            detail="At least one of doc_id, kb_id, or reference_questions is required.",
         )
 
     if payload.doc_id:
@@ -51,12 +52,19 @@ def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
         if doc.status != "ready":
             raise HTTPException(status_code=409, detail="Document is still processing")
 
+    if payload.kb_id:
+        try:
+            ensure_kb(db, resolved_user_id, payload.kb_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     try:
         questions = generate_quiz(
             resolved_user_id,
             payload.doc_id,
             payload.count,
             payload.difficulty,
+            kb_id=payload.kb_id,
             style_prompt=payload.style_prompt,
             reference_questions=payload.reference_questions,
         )
@@ -73,6 +81,7 @@ def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
     quiz = Quiz(
         id=quiz_id,
         user_id=resolved_user_id,
+        kb_id=payload.kb_id,
         doc_id=payload.doc_id,
         difficulty=payload.difficulty,
         question_type="mcq",

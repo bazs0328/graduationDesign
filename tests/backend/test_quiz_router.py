@@ -26,7 +26,7 @@ def _mock_generate_quiz(*args, **kwargs):
 
 
 def test_quiz_generate_requires_at_least_one_input(client):
-    """POST /api/quiz/generate without doc_id, reference_questions, or style_prompt returns 400."""
+    """POST /api/quiz/generate without doc_id, kb_id, or reference_questions returns 400."""
     resp = client.post(
         "/api/quiz/generate",
         json={"count": 3, "difficulty": "medium", "user_id": "u1"},
@@ -34,7 +34,7 @@ def test_quiz_generate_requires_at_least_one_input(client):
     assert resp.status_code == 400
     data = resp.json()
     assert "detail" in data
-    assert "doc_id" in data["detail"] or "reference_questions" in data["detail"] or "style_prompt" in data["detail"]
+    assert "doc_id" in data["detail"] or "kb_id" in data["detail"] or "reference_questions" in data["detail"]
 
 
 def test_quiz_generate_with_doc_id_success(client, seeded_session):
@@ -60,8 +60,30 @@ def test_quiz_generate_with_doc_id_success(client, seeded_session):
         assert len(q["options"]) == 4
 
 
+def test_quiz_generate_with_kb_id_success(client, seeded_session):
+    """POST /api/quiz/generate with kb_id returns quiz_id and questions (mocked)."""
+    with patch("app.routers.quiz.generate_quiz", side_effect=_mock_generate_quiz):
+        resp = client.post(
+            "/api/quiz/generate",
+            json={
+                "kb_id": seeded_session["kb_id"],
+                "user_id": seeded_session["user_id"],
+                "count": 2,
+                "difficulty": "easy",
+            },
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "quiz_id" in data
+    assert data["quiz_id"]
+    assert "questions" in data
+    assert len(data["questions"]) == 2
+    for q in data["questions"]:
+        assert "question" in q and "options" in q and "answer_index" in q and "explanation" in q
+
+
 def test_quiz_generate_with_style_prompt_only(client, seeded_session):
-    """POST /api/quiz/generate with only style_prompt (no doc_id) returns quiz (mocked)."""
+    """POST /api/quiz/generate with reference_questions + style_prompt returns quiz (mocked)."""
     with patch("app.routers.quiz.generate_quiz", side_effect=_mock_generate_quiz):
         resp = client.post(
             "/api/quiz/generate",
@@ -69,6 +91,7 @@ def test_quiz_generate_with_style_prompt_only(client, seeded_session):
                 "user_id": seeded_session["user_id"],
                 "count": 2,
                 "difficulty": "medium",
+                "reference_questions": "1. What is 2+2? (A) 3 (B) 4 (C) 5 (D) 6",
                 "style_prompt": "High school math multiple-choice style.",
             },
         )

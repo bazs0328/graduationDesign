@@ -102,7 +102,8 @@ class Quiz(Base):
 
     id = Column(String, primary_key=True, index=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=False)
-    doc_id = Column(String, ForeignKey("documents.id"))
+    kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=True, index=True)
+    doc_id = Column(String, ForeignKey("documents.id"), nullable=True)
     difficulty = Column(String, default="medium")
     question_type = Column(String, default="mcq")
     questions_json = Column(Text, nullable=False)

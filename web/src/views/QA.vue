@@ -20,7 +20,7 @@
             <div class="w-16 h-16 bg-primary/10 text-primary rounded-full flex items-center justify-center">
               <Sparkles class="w-8 h-8" />
             </div>
-            <p>在右侧选择文档，即可针对内容提问。</p>
+            <p>在右侧选择知识库后，即可针对该知识库提问。</p>
           </div>
           
           <div v-for="(msg, index) in qaMessages" :key="index" class="flex flex-col" :class="msg.role === 'question' ? 'items-end' : 'items-start'">
@@ -67,23 +67,23 @@
               @keydown.enter.prevent="askQuestion"
               placeholder="在此输入你的问题…"
               class="flex-1 bg-background border border-input rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary resize-none h-[52px]"
-              :disabled="!selectedDocId || busy.qa"
+              :disabled="!selectedKbId || busy.qa"
             ></textarea>
             <button
               @click="askQuestion"
               class="bg-primary text-primary-foreground p-3 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center"
-              :disabled="!selectedDocId || !qaInput.trim() || busy.qa"
+              :disabled="!selectedKbId || !qaInput.trim() || busy.qa"
             >
               <Send class="w-6 h-6" />
             </button>
           </div>
-          <p v-if="!selectedDocId" class="text-[10px] text-destructive mt-2 text-center font-bold uppercase tracking-widest">
-            请先选择文档
+          <p v-if="!selectedKbId" class="text-[10px] text-destructive mt-2 text-center font-bold uppercase tracking-widest">
+            请先选择知识库
           </p>
         </div>
       </section>
 
-      <!-- Right: Doc Selection -->
+      <!-- Right: Knowledge Base Selection -->
       <aside class="w-72 space-y-6 flex flex-col">
         <div class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
           <div class="flex items-center gap-3">
@@ -91,35 +91,54 @@
             <h2 class="text-xl font-bold">上下文</h2>
           </div>
           <div class="space-y-2">
-            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">目标文档</label>
-            <select v-model="selectedDocId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
+            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">选择知识库</label>
+            <select v-model="selectedKbId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
               <option disabled value="">请选择</option>
-              <option v-for="doc in docs" :key="doc.id" :value="doc.id">{{ doc.filename }}</option>
+              <option v-for="kb in kbs" :key="kb.id" :value="kb.id">{{ kb.name || kb.id }}</option>
+            </select>
+          </div>
+          <div class="space-y-2" v-if="selectedKbId">
+            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">限定文档 (可选)</label>
+            <select v-model="selectedDocId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
+              <option value="">不限定（整库问答）</option>
+              <option v-for="doc in docsInKb" :key="doc.id" :value="doc.id">{{ doc.filename }}</option>
             </select>
           </div>
         </div>
 
         <div class="flex-1 bg-card border border-border rounded-xl p-6 shadow-sm flex flex-col min-h-0">
           <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-4">简要统计</h3>
-          <div v-if="selectedDoc" class="space-y-4 overflow-y-auto pr-2">
+          <div v-if="selectedKb" class="space-y-4 overflow-y-auto pr-2">
             <div class="p-3 bg-accent/30 rounded-lg border border-border">
-              <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">知识库</p>
-              <p class="text-sm font-semibold truncate">{{ kbNameById(selectedDoc.kb_id) }}</p>
+              <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">当前知识库</p>
+              <p class="text-sm font-semibold truncate">{{ selectedKb.name || selectedKb.id }}</p>
             </div>
-            <div class="grid grid-cols-2 gap-3">
-              <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
-                <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">页数</p>
-                <p class="text-lg font-bold">{{ selectedDoc.num_pages }}</p>
+            
+            <!-- Doc Stats -->
+            <div v-if="selectedDoc" class="space-y-4">
+              <div class="p-3 bg-accent/30 rounded-lg border border-border">
+                <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">当前文档</p>
+                <p class="text-sm font-semibold truncate">{{ selectedDoc.filename }}</p>
               </div>
-              <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
-                <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">块数</p>
-                <p class="text-lg font-bold">{{ selectedDoc.num_chunks }}</p>
+              <div class="grid grid-cols-2 gap-3">
+                <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
+                  <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">页数</p>
+                  <p class="text-lg font-bold">{{ selectedDoc.num_pages }}</p>
+                </div>
+                <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
+                  <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">块数</p>
+                  <p class="text-lg font-bold">{{ selectedDoc.num_chunks }}</p>
+                </div>
               </div>
+            </div>
+            <div v-else class="p-3 bg-accent/30 rounded-lg border border-border">
+              <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">文档数量</p>
+              <p class="text-sm font-semibold">{{ docsInKb.length }} 篇</p>
             </div>
           </div>
           <div v-else class="flex-1 flex flex-col items-center justify-center text-muted-foreground text-xs text-center opacity-50">
             <FileText class="w-12 h-12 mb-2" />
-            <p>选择文档以查看详情</p>
+            <p>选择知识库以开始提问</p>
           </div>
         </div>
       </aside>
@@ -134,8 +153,9 @@ import { apiGet, apiPost } from '../api'
 
 const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
 const resolvedUserId = computed(() => userId.value || 'default')
-const docs = ref([])
 const kbs = ref([])
+const docsInKb = ref([])
+const selectedKbId = ref('')
 const selectedDocId = ref('')
 const qaInput = ref('')
 const qaMessages = ref([])
@@ -144,8 +164,12 @@ const busy = ref({
 })
 const scrollContainer = ref(null)
 
+const selectedKb = computed(() => {
+  return kbs.value.find(k => k.id === selectedKbId.value) || null
+})
+
 const selectedDoc = computed(() => {
-  return docs.value.find(d => d.id === selectedDocId.value) || null
+  return docsInKb.value.find(d => d.id === selectedDocId.value) || null
 })
 
 async function refreshKbs() {
@@ -156,16 +180,20 @@ async function refreshKbs() {
   }
 }
 
-async function refreshDocs() {
+async function refreshDocsInKb() {
+  if (!selectedKbId.value) {
+    docsInKb.value = []
+    return
+  }
   try {
-    docs.value = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    docsInKb.value = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(selectedKbId.value)}`)
   } catch (err) {
     console.error(err)
   }
 }
 
 async function askQuestion() {
-  if (!selectedDocId.value || !qaInput.value.trim() || busy.value.qa) return
+  if (!selectedKbId.value || !qaInput.value.trim() || busy.value.qa) return
   
   const question = qaInput.value.trim()
   qaInput.value = ''
@@ -175,11 +203,17 @@ async function askQuestion() {
   scrollToBottom()
   
   try {
-    const res = await apiPost('/api/qa', {
-      doc_id: selectedDocId.value,
+    const payload = {
       question,
       user_id: resolvedUserId.value
-    })
+    }
+    if (selectedDocId.value) {
+      payload.doc_id = selectedDocId.value
+    } else {
+      payload.kb_id = selectedKbId.value
+    }
+
+    const res = await apiPost('/api/qa', payload)
     qaMessages.value.push({ role: 'answer', content: res.answer, sources: res.sources })
   } catch (err) {
     qaMessages.value.push({ role: 'answer', content: '错误：' + err.message })
@@ -197,14 +231,13 @@ function scrollToBottom() {
   })
 }
 
-function kbNameById(kbId) {
-  const kb = kbs.value.find((item) => item.id === kbId)
-  return kb ? kb.name : '未知知识库'
-}
-
 onMounted(async () => {
   await refreshKbs()
-  await refreshDocs()
+})
+
+watch(selectedKbId, () => {
+  selectedDocId.value = ''
+  refreshDocsInKb()
 })
 
 watch(qaMessages, () => scrollToBottom(), { deep: true })
