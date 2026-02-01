@@ -1,14 +1,25 @@
 import json
+import os
+import tempfile
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.users import ensure_user
 from app.db import get_db
 from app.models import Document, Quiz, QuizAttempt
-from app.schemas import QuizGenerateRequest, QuizGenerateResponse, QuizQuestion, QuizSubmitRequest, QuizSubmitResponse
+from app.schemas import (
+    ParseReferenceResponse,
+    QuizGenerateRequest,
+    QuizGenerateResponse,
+    QuizQuestion,
+    QuizSubmitRequest,
+    QuizSubmitResponse,
+)
 from app.services.quiz import generate_quiz
+from app.services.text_extraction import extract_text
+from app.utils.document_validator import DocumentValidator
 
 router = APIRouter()
 
@@ -71,6 +82,69 @@ def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
     db.commit()
 
     return QuizGenerateResponse(quiz_id=quiz_id, questions=parsed)
+
+
+@router.post("/quiz/parse-reference", response_model=ParseReferenceResponse)
+def parse_reference_pdf(file: UploadFile = File(...)):
+    """Parse a reference exam PDF to plain text; does not persist. Return text for use as reference_questions."""
+    if not file.filename or not file.filename.strip():
+        raise HTTPException(status_code=400, detail="Missing filename")
+
+    try:
+        safe_name = DocumentValidator.validate_upload_safety(
+            file.filename,
+            None,
+            allowed_extensions={".pdf"},
+            content_type=file.content_type,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    total_size = 0
+    max_size = DocumentValidator.MAX_PDF_SIZE
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp_path = tmp.name
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > max_size:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="PDF file too large",
+                    )
+                tmp.write(chunk)
+
+        try:
+            DocumentValidator.validate_upload_safety(
+                safe_name, total_size, allowed_extensions={".pdf"}, content_type=file.content_type
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        try:
+            result = extract_text(tmp_path, ".pdf")
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to extract text from PDF.",
+            ) from exc
+
+        if not result.text or not result.text.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="No text extracted from PDF",
+            )
+        return ParseReferenceResponse(text=result.text)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 @router.post("/quiz/submit", response_model=QuizSubmitResponse)

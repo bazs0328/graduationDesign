@@ -82,7 +82,7 @@
   - 验收标准：
     - `POST /api/quiz/generate` 返回 `quiz_id` 与题目列表，每题含 `question`/`options`/`answer_index`/`explanation`
     - `POST /api/quiz/submit` 返回 `score`/`correct`/`total`/`results`/`explanations`
-- [ ] **模拟真题风格（对标 DeepTutor Mimic）**
+- [x] **模拟真题风格（对标 DeepTutor Mimic）**
   - 范围：参考试卷/题目或风格描述 → 生成**风格与难度相近**的题目
   - 方案：支持上传参考试卷 PDF 或传入题目文本/风格提示词；解析或抽取参考题后，按参考题生成新题（保持题型与难度，改情境或数字）
   - 验收标准：

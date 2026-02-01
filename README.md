@@ -77,6 +77,7 @@ python3 /app/tests/qa_regression.py \
   - `reference_questions` — generate questions in the same style/difficulty as the given text (paste or from reference exam).
   - `style_prompt` — generate questions matching a style/template description (e.g. exam-style wording).
 - Optional: `count`, `difficulty`, `user_id`. When `doc_id` is omitted, pass `reference_questions` and/or `style_prompt` for mimic-style generation. Submit with **POST /api/quiz/submit** as before.
+- **POST /api/quiz/parse-reference**: Accepts a PDF file (multipart), returns `{ "text": "..." }` (extracted plain text). Use the returned `text` as `reference_questions` in **POST /api/quiz/generate** for reference-exam style generation. Does not persist the file.
 
 ## Notes
 - Uploaded files are stored per user in `backend/data/users/<user_id>/uploads`.

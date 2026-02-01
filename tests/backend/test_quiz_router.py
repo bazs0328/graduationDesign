@@ -1,7 +1,10 @@
-"""Tests for quiz router (generate + submit, including mimic style/reference)."""
+"""Tests for quiz router (generate + submit, mimic style/reference, parse-reference PDF)."""
+import io
 from unittest.mock import patch
 
 import pytest
+
+from app.services.text_extraction import ExtractionResult
 
 
 def _mock_generate_quiz(*args, **kwargs):
@@ -154,3 +157,49 @@ def test_quiz_generate_with_nonexistent_doc_returns_404(client, seeded_session):
     )
     assert resp.status_code == 404
     assert "detail" in resp.json()
+
+
+# --- parse-reference PDF ---
+
+
+def test_parse_reference_pdf_success(client):
+    """POST /api/quiz/parse-reference with PDF returns extracted text (mocked)."""
+    mock_text = "Reference question 1. Reference question 2."
+    with patch("app.routers.quiz.extract_text") as mock_extract:
+        mock_extract.return_value = ExtractionResult(
+            text=mock_text, page_count=2, pages=["p1", "p2"], encoding=None
+        )
+        resp = client.post(
+            "/api/quiz/parse-reference",
+            files={"file": ("ref.pdf", io.BytesIO(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"), "application/pdf")},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["text"] == mock_text
+    mock_extract.assert_called_once()
+
+
+def test_parse_reference_pdf_non_pdf_returns_400(client):
+    """POST /api/quiz/parse-reference with non-PDF file returns 400."""
+    resp = client.post(
+        "/api/quiz/parse-reference",
+        files={"file": ("ref.txt", io.BytesIO(b"plain text"), "text/plain")},
+    )
+    assert resp.status_code == 400
+    assert "detail" in resp.json()
+
+
+def test_parse_reference_pdf_empty_extraction_returns_400(client):
+    """POST /api/quiz/parse-reference when extraction returns empty text returns 400."""
+    with patch("app.routers.quiz.extract_text") as mock_extract:
+        mock_extract.return_value = ExtractionResult(
+            text="", page_count=1, pages=[], encoding=None
+        )
+        resp = client.post(
+            "/api/quiz/parse-reference",
+            files={"file": ("ref.pdf", io.BytesIO(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"), "application/pdf")},
+        )
+    assert resp.status_code == 400
+    data = resp.json()
+    assert "detail" in data
+    assert "No text" in data["detail"]

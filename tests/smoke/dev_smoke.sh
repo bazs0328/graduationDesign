@@ -291,6 +291,16 @@ if [[ -z "$mimic_quiz_id" ]]; then
 fi
 log "mimic quiz_id=${mimic_quiz_id}"
 
+log "Quiz parse-reference (reject non-PDF)..."
+parse_ref_resp=$(curl -sS -w "\n%{http_code}" -X POST \
+  -F "file=@${DOC_FILE};filename=ref.txt" \
+  "${API_BASE}/api/quiz/parse-reference" 2>/dev/null || true)
+parse_ref_code=$(echo "$parse_ref_resp" | tail -1)
+if [[ "$parse_ref_code" != "400" ]]; then
+  fail "parse-reference should reject non-PDF with 400, got: ${parse_ref_code}"
+fi
+log "parse-reference correctly rejected non-PDF (400)"
+
 log "Fetching progress..."
 progress_json=$(curl -sS "${API_BASE}/api/progress?user_id=${USER_ID}" || true)
 if [[ "$progress_json" == *"detail"* ]]; then

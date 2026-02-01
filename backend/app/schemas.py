@@ -109,6 +109,10 @@ class QuizSubmitResponse(BaseModel):
     explanations: List[str]
 
 
+class ParseReferenceResponse(BaseModel):
+    text: str
+
+
 class ProgressByKb(BaseModel):
     kb_id: str
     kb_name: Optional[str] = None
