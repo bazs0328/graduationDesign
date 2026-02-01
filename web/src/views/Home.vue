@@ -5,20 +5,20 @@
       <div class="relative z-10 max-w-3xl space-y-6">
         <div class="inline-flex items-center gap-2 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-sm font-bold tracking-wide uppercase">
           <Sparkles class="w-4 h-4" />
-          Next-Gen Learning
+          新一代学习
         </div>
         <h1 class="text-5xl md:text-7xl font-black tracking-tight leading-none">
-          Master Your <br/> Knowledge with <span class="text-blue-200">AI</span>
+          用 <span class="text-blue-200">AI</span> 掌握<br/>你的知识
         </h1>
         <p class="text-xl text-blue-50/90 leading-relaxed max-w-2xl font-medium">
-          GradTutor transforms your documents into interactive learning experiences. Summarize, quiz, and chat with your personal AI tutor.
+          GradTutor 将你的文档转化为互动学习体验，支持摘要、测验与 AI 辅导对话。
         </p>
         <div class="flex flex-wrap gap-4 pt-4">
           <router-link to="/upload" class="px-8 py-4 bg-white text-primary rounded-2xl font-black text-lg shadow-xl hover:scale-105 active:scale-95 transition-all">
-            Get Started Free
+            免费开始
           </router-link>
           <router-link to="/qa" class="px-8 py-4 bg-primary-foreground/10 backdrop-blur-md text-white border-2 border-white/20 rounded-2xl font-black text-lg hover:bg-white/10 transition-all">
-            Try AI Chat
+            试试 AI 对话
           </router-link>
         </div>
       </div>
@@ -53,33 +53,33 @@ import {
 
 const features = [
   {
-    name: 'Document Upload',
-    description: 'Build your personal knowledge base by uploading PDF or text files seamlessly.',
+    name: '文档上传',
+    description: '上传 PDF 或文本文件，轻松构建个人知识库。',
     icon: Upload
   },
   {
-    name: 'Smart Summaries',
-    description: 'Instantly extract core concepts and key points from complex learning materials.',
+    name: '智能摘要',
+    description: '从复杂学习材料中快速提取核心概念与要点。',
     icon: FileText
   },
   {
-    name: 'Interactive Q&A',
-    description: 'Engage in deep conversations with an AI tutor that understands every detail of your docs.',
+    name: '互动问答',
+    description: '与理解你文档内容的 AI 辅导进行深度对话。',
     icon: MessageSquare
   },
   {
-    name: 'Auto-Quizzes',
-    description: 'Challenge yourself with AI-generated tests designed to reinforce your understanding.',
+    name: '自动测验',
+    description: '通过 AI 生成的测验巩固理解、检验掌握程度。',
     icon: PenTool
   },
   {
-    name: 'Progress Tracking',
-    description: 'Visualize your growth and receive data-driven recommendations for your study path.',
+    name: '进度跟踪',
+    description: '可视化学习成长，获得基于数据的学径推荐。',
     icon: BarChart2
   },
   {
-    name: 'AI Insights',
-    description: 'Break down difficult theorems and definitions with advanced simplified explanations.',
+    name: 'AI 解析',
+    description: '用简明解释拆解难懂定理与定义。',
     icon: Sparkles
   }
 ]
