@@ -48,7 +48,6 @@ def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="Document not found")
     if doc.status != "ready":
         raise HTTPException(status_code=409, detail="Document is still processing")
-
     if not payload.force:
         cached = (
             db.query(KeypointRecord)
@@ -68,8 +67,11 @@ def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(get_db))
                 cached=True,
             )
 
-    with open(doc.text_path, "r", encoding="utf-8", errors="ignore") as f:
-        text = f.read()
+    try:
+        with open(doc.text_path, "r", encoding="utf-8", errors="ignore") as f:
+            text = f.read()
+    except Exception as open_exc:
+        raise HTTPException(status_code=500, detail="Document text file not readable.") from open_exc
 
     try:
         points = extract_keypoints(

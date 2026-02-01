@@ -1,3 +1,4 @@
+import json
 from typing import Optional
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -10,7 +11,7 @@ from app.utils.json_tools import safe_json_loads
 KEYPOINT_SYSTEM = (
     "You are a learning assistant. Extract concise key knowledge points from the material. "
     "Each point should be a short sentence focused on definitions, formulas, steps, or core ideas. "
-    "Return JSON array of objects: [{text: string, explanation?: string}, ...]. "
+    "Return JSON array of objects: [{{text: string, explanation?: string}}, ...]. "
     "Explanation is optional, a brief clarification or elaboration."
 )
 
@@ -30,7 +31,7 @@ FINAL_PROMPT = ChatPromptTemplate.from_messages(
         (
             "human",
             "Merge and deduplicate these keypoints into 10-15 clear points. "
-            "Return JSON array of objects [{text, explanation?}] only.\n\n{points}",
+            "Return JSON array of objects [{{text, explanation?}}] only.\n\n{points}",
         ),
     ]
 )
@@ -55,10 +56,13 @@ def _parse_point(p) -> dict:
 
 
 def _attach_source(user_id: str, doc_id: str, point: dict) -> dict:
+    query_text = point.get("text") or ""
+    if not query_text:
+        return point
     try:
         vectorstore = get_vectorstore(user_id)
         docs = vectorstore.similarity_search(
-            point["text"], k=1, filter={"doc_id": doc_id}
+            query_text, k=1, filter={"doc_id": doc_id}
         )
         if docs:
             meta = docs[0].metadata or {}
@@ -80,8 +84,9 @@ def extract_keypoints(
     chunks = splitter.split_text(text)
 
     all_points: list[dict] = []
-    for chunk in chunks:
-        msg = CHUNK_PROMPT.format_messages(chunk=chunk)
+    for i, chunk in enumerate(chunks):
+        safe_chunk = chunk.replace("{", "{{").replace("}", "}}")
+        msg = CHUNK_PROMPT.format_messages(chunk=safe_chunk)
         result = llm.invoke(msg)
         try:
             points = safe_json_loads(result.content)
@@ -90,11 +95,11 @@ def extract_keypoints(
         if isinstance(points, list):
             for p in points:
                 parsed = _parse_point(p)
-                if parsed and parsed["text"]:
+                if parsed and parsed.get("text"):
                     all_points.append(parsed)
 
     points_str = "\n".join(
-        f"- {p['text']}" + (f" ({p['explanation']})" if p.get("explanation") else "")
+        f"- {p.get('text', '')}" + (f" ({p.get('explanation')})" if p.get("explanation") else "")
         for p in all_points
     )
     final_msg = FINAL_PROMPT.format_messages(points=points_str)
@@ -109,7 +114,7 @@ def extract_keypoints(
     out: list[dict] = []
     for p in final_points:
         parsed = _parse_point(p)
-        if parsed and parsed["text"]:
+        if parsed and parsed.get("text"):
             if user_id and doc_id:
                 parsed = _attach_source(user_id, doc_id, parsed)
             out.append(parsed)

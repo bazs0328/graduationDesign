@@ -88,6 +88,7 @@
             <div class="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
             <p class="text-muted-foreground animate-pulse">正在提取核心概念…</p>
           </div>
+          <p v-else-if="keypointsError" class="text-sm text-destructive">{{ keypointsError }}</p>
           <div v-else-if="keypoints.length" class="grid grid-cols-1 gap-4">
             <div v-for="(point, idx) in keypoints" :key="idx" class="p-4 bg-background border border-border rounded-xl hover:border-primary/30 transition-all group">
               <div class="flex gap-4">
@@ -133,6 +134,7 @@ const summary = ref('')
 const summaryCached = ref(false)
 const keypoints = ref([])
 const keypointsCached = ref(false)
+const keypointsError = ref('')
 const busy = ref({
   summary: false,
   keypoints: false
@@ -186,6 +188,7 @@ async function generateKeypoints(force = false) {
   busy.value.keypoints = true
   keypoints.value = []
   keypointsCached.value = false
+  keypointsError.value = ''
   try {
     const res = await apiPost('/api/keypoints', {
       doc_id: selectedDocId.value,
@@ -195,6 +198,7 @@ async function generateKeypoints(force = false) {
     keypoints.value = res.keypoints || []
     keypointsCached.value = !!res.cached
   } catch (err) {
+    keypointsError.value = '错误：' + (err?.message || String(err))
     console.error(err)
   } finally {
     busy.value.keypoints = false
