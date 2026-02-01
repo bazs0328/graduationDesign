@@ -69,7 +69,7 @@
     - `POST /api/chat/sessions` 可创建会话并绑定 `kb_id`/`doc_id`
     - `GET /api/chat/sessions/{id}/messages` 可拉取完整对话
     - `GET /api/progress?user_id=...` 返回统计字段齐全（含 by_kb）
-- [ ] **问答会话增强（sources 持久化 + 多轮历史）**
+- [x] **问答会话增强（sources 持久化 + 多轮历史）**
   - 范围：带 `session_id` 的问答将当轮 **answer + sources** 写入该会话；拉取消息时返回每条消息的 **sources**；生成回答时使用**最近 N 轮对话**作为 history
   - 验收标准：
     - `POST /api/qa` 带 `session_id` 时，对应会话新增消息且包含 sources
