@@ -10,11 +10,11 @@
         v-for="item in navItems"
         :key="item.path"
         :to="item.path"
-        class="flex items-center gap-3 px-3 py-2 rounded-md transition-colors hover:bg-accent hover:text-accent-foreground group"
-        :class="{ 'bg-accent text-accent-foreground': $route.path === item.path }"
+        class="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 hover:bg-primary/10 hover:text-primary group"
+        :class="{ 'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground shadow-md shadow-primary/20': $route.path === item.path }"
       >
         <component :is="item.icon" class="w-5 h-5" />
-        <span v-if="!collapsed" class="font-medium">{{ item.name }}</span>
+        <span v-if="!collapsed" class="font-semibold">{{ item.name }}</span>
         <div v-if="collapsed" class="absolute left-16 bg-popover text-popover-foreground px-2 py-1 rounded shadow-md opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap">
           {{ item.name }}
         </div>

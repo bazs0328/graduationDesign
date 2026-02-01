@@ -99,6 +99,14 @@
 
 ---
 
+## 前端整体重构（P1 前）
+
+- [x] **前端整体重构与 UI 美化**
+  - 范围：参考 `tmp/DeepTutor/web` 的架构与视觉，对 `web/` 前端进行重构；Vue Router + Tailwind v4 + 侧栏布局，多视图（Home / Upload / Summary / Q&A / Quiz / Progress）；色调与视觉效果参考 DeepTutor，默认亮色、活力蓝主色、渐变 Hero、卡片与侧栏优化。
+  - 验收标准：结构清晰、视觉统一、关键流程可用；界面亮丽美观。
+
+---
+
 ## P1（DeepTutor 已有但超出需求五模块）
 
 - [ ] **多代理求解**（DeepTutor 对应：Problem Solving & Assessment）

@@ -32,7 +32,7 @@ import { Sun, Moon } from 'lucide-vue-next'
 import AppSidebar from './AppSidebar.vue'
 
 const route = useRoute()
-const isDark = ref(true)
+const isDark = ref(false)
 const userId = ref(localStorage.getItem('gradtutor_user') || 'Guest')
 
 const currentRouteName = computed(() => {
