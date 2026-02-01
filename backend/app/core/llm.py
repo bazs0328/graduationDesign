@@ -2,9 +2,59 @@ from __future__ import annotations
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+from langchain_core.embeddings import Embeddings
+from openai import OpenAI
+import dashscope
 
 from app.core.config import settings
+
+
+class QwenEmbeddings(Embeddings):
+    def __init__(self, api_key: str, base_url: str, model: str):
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.model = model
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        payload = [str(text) for text in texts]
+        response = self.client.embeddings.create(model=self.model, input=payload)
+        data = sorted(response.data, key=lambda item: item.index)
+        return [item.embedding for item in data]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_documents([text])[0]
+
+
+class DashScopeVLEmbeddings(Embeddings):
+    def __init__(self, api_key: str, model: str):
+        self.api_key = api_key
+        self.model = model
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        dashscope.api_key = self.api_key
+        embeddings = []
+        for text in texts:
+            resp = dashscope.MultiModalEmbedding.call(
+                model=self.model,
+                input=[{"text": str(text)}],
+            )
+            if not resp:
+                raise ValueError("DashScope embedding failed: empty response")
+            status_code = resp.get("status_code")
+            code = resp.get("code")
+            if status_code not in (200, "200") or code not in (None, "", 0, "0"):
+                raise ValueError(f"DashScope embedding failed: {resp}")
+            output = resp.get("output") or {}
+            items = output.get("embeddings") or output.get("data") or []
+            if not items:
+                raise ValueError(f"DashScope embedding empty: {resp}")
+            vector = items[0].get("embedding") or items[0].get("vector")
+            if not isinstance(vector, list):
+                raise ValueError(f"DashScope embedding invalid: {resp}")
+            embeddings.append(vector)
+        return embeddings
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_documents([text])[0]
 
 
 def get_llm(temperature: float = 0.2):
@@ -34,6 +84,15 @@ def get_llm(temperature: float = 0.2):
             model=settings.gemini_model,
             temperature=temperature,
         )
+    if provider == "qwen":
+        if not settings.qwen_api_key:
+            raise ValueError("QWEN_API_KEY is not set")
+        return ChatOpenAI(
+            api_key=settings.qwen_api_key,
+            base_url=settings.qwen_base_url,
+            model=settings.qwen_model,
+            temperature=temperature,
+        )
     raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
 
@@ -46,11 +105,20 @@ def get_embeddings():
             api_key=settings.openai_api_key,
             model=settings.openai_embedding_model,
         )
-    if provider in ("bgem3", "bge-m3", "bge_m3"):
-        return HuggingFaceBgeEmbeddings(
-            model_name=settings.bge_m3_model,
-            model_kwargs={"device": settings.embeddings_device},
-            encode_kwargs={"normalize_embeddings": True},
+    if provider == "qwen":
+        if not settings.qwen_api_key:
+            raise ValueError("QWEN_API_KEY is not set")
+        return QwenEmbeddings(
+            api_key=settings.qwen_api_key,
+            base_url=settings.qwen_base_url,
+            model=settings.qwen_embedding_model,
+        )
+    if provider in ("dashscope", "qwen_vl", "qwen3_vl"):
+        if not settings.qwen_api_key:
+            raise ValueError("QWEN_API_KEY is not set")
+        return DashScopeVLEmbeddings(
+            api_key=settings.qwen_api_key,
+            model=settings.dashscope_embedding_model,
         )
     if provider == "deepseek":
         if settings.deepseek_embedding_model:

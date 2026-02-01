@@ -1,3 +1,4 @@
+import ast
 import json
 import re
 
@@ -18,4 +19,8 @@ def safe_json_loads(text: str):
         return json.loads(text)
     except json.JSONDecodeError:
         cleaned = extract_json_block(text)
-        return json.loads(cleaned)
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            # Fall back to Python literal parsing for single-quote JSON-like output.
+            return ast.literal_eval(cleaned)

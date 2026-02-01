@@ -5,8 +5,8 @@ class Settings(BaseSettings):
     app_name: str = "GradTutor"
     data_dir: str = "data"
 
-    llm_provider: str = "openai"  # openai, gemini, deepseek
-    embedding_provider: str = "openai"  # openai, gemini, deepseek, bgem3
+    llm_provider: str = "openai"  # openai, gemini, deepseek, qwen
+    embedding_provider: str = "dashscope"  # openai, gemini, deepseek, qwen, dashscope
 
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
@@ -21,8 +21,11 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-chat"
     deepseek_embedding_model: str | None = None
 
-    bge_m3_model: str = "BAAI/bge-m3"
-    embeddings_device: str = "cpu"
+    qwen_api_key: str | None = None
+    qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    qwen_model: str = "qwen-plus"
+    qwen_embedding_model: str = "text-embedding-v4"
+    dashscope_embedding_model: str = "qwen3-vl-embedding"
 
     chunk_size: int = 1000
     chunk_overlap: int = 150

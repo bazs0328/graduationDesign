@@ -34,13 +34,14 @@ Open the UI at http://localhost:5173
 
 ## Configuration
 Backend settings are in `backend/.env`:
-- `LLM_PROVIDER=openai` or `gemini` or `deepseek`
-- `EMBEDDING_PROVIDER=openai|gemini|deepseek|bgem3`
+- `LLM_PROVIDER=openai` or `gemini` or `deepseek` or `qwen`
+- `EMBEDDING_PROVIDER=openai|gemini|deepseek|qwen|dashscope`
 - `OPENAI_API_KEY=...`
 - `GOOGLE_API_KEY=...`
 - `DEEPSEEK_API_KEY=...` (DeepSeek is OpenAI-compatible; see `.env.example` for base_url)
+- `QWEN_API_KEY=...` (Qwen is OpenAI-compatible; see `.env.example` for base_url)
+- `DASHSCOPE_EMBEDDING_MODEL=...` (DashScope SDK embedding using `QWEN_API_KEY`, e.g. `qwen3-vl-embedding`)
 - DeepSeek embedding is optional; if not provided, embeddings fall back to OpenAI when `OPENAI_API_KEY` is set.
- - `BGE_M3_MODEL=BAAI/bge-m3` and `EMBEDDINGS_DEVICE=cpu` for local BGE-M3 embeddings
 
 Frontend can point to a different API via:
 ```
@@ -62,7 +63,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml exec backend bash
 3) 回归测试（在同一容器内执行）
 ```bash
 python3 /app/scripts/qa_regression.py \
-  --user-id qa_reg --kb-name qa_reg_kb_bge \
+  --user-id qa_reg --kb-name qa_reg_kb_qwen \
   --doc-count 30 --queries 40 --top-k 5 --fetch-k 20 \
   --mode hybrid --min-recall 0.7
 ```
@@ -81,7 +82,7 @@ python3 /app/scripts/qa_regression.py \
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm backend \
   python3 /app/scripts/qa_regression.py \
-  --user-id qa_reg --kb-name qa_reg_kb_bge \
+  --user-id qa_reg --kb-name qa_reg_kb_qwen \
   --doc-count 30 --queries 40 --top-k 5 --fetch-k 20 \
   --mode hybrid --min-recall 0.7
 ```

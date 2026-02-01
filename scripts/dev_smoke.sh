@@ -84,12 +84,75 @@ if [[ -z "$doc_id" ]]; then
 fi
 log "doc_id=${doc_id}"
 
+log "Waiting for document to be ready..."
+ready_status=$(DOC_ID="${doc_id}" USER_ID="${USER_ID}" API_BASE="${API_BASE}" python3 - <<'PY'
+import json
+import os
+import time
+import urllib.request
+
+doc_id = os.environ.get("DOC_ID")
+user_id = os.environ.get("USER_ID")
+api_base = os.environ.get("API_BASE")
+
+status = ""
+error_message = ""
+for _ in range(30):
+    try:
+        with urllib.request.urlopen(f"{api_base}/api/docs?user_id={user_id}") as resp:
+            docs = json.load(resp)
+    except Exception:
+        docs = []
+    for doc in docs:
+        if doc.get("id") == doc_id:
+            status = doc.get("status") or ""
+            error_message = doc.get("error_message") or ""
+            break
+    if status == "ready":
+        print("ready")
+        raise SystemExit(0)
+    if status == "error":
+        print(f"error:{error_message}")
+        raise SystemExit(0)
+    time.sleep(2)
+
+print(f"timeout:{status}")
+PY
+)
+
+if [[ "$ready_status" == "ready" ]]; then
+  log "Document is ready."
+elif [[ "$ready_status" == error:* ]]; then
+  fail "Document processing failed: ${ready_status#error:}"
+else
+  fail "Document did not become ready in time: ${ready_status#timeout:}"
+fi
+
 log "Generating summary..."
 summary_json=$(curl -sS -H "Content-Type: application/json" \
   -d "{\"doc_id\":\"${doc_id}\",\"user_id\":\"${USER_ID}\"}" \
   "${API_BASE}/api/summary" || true)
 if [[ "$summary_json" == *"detail"* ]]; then
   fail "Summary failed: ${summary_json}"
+fi
+summary_ok=$(SUMMARY_JSON="${summary_json}" python3 - <<'PY'
+import json, os
+data = os.environ.get("SUMMARY_JSON", "")
+try:
+    obj = json.loads(data)
+except Exception:
+    print("invalid_json")
+    raise SystemExit(0)
+
+summary = obj.get("summary")
+if isinstance(summary, str) and summary.strip():
+    print("ok")
+else:
+    print("missing_summary")
+PY
+)
+if [[ "$summary_ok" != "ok" ]]; then
+  fail "Summary malformed: ${summary_json}"
 fi
 
 log "Generating keypoints..."
@@ -99,6 +162,25 @@ keypoints_json=$(curl -sS -H "Content-Type: application/json" \
 if [[ "$keypoints_json" == *"detail"* ]]; then
   fail "Keypoints failed: ${keypoints_json}"
 fi
+keypoints_ok=$(KEYPOINTS_JSON="${keypoints_json}" python3 - <<'PY'
+import json, os
+data = os.environ.get("KEYPOINTS_JSON", "")
+try:
+    obj = json.loads(data)
+except Exception:
+    print("invalid_json")
+    raise SystemExit(0)
+
+points = obj.get("keypoints")
+if isinstance(points, list) and points:
+    print("ok")
+else:
+    print("missing_keypoints")
+PY
+)
+if [[ "$keypoints_ok" != "ok" ]]; then
+  fail "Keypoints malformed: ${keypoints_json}"
+fi
 
 log "Asking QA..."
 qa_json=$(curl -sS -H "Content-Type: application/json" \
@@ -106,6 +188,26 @@ qa_json=$(curl -sS -H "Content-Type: application/json" \
   "${API_BASE}/api/qa" || true)
 if [[ "$qa_json" == *"detail"* || "$qa_json" == "Internal Server Error" ]]; then
   fail "QA failed: ${qa_json}"
+fi
+qa_ok=$(QA_JSON="${qa_json}" python3 - <<'PY'
+import json, os
+data = os.environ.get("QA_JSON", "")
+try:
+    obj = json.loads(data)
+except Exception:
+    print("invalid_json")
+    raise SystemExit(0)
+
+answer = obj.get("answer")
+sources = obj.get("sources")
+if isinstance(answer, str) and answer.strip() and isinstance(sources, list) and len(sources) > 0:
+    print("ok")
+else:
+    print("missing_answer_or_sources")
+PY
+)
+if [[ "$qa_ok" != "ok" ]]; then
+  fail "QA malformed: ${qa_json}"
 fi
 
 log "Generating quiz..."
@@ -130,6 +232,29 @@ if [[ -z "$quiz_id" ]]; then
   fail "Quiz generation did not return quiz_id: ${quiz_json}"
 fi
 log "quiz_id=${quiz_id}"
+quiz_ok=$(QUIZ_JSON="${quiz_json}" python3 - <<'PY'
+import json, os
+data = os.environ.get("QUIZ_JSON", "")
+try:
+    obj = json.loads(data)
+except Exception:
+    print("invalid_json")
+    raise SystemExit(0)
+questions = obj.get("questions")
+if not isinstance(questions, list) or not questions:
+    print("missing_questions")
+    raise SystemExit(0)
+for q in questions:
+    opts = q.get("options") if isinstance(q, dict) else None
+    if not isinstance(opts, list) or len(opts) != 4:
+        print("invalid_options")
+        raise SystemExit(0)
+print("ok")
+PY
+)
+if [[ "$quiz_ok" != "ok" ]]; then
+  fail "Quiz malformed: ${quiz_json}"
+fi
 
 log "Submitting quiz..."
 submit_json=$(curl -sS -H "Content-Type: application/json" \
