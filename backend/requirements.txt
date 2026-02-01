@@ -13,3 +13,6 @@ pdfplumber
 charset-normalizer
 rank-bm25
 dashscope
+pytest
+pytest-asyncio
+httpx

@@ -41,6 +41,7 @@ class ChatMessage(Base):
     session_id = Column(String, ForeignKey("chat_sessions.id"), nullable=False, index=True)
     role = Column(String, nullable=False)
     content = Column(Text, nullable=False)
+    sources_json = Column(Text, nullable=True)  # JSON array of SourceSnippet-compatible dicts
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

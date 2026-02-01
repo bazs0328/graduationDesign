@@ -42,6 +42,12 @@ def ensure_schema():
             )
             conn.commit()
 
+        result = conn.execute(text("PRAGMA table_info(chat_messages)"))
+        cols = {row[1] for row in result}
+        if "sources_json" not in cols:
+            conn.execute(text("ALTER TABLE chat_messages ADD COLUMN sources_json TEXT"))
+            conn.commit()
+
 
 def get_db():
     db = SessionLocal()

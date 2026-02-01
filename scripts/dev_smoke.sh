@@ -366,6 +366,33 @@ if [[ -z "$session_id" ]]; then
 fi
 log "session_id=${session_id}"
 
+log "QA with session_id (persist sources)..."
+qa_session_json=$(curl -sS -H "Content-Type: application/json" \
+  -d "{\"doc_id\":\"${doc_id}\",\"user_id\":\"${USER_ID}\",\"session_id\":\"${session_id}\",\"question\":\"What is a matrix?\"}" \
+  "${API_BASE}/api/qa" || true)
+if [[ "$qa_session_json" == *"detail"* || "$qa_session_json" == "Internal Server Error" ]]; then
+  fail "QA with session failed: ${qa_session_json}"
+fi
+qa_session_ok=$(QA_SESSION_JSON="${qa_session_json}" python3 - <<'PY'
+import json, os
+data = os.environ.get("QA_SESSION_JSON", "")
+try:
+    obj = json.loads(data)
+except Exception:
+    print("invalid_json")
+    raise SystemExit(0)
+answer = obj.get("answer")
+sources = obj.get("sources")
+if isinstance(answer, str) and answer.strip() and isinstance(sources, list) and len(sources) > 0:
+    print("ok")
+else:
+    print("missing_answer_or_sources")
+PY
+)
+if [[ "$qa_session_ok" != "ok" ]]; then
+  fail "QA with session malformed: ${qa_session_json}"
+fi
+
 log "Fetching session messages..."
 messages_json=$(curl -sS "${API_BASE}/api/chat/sessions/${session_id}/messages?user_id=${USER_ID}" || true)
 messages_ok=$(MESSAGES_JSON="${messages_json}" python3 - <<'PY'
@@ -379,7 +406,19 @@ except Exception:
 if isinstance(obj, dict) and "detail" in obj:
     print("error")
 elif isinstance(obj, list):
-    print("ok")
+    if not obj:
+        print("empty_list")
+    else:
+        has_assistant_with_sources = False
+        for m in obj:
+            if m.get("role") == "assistant" and m.get("sources"):
+                if isinstance(m["sources"], list) and len(m["sources"]) > 0:
+                    has_assistant_with_sources = True
+                    break
+        if has_assistant_with_sources:
+            print("ok")
+        else:
+            print("no_assistant_sources")
 else:
     print("not_list")
 PY
@@ -411,6 +450,60 @@ PY
 )
 if [[ "$rec_ok" != "ok" ]]; then
   fail "Recommendations malformed: ${rec_json}"
+fi
+
+log "Negative case: QA without doc_id or kb_id returns 400..."
+qa_neg1_http=$(curl -sS -o /tmp/smoke_qa_neg1.json -w "%{http_code}" \
+  -H "Content-Type: application/json" \
+  -d "{\"user_id\":\"${USER_ID}\",\"question\":\"What is a matrix?\"}" \
+  "${API_BASE}/api/qa" || echo "000")
+qa_neg1_body=$(cat /tmp/smoke_qa_neg1.json 2>/dev/null || echo "{}")
+if [[ "$qa_neg1_http" != "400" ]]; then
+  fail "QA without doc_id/kb_id expected 400, got ${qa_neg1_http}: ${qa_neg1_body}"
+fi
+qa_neg1_ok=$(QA_NEG1="${qa_neg1_body}" python3 - <<'PY'
+import json, os
+data = os.environ.get("QA_NEG1", "{}")
+try:
+    obj = json.loads(data)
+except Exception:
+    print("invalid_json")
+    raise SystemExit(0)
+if isinstance(obj, dict) and obj.get("detail"):
+    print("ok")
+else:
+    print("no_detail")
+PY
+)
+if [[ "$qa_neg1_ok" != "ok" ]]; then
+  fail "QA 400 response missing detail: ${qa_neg1_body}"
+fi
+
+log "Negative case: QA with invalid session_id returns 404..."
+qa_neg2_http=$(curl -sS -o /tmp/smoke_qa_neg2.json -w "%{http_code}" \
+  -H "Content-Type: application/json" \
+  -d "{\"doc_id\":\"${doc_id}\",\"user_id\":\"${USER_ID}\",\"session_id\":\"00000000-0000-0000-0000-000000000000\",\"question\":\"What is a matrix?\"}" \
+  "${API_BASE}/api/qa" || echo "000")
+qa_neg2_body=$(cat /tmp/smoke_qa_neg2.json 2>/dev/null || echo "{}")
+if [[ "$qa_neg2_http" != "404" ]]; then
+  fail "QA with invalid session_id expected 404, got ${qa_neg2_http}: ${qa_neg2_body}"
+fi
+qa_neg2_ok=$(QA_NEG2="${qa_neg2_body}" python3 - <<'PY'
+import json, os
+data = os.environ.get("QA_NEG2", "{}")
+try:
+    obj = json.loads(data)
+except Exception:
+    print("invalid_json")
+    raise SystemExit(0)
+if isinstance(obj, dict) and obj.get("detail"):
+    print("ok")
+else:
+    print("no_detail")
+PY
+)
+if [[ "$qa_neg2_ok" != "ok" ]]; then
+  fail "QA 404 response missing detail: ${qa_neg2_body}"
 fi
 
 log "Smoke test complete."

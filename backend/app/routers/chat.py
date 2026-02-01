@@ -1,4 +1,6 @@
+import json
 from uuid import uuid4
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -7,9 +9,38 @@ from app.core.knowledge_bases import ensure_kb
 from app.core.users import ensure_user
 from app.db import get_db
 from app.models import ChatMessage, ChatSession, Document
-from app.schemas import ChatMessageOut, ChatSessionCreateRequest, ChatSessionOut
+from app.schemas import ChatMessageOut, ChatSessionCreateRequest, ChatSessionOut, SourceSnippet
 
 router = APIRouter()
+
+
+def _parse_sources(sources_json: str | None) -> List[SourceSnippet] | None:
+    if not sources_json:
+        return None
+    try:
+        data = json.loads(sources_json)
+        if not isinstance(data, list):
+            return None
+        result = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            try:
+                result.append(
+                    SourceSnippet(
+                        source=item.get("source", ""),
+                        snippet=item.get("snippet", ""),
+                        doc_id=item.get("doc_id"),
+                        kb_id=item.get("kb_id"),
+                        page=item.get("page"),
+                        chunk=item.get("chunk"),
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+        return result if result else None
+    except (json.JSONDecodeError, TypeError):
+        return None
 
 
 @router.get("/chat/sessions", response_model=list[ChatSessionOut])
@@ -73,9 +104,20 @@ def list_messages(session_id: str, user_id: str | None = None, db: Session = Dep
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    return (
+    messages = (
         db.query(ChatMessage)
         .filter(ChatMessage.session_id == session_id)
         .order_by(ChatMessage.created_at.asc())
         .all()
     )
+    return [
+        ChatMessageOut(
+            id=m.id,
+            session_id=m.session_id,
+            role=m.role,
+            content=m.content,
+            created_at=m.created_at,
+            sources=_parse_sources(m.sources_json) if m.role == "assistant" and m.sources_json else None,
+        )
+        for m in messages
+    ]

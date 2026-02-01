@@ -1,3 +1,4 @@
+import json
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -115,12 +116,24 @@ def ask_question(payload: QARequest, db: Session = Depends(get_db)):
                 content=payload.question,
             )
         )
+        sources_list = [
+            {
+                "source": s.get("source", ""),
+                "snippet": s.get("snippet", ""),
+                "doc_id": s.get("doc_id"),
+                "kb_id": s.get("kb_id"),
+                "page": s.get("page"),
+                "chunk": s.get("chunk"),
+            }
+            for s in sources
+        ]
         db.add(
             ChatMessage(
                 id=str(uuid4()),
                 session_id=session.id,
                 role="assistant",
                 content=answer,
+                sources_json=json.dumps(sources_list, ensure_ascii=False) if sources_list else None,
             )
         )
 

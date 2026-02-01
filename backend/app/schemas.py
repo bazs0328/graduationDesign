@@ -190,6 +190,7 @@ class ChatMessageOut(BaseModel):
     role: str
     content: str
     created_at: datetime
+    sources: Optional[List[SourceSnippet]] = None  # only assistant messages have value
 
     model_config = ConfigDict(from_attributes=True)
 
