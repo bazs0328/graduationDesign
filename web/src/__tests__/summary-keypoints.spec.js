@@ -60,7 +60,10 @@ beforeEach(() => {
       return Promise.resolve({ summary: 'ok', cached: false })
     }
     if (path === '/api/keypoints') {
-      return Promise.resolve({ keypoints: ['k1'], cached: false })
+      return Promise.resolve({
+        keypoints: [{ text: 'k1', explanation: 'explanation for k1', page: 1 }],
+        cached: false
+      })
     }
     return Promise.resolve({})
   })
@@ -109,5 +112,27 @@ describe('Summary/Keypoints payloads', () => {
       '/api/keypoints',
       expect.objectContaining({ force: false })
     )
+  })
+
+  it('renders keypoints with text, explanation, and source', async () => {
+    const wrapper = mount(App)
+    await flushPromises()
+    await nextTick()
+
+    const summaryTab = wrapper.findAll('button').find((btn) => btn.text() === 'Summary')
+    await summaryTab.trigger('click')
+    await nextTick()
+
+    const keypointsBtn = wrapper
+      .findAll('button')
+      .find((btn) => btn.text().toLowerCase().includes('extract keypoints'))
+    await keypointsBtn.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const html = wrapper.html()
+    expect(html).toContain('k1')
+    expect(html).toContain('explanation for k1')
+    expect(html).toContain('p.1')
   })
 })

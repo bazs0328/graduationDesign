@@ -138,9 +138,17 @@ class KeypointsRequest(BaseModel):
     force: bool = False
 
 
+class KeypointItem(BaseModel):
+    text: str
+    explanation: Optional[str] = None
+    source: Optional[str] = None
+    page: Optional[int] = None
+    chunk: Optional[int] = None
+
+
 class KeypointsResponse(BaseModel):
     doc_id: str
-    keypoints: List[str]
+    keypoints: List[KeypointItem]
     cached: bool = False
 
 

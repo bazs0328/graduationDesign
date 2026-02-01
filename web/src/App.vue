@@ -115,7 +115,11 @@
         </button>
         <div v-if="keypoints.length" class="list" style="margin-top: 12px">
           <div v-for="(point, idx) in keypoints" :key="idx" class="list-item">
-            {{ point }}
+            <span>{{ typeof point === 'string' ? point : point.text }}</span>
+            <p v-if="typeof point !== 'string' && point.explanation" class="muted" style="margin: 4px 0 0 0; font-size: 0.9em">{{ point.explanation }}</p>
+            <p v-if="typeof point !== 'string' && (point.source || point.page || point.chunk)" class="muted" style="font-size: 0.85em; margin: 2px 0 0 0">
+              来源: {{ [point.source, point.page ? `p.${point.page}` : '', point.chunk ? `c.${point.chunk}` : ''].filter(Boolean).join(' ') }}
+            </p>
           </div>
           <p v-if="keypointsCached" class="muted">Cached result.</p>
         </div>

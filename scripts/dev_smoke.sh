@@ -172,10 +172,17 @@ except Exception:
     raise SystemExit(0)
 
 points = obj.get("keypoints")
-if isinstance(points, list) and points:
-    print("ok")
-else:
+if not isinstance(points, list) or not points:
     print("missing_keypoints")
+else:
+    def has_text(p):
+        if isinstance(p, str):
+            return bool(p.strip())
+        if isinstance(p, dict):
+            return bool((p.get("text") or "").strip())
+        return False
+    valid = all(has_text(p) for p in points)
+    print("ok" if valid else "missing_keypoints")
 PY
 )
 if [[ "$keypoints_ok" != "ok" ]]; then

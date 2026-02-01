@@ -49,7 +49,7 @@
 - [x] **单文档要点列表（keypoints）**
   - 范围：按文档抽取要点列表，支持缓存
   - 验收标准：`POST /api/keypoints` 返回非空 `keypoints` 列表与 `cached`
-- [ ] **知识点摘要增强（结构化+讲解+来源）**
+- [x] **知识点摘要增强（结构化+讲解+来源）**
   - 范围：在要点基础上增加**简短讲解或步骤**、**来源定位**（doc_id/page/chunk 或段落），对标 DeepTutor 知识简化
   - 方案：keypoints 响应扩展为每项含 `text`、可选 `explanation`、可选 `source`/`page`/`chunk`；或单独接口，先文本形态
   - 验收标准：
