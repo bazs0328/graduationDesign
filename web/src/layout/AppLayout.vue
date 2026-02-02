@@ -10,7 +10,7 @@
           </button>
           <div class="flex items-center gap-2 px-3 py-1.5 bg-accent rounded-full text-sm font-medium">
             <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            {{ userId }}
+            {{ displayName }}
           </div>
         </div>
       </header>
@@ -32,10 +32,15 @@ import { computed, ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Sun, Moon } from 'lucide-vue-next'
 import AppSidebar from './AppSidebar.vue'
+import { getCurrentUser } from '../api'
 
 const route = useRoute()
 const isDark = ref(false)
-const userId = ref(localStorage.getItem('gradtutor_user') || '游客')
+
+const displayName = computed(() => {
+  const user = getCurrentUser()
+  return user ? (user.name || user.username) : '游客'
+})
 
 const currentRouteName = computed(() => {
   return route.meta?.title || route.name || '控制台'
@@ -51,10 +56,6 @@ onMounted(() => {
   document.documentElement.classList.toggle('light', !isDark.value)
 })
 
-// Listen for storage changes to update userId
-window.addEventListener('storage', () => {
-  userId.value = localStorage.getItem('gradtutor_user') || '游客'
-})
 </script>
 
 <style scoped>

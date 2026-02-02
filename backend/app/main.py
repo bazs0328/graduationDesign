@@ -6,6 +6,7 @@ from app.core.paths import ensure_data_dirs
 from app.db import Base, engine, ensure_schema
 from app.routers import (
     activity,
+    auth,
     chat,
     documents,
     health,
@@ -35,6 +36,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health.router, prefix="/api")
+    app.include_router(auth.router, prefix="/api")
     app.include_router(activity.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")
     app.include_router(knowledge_bases.router, prefix="/api")

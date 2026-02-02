@@ -22,16 +22,16 @@
     </nav>
 
     <div class="p-4 border-t border-border space-y-4">
-      <div v-if="!collapsed" class="space-y-1">
-        <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">用户 ID</label>
-        <div class="flex gap-2">
-          <input
-            type="text"
-            v-model="userIdLocal"
-            class="flex-1 bg-background border border-input rounded px-2 py-1 text-sm focus:ring-2 focus:ring-primary outline-none"
-            @blur="updateUserId"
-          />
-        </div>
+      <div v-if="!collapsed" class="space-y-2">
+        <p class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">当前用户</p>
+        <p class="text-sm font-medium truncate" :title="displayName">{{ displayName }}</p>
+        <button
+          type="button"
+          @click="handleLogout"
+          class="w-full py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors"
+        >
+          退出登录
+        </button>
       </div>
       <button
         @click="collapsed = !collapsed"
@@ -44,7 +44,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import {
   Home,
   Upload,
@@ -55,9 +55,18 @@ import {
   ChevronLeft,
   ChevronRight
 } from 'lucide-vue-next'
+import { getCurrentUser, logout } from '../api'
 
 const collapsed = ref(false)
-const userIdLocal = ref(localStorage.getItem('gradtutor_user') || '')
+
+const displayName = computed(() => {
+  const user = getCurrentUser()
+  return user ? (user.name || user.username) : '—'
+})
+
+function handleLogout() {
+  logout()
+}
 
 const navItems = [
   { name: '首页', path: '/', icon: Home },
@@ -67,12 +76,4 @@ const navItems = [
   { name: '测验', path: '/quiz', icon: PenTool },
   { name: '进度', path: '/progress', icon: BarChart2 }
 ]
-
-function updateUserId() {
-  if (userIdLocal.value.trim()) {
-    localStorage.setItem('gradtutor_user', userIdLocal.value.trim())
-    // Trigger a global refresh if needed, for now we just rely on local storage
-    window.location.reload() // Simplest way to propagate user change across views
-  }
-}
 </script>

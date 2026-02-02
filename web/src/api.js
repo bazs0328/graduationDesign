@@ -1,7 +1,17 @@
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
 async function request(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, options)
+  const fullUrl = `${API_BASE}${path}`
+  const isAuth = path.includes('/api/auth')
+  let abortId
+  let signal = options.signal
+  if (isAuth && !signal) {
+    const controller = new AbortController()
+    signal = controller.signal
+    abortId = setTimeout(() => controller.abort(), 15000)
+  }
+  const res = await fetch(fullUrl, { ...options, signal })
+  if (abortId) clearTimeout(abortId)
   if (!res.ok) {
     const text = await res.text()
     try {
@@ -37,6 +47,30 @@ async function request(path, options = {}) {
 
 export async function apiGet(path) {
   return request(path)
+}
+
+export async function authRegister(username, password, name = null) {
+  return apiPost('/api/auth/register', { username, password, name })
+}
+
+export async function authLogin(username, password) {
+  return apiPost('/api/auth/login', { username, password })
+}
+
+export function getCurrentUser() {
+  const userId = localStorage.getItem('gradtutor_user_id')
+  const username = localStorage.getItem('gradtutor_username')
+  const name = localStorage.getItem('gradtutor_name')
+  if (!userId) return null
+  return { user_id: userId, username: username || userId, name: name || username || userId }
+}
+
+export function logout() {
+  localStorage.removeItem('gradtutor_user_id')
+  localStorage.removeItem('gradtutor_username')
+  localStorage.removeItem('gradtutor_name')
+  localStorage.removeItem('gradtutor_user')
+  window.location.href = '/login'
 }
 
 export async function apiPost(path, body, isForm = false) {

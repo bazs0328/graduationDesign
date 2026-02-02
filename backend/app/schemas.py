@@ -4,6 +4,23 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
 
+class AuthRegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=32)
+    password: str = Field(min_length=6)
+    name: Optional[str] = None
+
+
+class AuthLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AuthResponse(BaseModel):
+    user_id: str
+    username: str
+    name: Optional[str] = None
+
+
 class DocumentOut(BaseModel):
     id: str
     user_id: str

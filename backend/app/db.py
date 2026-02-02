@@ -16,6 +16,28 @@ def ensure_schema():
         return
 
     with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(users)"))
+        cols = {row[1] for row in result}
+        if "username" not in cols:
+            conn.execute(
+                text("ALTER TABLE users ADD COLUMN username VARCHAR(255) NOT NULL DEFAULT ''")
+            )
+            conn.commit()
+        if "password_hash" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE users ADD COLUMN password_hash VARCHAR(255) NOT NULL DEFAULT ''"
+                )
+            )
+            conn.commit()
+        result = conn.execute(text("PRAGMA table_info(users)"))
+        cols = {row[1] for row in result}
+        if "username" in cols and "password_hash" in cols:
+            conn.execute(
+                text("UPDATE users SET username = id WHERE username = '' OR username IS NULL")
+            )
+            conn.commit()
+
         result = conn.execute(text("PRAGMA table_info(documents)"))
         cols = {row[1] for row in result}
         if "kb_id" not in cols:

@@ -2,6 +2,12 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
   {
+    path: '/login',
+    name: 'Login',
+    meta: { title: '登录' },
+    component: () => import('../views/Login.vue')
+  },
+  {
     path: '/',
     name: 'Home',
     meta: { title: '首页' },
@@ -42,6 +48,17 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+router.beforeEach((to, from, next) => {
+  const isLoggedIn = !!localStorage.getItem('gradtutor_user_id')
+  if (to.path !== '/login' && !isLoggedIn) {
+    next('/login')
+  } else if (to.path === '/login' && isLoggedIn) {
+    next('/')
+  } else {
+    next()
+  }
 })
 
 export default router

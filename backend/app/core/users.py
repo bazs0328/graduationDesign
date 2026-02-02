@@ -9,7 +9,12 @@ def ensure_user(db: Session, user_id: str | None) -> str:
     resolved = (user_id or DEFAULT_USER_ID).strip() or DEFAULT_USER_ID
     user = db.query(User).filter(User.id == resolved).first()
     if not user:
-        user = User(id=resolved, name=None)
+        user = User(
+            id=resolved,
+            username=resolved,
+            password_hash="",
+            name=None,
+        )
         db.add(user)
         db.commit()
     # Ensure a default knowledge base exists for the user
