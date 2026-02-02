@@ -1,6 +1,6 @@
 ---
+name: javascript
 description: JavaScript best practices, ES2022+ features, and modern patterns for scalable applications
-alwaysApply: false
 ---
 # JavaScript Best Practices
 

@@ -1,8 +1,7 @@
 ---
+name: terminal
 description: Terminal optimization guide for Claude agents - deterministic, efficient, and composable command patterns
-alwaysApply: false
 ---
-
 # Claude Agent Terminal Command Patterns
 
 ## Core Principles for AI Agents

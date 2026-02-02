@@ -164,9 +164,13 @@ async function refreshKbs() {
 
 async function refreshDocs() {
   busy.value.refresh = true
+  statusMessage.value = ''
   try {
     const kbParam = selectedKbId.value ? `&kb_id=${encodeURIComponent(selectedKbId.value)}` : ''
-    docs.value = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}${kbParam}`)
+    const result = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}${kbParam}`)
+    docs.value = result
+    statusMessage.value = `已刷新，共 ${result.length} 个文档`
+    setTimeout(() => { statusMessage.value = '' }, 2000)
   } catch (err) {
     statusMessage.value = '加载文档失败：' + err.message
   } finally {
