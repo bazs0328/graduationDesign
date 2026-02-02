@@ -16,6 +16,7 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
       <!-- Left: KB Breakdown & Recommendations -->
       <div class="lg:col-span-2 space-y-8">
+        <LearnerProfileCard :profile="profile" />
         <!-- KB Selector & Stats -->
         <section class="bg-card border border-border rounded-xl p-8 shadow-sm space-y-8">
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -124,11 +125,13 @@ import {
   TrendingUp,
   CheckCircle2
 } from 'lucide-vue-next'
-import { apiGet, apiPost } from '../api'
+import LearnerProfileCard from '../components/LearnerProfileCard.vue'
+import { apiGet, getProfile } from '../api'
 
 const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
 const resolvedUserId = computed(() => userId.value || 'default')
 const progress = ref(null)
+const profile = ref(null)
 const activity = ref([])
 const recommendations = ref([])
 const kbs = ref([])
@@ -165,6 +168,14 @@ const kbStatItems = computed(() => {
 async function fetchProgress() {
   try {
     progress.value = await apiGet(`/api/progress?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+async function fetchProfile() {
+  try {
+    profile.value = await getProfile(resolvedUserId.value)
   } catch (err) {
     console.error(err)
   }
@@ -217,11 +228,14 @@ function actionLabel(type) {
     case 'keypoints': return '要点'
     case 'quiz': return '测验'
     case 'qa': return '问答'
+    case 'review': return '复习'
+    case 'challenge': return '挑战'
     default: return type
   }
 }
 
 onMounted(async () => {
+  await fetchProfile()
   await fetchProgress()
   await fetchActivity()
   await refreshKbs()

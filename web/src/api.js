@@ -47,3 +47,13 @@ export async function apiPost(path, body, isForm = false) {
   }
   return request(path, options)
 }
+
+export async function getProfile(userId) {
+  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
+  return apiGet(`/api/profile${query}`)
+}
+
+export async function getDifficultyPlan(userId) {
+  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
+  return apiGet(`/api/profile/difficulty-plan${query}`)
+}

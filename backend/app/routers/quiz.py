@@ -15,8 +15,16 @@ from app.schemas import (
     QuizGenerateRequest,
     QuizGenerateResponse,
     QuizQuestion,
+    QuizFeedback,
     QuizSubmitRequest,
     QuizSubmitResponse,
+    NextQuizRecommendation,
+)
+from app.services.learner_profile import (
+    extract_weak_concepts,
+    generate_difficulty_plan,
+    get_or_create_profile,
+    update_profile_after_quiz,
 )
 from app.services.quiz import generate_quiz
 from app.services.text_extraction import extract_text
@@ -32,6 +40,27 @@ def _has_quiz_input(payload: QuizGenerateRequest) -> bool:
         or (payload.kb_id and payload.kb_id.strip())
         or (payload.reference_questions and payload.reference_questions.strip())
     )
+
+
+def _split_counts(total: int, ratios: dict[str, float]) -> dict[str, int]:
+    counts = {key: int(total * ratio) for key, ratio in ratios.items()}
+    remainder = total - sum(counts.values())
+
+    if remainder > 0:
+        for key, _ in sorted(ratios.items(), key=lambda item: item[1], reverse=True):
+            if remainder <= 0:
+                break
+            counts[key] += 1
+            remainder -= 1
+    elif remainder < 0:
+        for key, _ in sorted(ratios.items(), key=lambda item: item[1], reverse=True):
+            if remainder >= 0:
+                break
+            if counts[key] > 0:
+                counts[key] -= 1
+                remainder += 1
+
+    return counts
 
 
 @router.post("/quiz/generate", response_model=QuizGenerateResponse)
@@ -59,15 +88,43 @@ def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     try:
-        questions = generate_quiz(
-            resolved_user_id,
-            payload.doc_id,
-            payload.count,
-            payload.difficulty,
-            kb_id=payload.kb_id,
-            style_prompt=payload.style_prompt,
-            reference_questions=payload.reference_questions,
-        )
+        if payload.auto_adapt and payload.difficulty is None:
+            profile = get_or_create_profile(db, resolved_user_id)
+            plan = generate_difficulty_plan(profile)
+            counts = _split_counts(
+                payload.count,
+                {"easy": plan.easy, "medium": plan.medium, "hard": plan.hard},
+            )
+            questions = []
+            for difficulty, count in counts.items():
+                if count <= 0:
+                    continue
+                questions.extend(
+                    generate_quiz(
+                        resolved_user_id,
+                        payload.doc_id,
+                        count,
+                        difficulty,
+                        kb_id=payload.kb_id,
+                        style_prompt=payload.style_prompt,
+                        reference_questions=payload.reference_questions,
+                    )
+                )
+            if len(questions) > payload.count:
+                questions = questions[: payload.count]
+            difficulty_label = "adaptive"
+        else:
+            difficulty = payload.difficulty or "medium"
+            questions = generate_quiz(
+                resolved_user_id,
+                payload.doc_id,
+                payload.count,
+                difficulty,
+                kb_id=payload.kb_id,
+                style_prompt=payload.style_prompt,
+                reference_questions=payload.reference_questions,
+            )
+            difficulty_label = difficulty
         parsed = [QuizQuestion(**q) for q in questions]
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -83,7 +140,7 @@ def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
         user_id=resolved_user_id,
         kb_id=payload.kb_id,
         doc_id=payload.doc_id,
-        difficulty=payload.difficulty,
+        difficulty=difficulty_label,
         question_type="mcq",
         questions_json=json.dumps(questions),
     )
@@ -181,6 +238,21 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
             correct += 1
 
     score = correct / total if total else 0.0
+    first_five_wrong = sum(1 for item in results[:5] if not item)
+    weak_concepts = extract_weak_concepts(questions, results)
+    update_profile_after_quiz(db, resolved_user_id, score, weak_concepts)
+
+    feedback = None
+    next_quiz_recommendation = None
+    if score < 0.3 or first_five_wrong >= 4:
+        feedback = QuizFeedback(
+            type="encouragement",
+            message="本次题目难度偏高，下次会为你调整更适合的题目，继续加油！",
+        )
+        next_quiz_recommendation = NextQuizRecommendation(
+            difficulty="easy",
+            focus_concepts=weak_concepts,
+        )
 
     attempt = QuizAttempt(
         id=str(uuid4()),
@@ -199,4 +271,6 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
         total=total,
         results=results,
         explanations=explanations,
+        feedback=feedback,
+        next_quiz_recommendation=next_quiz_recommendation,
     )

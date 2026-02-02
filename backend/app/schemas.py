@@ -78,7 +78,8 @@ class QuizGenerateRequest(BaseModel):
     doc_id: Optional[str] = None
     kb_id: Optional[str] = None
     count: int = Field(default=5, ge=1, le=20)
-    difficulty: str = Field(default="medium")
+    difficulty: Optional[str] = None
+    auto_adapt: bool = True
     user_id: Optional[str] = None
     style_prompt: Optional[str] = None
     reference_questions: Optional[str] = None
@@ -89,6 +90,7 @@ class QuizQuestion(BaseModel):
     options: List[str]
     answer_index: int
     explanation: str
+    concepts: List[str] = []
 
 
 class QuizGenerateResponse(BaseModel):
@@ -102,12 +104,42 @@ class QuizSubmitRequest(BaseModel):
     user_id: Optional[str] = None
 
 
+class QuizFeedback(BaseModel):
+    type: str
+    message: str
+
+
+class NextQuizRecommendation(BaseModel):
+    difficulty: str
+    focus_concepts: List[str] = []
+
+
 class QuizSubmitResponse(BaseModel):
     score: float
     correct: int
     total: int
     results: List[bool]
     explanations: List[str]
+    feedback: Optional[QuizFeedback] = None
+    next_quiz_recommendation: Optional[NextQuizRecommendation] = None
+
+
+class DifficultyPlan(BaseModel):
+    easy: float
+    medium: float
+    hard: float
+    message: Optional[str] = None
+
+
+class LearnerProfileOut(BaseModel):
+    user_id: str
+    ability_level: str
+    theta: float
+    frustration_score: float
+    weak_concepts: List[str]
+    recent_accuracy: float
+    total_attempts: int
+    updated_at: datetime
 
 
 class ParseReferenceResponse(BaseModel):
@@ -205,6 +237,7 @@ class ChatMessageOut(BaseModel):
 class RecommendationAction(BaseModel):
     type: str
     reason: Optional[str] = None
+    params: Optional[dict] = None
 
 
 class RecommendationItem(BaseModel):

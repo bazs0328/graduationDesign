@@ -12,6 +12,7 @@ from app.schemas import (
     RecommendationItem,
     RecommendationsResponse,
 )
+from app.services.learner_profile import get_or_create_profile, get_weak_concepts
 
 router = APIRouter()
 
@@ -30,6 +31,8 @@ def get_recommendations(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     limit = max(1, min(limit, 20))
+    profile = get_or_create_profile(db, resolved_user_id)
+    weak_concepts = get_weak_concepts(profile)
     docs = (
         db.query(Document)
         .filter(
@@ -98,6 +101,32 @@ def get_recommendations(
             actions.append(RecommendationAction(type="qa", reason="No questions yet"))
         else:
             actions.append(RecommendationAction(type="qa", reason="Continue Q&A practice"))
+
+        if weak_concepts:
+            actions.append(
+                RecommendationAction(
+                    type="review",
+                    reason="根据薄弱知识点推荐复习",
+                    params={"focus_concepts": weak_concepts[:3]},
+                )
+            )
+
+        if profile.ability_level == "beginner" and profile.recent_accuracy >= 0.7:
+            actions.append(
+                RecommendationAction(
+                    type="challenge",
+                    reason="基础掌握不错，可尝试中等难度",
+                    params={"difficulty": "medium"},
+                )
+            )
+        elif profile.ability_level == "advanced" and profile.recent_accuracy >= 0.7:
+            actions.append(
+                RecommendationAction(
+                    type="challenge",
+                    reason="表现优秀，可尝试高难度挑战",
+                    params={"difficulty": "hard"},
+                )
+            )
 
         ranked_items.append(
             (

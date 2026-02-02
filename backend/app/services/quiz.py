@@ -23,7 +23,8 @@ QUIZ_PROMPT = ChatPromptTemplate.from_messages(
             "human",
             "Create {count} {difficulty} multiple-choice questions. "
             "Each question must have 4 options and one correct answer. "
-            "Return JSON array with fields: question, options, answer_index, explanation.\n\n"
+            "Return JSON array with fields: question, options, answer_index, explanation, concepts.\n"
+            "concepts must be a list of 1-3 key concepts tested.\n\n"
             "Context:\n{context}",
         ),
     ]
@@ -38,7 +39,8 @@ QUIZ_MIMIC_SYSTEM = (
 QUIZ_MIMIC_HUMAN_TEMPLATE = (
     "Create {count} {difficulty} multiple-choice questions. "
     "Each question must have 4 options and one correct answer. "
-    "Return JSON array with fields: question, options, answer_index, explanation.\n\n"
+    "Return JSON array with fields: question, options, answer_index, explanation, concepts.\n"
+    "concepts must be a list of 1-3 key concepts tested.\n\n"
     "{extra_instructions}"
     "Context:\n{context}"
 )

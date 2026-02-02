@@ -54,6 +54,64 @@ def ensure_schema():
             conn.execute(text("ALTER TABLE quizzes ADD COLUMN kb_id VARCHAR"))
             conn.commit()
 
+        result = conn.execute(text("PRAGMA table_info(learner_profiles)"))
+        cols = {row[1] for row in result}
+        if not cols:
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS learner_profiles ("
+                    "id VARCHAR PRIMARY KEY, "
+                    "user_id VARCHAR UNIQUE NOT NULL, "
+                    "ability_level VARCHAR, "
+                    "theta FLOAT, "
+                    "frustration_score FLOAT, "
+                    "weak_concepts TEXT, "
+                    "recent_accuracy FLOAT, "
+                    "total_attempts INTEGER, "
+                    "consecutive_low_scores INTEGER, "
+                    "updated_at DATETIME, "
+                    "FOREIGN KEY(user_id) REFERENCES users(id)"
+                    ")"
+                )
+            )
+            conn.commit()
+        else:
+            if "ability_level" not in cols:
+                conn.execute(
+                    text("ALTER TABLE learner_profiles ADD COLUMN ability_level VARCHAR")
+                )
+            if "theta" not in cols:
+                conn.execute(text("ALTER TABLE learner_profiles ADD COLUMN theta FLOAT"))
+            if "frustration_score" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE learner_profiles ADD COLUMN frustration_score FLOAT"
+                    )
+                )
+            if "weak_concepts" not in cols:
+                conn.execute(
+                    text("ALTER TABLE learner_profiles ADD COLUMN weak_concepts TEXT")
+                )
+            if "recent_accuracy" not in cols:
+                conn.execute(
+                    text("ALTER TABLE learner_profiles ADD COLUMN recent_accuracy FLOAT")
+                )
+            if "total_attempts" not in cols:
+                conn.execute(
+                    text("ALTER TABLE learner_profiles ADD COLUMN total_attempts INTEGER")
+                )
+            if "consecutive_low_scores" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE learner_profiles ADD COLUMN consecutive_low_scores INTEGER"
+                    )
+                )
+            if "updated_at" not in cols:
+                conn.execute(
+                    text("ALTER TABLE learner_profiles ADD COLUMN updated_at DATETIME")
+                )
+            conn.commit()
+
 
 def get_db():
     db = SessionLocal()

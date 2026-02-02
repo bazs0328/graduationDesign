@@ -24,13 +24,25 @@
                 <input type="number" min="1" max="20" v-model.number="quizCount" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm" />
               </div>
               <div class="space-y-2">
-                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">难度</label>
-                <select v-model="quizDifficulty" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
-                  <option value="easy">简单</option>
-                  <option value="medium">中等</option>
-                  <option value="hard">困难</option>
-                </select>
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">自适应模式</label>
+                <button
+                  class="w-full flex items-center justify-between border border-input rounded-lg px-3 py-2 text-sm transition-colors"
+                  :class="autoAdapt ? 'bg-primary/10 text-primary border-primary/30' : 'bg-background text-muted-foreground'"
+                  @click="autoAdapt = !autoAdapt"
+                >
+                  <span>{{ autoAdapt ? '开启' : '关闭' }}</span>
+                  <span class="text-xs">{{ autoAdapt ? '系统自动调难度' : '手动选择难度' }}</span>
+                </button>
               </div>
+            </div>
+
+            <div v-if="!autoAdapt" class="space-y-2">
+              <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">难度</label>
+              <select v-model="quizDifficulty" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
+                <option value="easy">简单</option>
+                <option value="medium">中等</option>
+                <option value="hard">困难</option>
+              </select>
             </div>
 
             <button
@@ -66,6 +78,16 @@
           <p class="text-sm font-medium">
             {{ quizResult.correct }} / {{ quizResult.total }} 正确
           </p>
+          <div v-if="quizResult.feedback" class="mt-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-left space-y-2">
+            <p class="text-xs font-bold uppercase tracking-widest text-amber-600">学习建议</p>
+            <p class="text-sm text-amber-700">{{ quizResult.feedback.message }}</p>
+            <div v-if="quizResult.next_quiz_recommendation" class="text-xs text-amber-700">
+              下次建议：{{ quizResult.next_quiz_recommendation.difficulty }} 难度
+              <span v-if="quizResult.next_quiz_recommendation.focus_concepts?.length">
+                （重点：{{ quizResult.next_quiz_recommendation.focus_concepts.join('、') }}）
+              </span>
+            </div>
+          </div>
         </div>
       </aside>
 
@@ -169,6 +191,7 @@ const quizAnswers = ref({})
 const quizResult = ref(null)
 const quizCount = ref(5)
 const quizDifficulty = ref('medium')
+const autoAdapt = ref(true)
 const busy = ref({
   quiz: false,
   submit: false
@@ -189,12 +212,16 @@ async function generateQuiz() {
   quizAnswers.value = {}
   quizResult.value = null
   try {
-    const res = await apiPost('/api/quiz/generate', {
+    const payload = {
       kb_id: selectedKbId.value,
       count: quizCount.value,
-      difficulty: quizDifficulty.value,
-      user_id: resolvedUserId.value
-    })
+      user_id: resolvedUserId.value,
+      auto_adapt: autoAdapt.value
+    }
+    if (!autoAdapt.value) {
+      payload.difficulty = quizDifficulty.value
+    }
+    const res = await apiPost('/api/quiz/generate', payload)
     quiz.value = res
   } catch (err) {
     console.error(err)

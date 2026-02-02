@@ -120,3 +120,18 @@ class QuizAttempt(Base):
     score = Column(Float, nullable=False)
     total = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LearnerProfile(Base):
+    __tablename__ = "learner_profiles"
+
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"), unique=True, index=True, nullable=False)
+    ability_level = Column(String, default="intermediate")
+    theta = Column(Float, default=0.0)
+    frustration_score = Column(Float, default=0.0)
+    weak_concepts = Column(Text, nullable=True)
+    recent_accuracy = Column(Float, default=0.5)
+    total_attempts = Column(Integer, default=0)
+    consecutive_low_scores = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

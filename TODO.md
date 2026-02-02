@@ -96,6 +96,9 @@
 - [x] **个性化推荐（按 KB）**
   - 范围：基于文档完成度生成下一步动作
   - 验收标准：`GET /api/recommendations?user_id=...&kb_id=...` 返回每文档 `actions`
+- [x] **细粒度学习画像与自适应难度**
+  - 范围：user_profile 字段（theta/ability/weak_concepts）；自适应策略与过难回调；对标 DeepTutor 个性化出题
+  - 验收标准：画像落库可查；测验根据画像自动调难度；过难回调生效；前端展示画像与推荐
 
 ---
 
@@ -134,9 +137,6 @@
 
 ## P2（需求内权重较低 / 可选）
 
-- [ ] **细粒度学习画像与自适应难度**
-  - 范围：user_profile 字段（theta/ability/weak_concepts）；先静态指标
-  - 预留扩展：自适应策略；对标 DeepTutor 个性化出题
 - [ ] **数据分析与指标看板**
   - 范围：统计视图 + CSV/JSON 导出 API
   - 预留扩展：可视化图表
