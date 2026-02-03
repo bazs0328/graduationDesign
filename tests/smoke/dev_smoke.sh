@@ -29,6 +29,85 @@ if [[ "$health" != *"ok"* ]]; then
   fail "Health check failed: ${health}"
 fi
 
+AUTH_USERNAME="${SMOKE_AUTH_USERNAME:-smoke_auth_user}"
+AUTH_PASSWORD="${SMOKE_AUTH_PASSWORD:-smoke_pass}"
+
+log "Auth: register..."
+register_resp=$(curl -sS -w "\n%{http_code}" -H "Content-Type: application/json" \
+  -d "{\"username\":\"${AUTH_USERNAME}\",\"password\":\"${AUTH_PASSWORD}\",\"name\":\"Smoke Auth\"}" \
+  "${API_BASE}/api/auth/register" 2>/dev/null || true)
+register_code=$(echo "$register_resp" | tail -1)
+register_body=$(echo "$register_resp" | sed '$d')
+
+if [[ "$register_code" == "200" || "$register_code" == "201" ]]; then
+  AUTH_USER_ID=$(REGISTER_BODY="${register_body}" python3 - <<'PY'
+import json, os
+data = os.environ.get("REGISTER_BODY", "{}")
+try:
+    obj = json.loads(data)
+    print(obj.get("user_id", ""))
+except Exception:
+    print("")
+PY
+)
+  if [[ -z "$AUTH_USER_ID" ]]; then
+    fail "Auth register response missing user_id: ${register_body}"
+  fi
+  log "Auth: registered user_id=${AUTH_USER_ID}"
+elif [[ "$register_code" == "409" ]]; then
+  log "Auth: user already exists, logging in..."
+  login_resp=$(curl -sS -H "Content-Type: application/json" \
+    -d "{\"username\":\"${AUTH_USERNAME}\",\"password\":\"${AUTH_PASSWORD}\"}" \
+    "${API_BASE}/api/auth/login" 2>/dev/null || true)
+  if [[ "$login_resp" == *"detail"* ]] && [[ "$login_resp" != *"user_id"* ]]; then
+    fail "Auth login failed: ${login_resp}"
+  fi
+  AUTH_USER_ID=$(LOGIN_BODY="${login_resp}" python3 - <<'PY'
+import json, os
+data = os.environ.get("LOGIN_BODY", "{}")
+try:
+    obj = json.loads(data)
+    print(obj.get("user_id", ""))
+except Exception:
+    print("")
+PY
+)
+  if [[ -z "$AUTH_USER_ID" ]]; then
+    fail "Auth login response missing user_id: ${login_resp}"
+  fi
+  log "Auth: logged in user_id=${AUTH_USER_ID}"
+else
+  fail "Auth register unexpected: ${register_code} ${register_body}"
+fi
+
+log "Auth: GET /me..."
+me_resp=$(curl -sS "${API_BASE}/api/auth/me?user_id=${AUTH_USER_ID}" || true)
+if [[ "$me_resp" == *"detail"* ]] && [[ "$me_resp" != *"user_id"* ]]; then
+  fail "Auth me failed: ${me_resp}"
+fi
+me_ok=$(ME_BODY="${me_resp}" AUTH_USER_ID="${AUTH_USER_ID}" python3 - <<'PY'
+import json, os
+data = os.environ.get("ME_BODY", "{}")
+uid = os.environ.get("AUTH_USER_ID", "")
+try:
+    obj = json.loads(data)
+except Exception:
+    print("invalid_json")
+    raise SystemExit(0)
+if obj.get("user_id") != uid:
+    print("user_id_mismatch")
+    raise SystemExit(0)
+if "username" not in obj:
+    print("missing_username")
+    raise SystemExit(0)
+print("ok")
+PY
+)
+if [[ "$me_ok" != "ok" ]]; then
+  fail "Auth me malformed: ${me_resp}"
+fi
+log "Auth: me OK"
+
 log "Preparing smoke document..."
 cat <<'DOC' > "${DOC_FILE}"
 Linear algebra studies vectors, matrices, and linear transformations.
@@ -305,6 +384,58 @@ log "Fetching progress..."
 progress_json=$(curl -sS "${API_BASE}/api/progress?user_id=${USER_ID}" || true)
 if [[ "$progress_json" == *"detail"* ]]; then
   fail "Progress failed: ${progress_json}"
+fi
+
+log "Fetching profile..."
+profile_json=$(curl -sS "${API_BASE}/api/profile?user_id=${USER_ID}" || true)
+if [[ "$profile_json" == *"detail"* ]]; then
+  fail "Profile failed: ${profile_json}"
+fi
+profile_ok=$(PROFILE_JSON="${profile_json}" python3 - <<'PY'
+import json, os
+data = os.environ.get("PROFILE_JSON", "")
+try:
+    obj = json.loads(data)
+except Exception:
+    print("invalid_json")
+    raise SystemExit(0)
+required = ("ability_level", "recent_accuracy", "frustration_score", "weak_concepts", "theta", "total_attempts")
+for k in required:
+    if k not in obj:
+        print(f"missing_{k}")
+        raise SystemExit(0)
+if not isinstance(obj.get("weak_concepts"), list):
+    print("weak_concepts_not_list")
+    raise SystemExit(0)
+print("ok")
+PY
+)
+if [[ "$profile_ok" != "ok" ]]; then
+  fail "Profile malformed: ${profile_json}"
+fi
+
+log "Fetching difficulty-plan..."
+diffplan_json=$(curl -sS "${API_BASE}/api/profile/difficulty-plan?user_id=${USER_ID}" || true)
+if [[ "$diffplan_json" == *"detail"* ]]; then
+  fail "Difficulty-plan failed: ${diffplan_json}"
+fi
+diffplan_ok=$(DIFFPLAN_JSON="${diffplan_json}" python3 - <<'PY'
+import json, os
+data = os.environ.get("DIFFPLAN_JSON", "")
+try:
+    obj = json.loads(data)
+except Exception:
+    print("invalid_json")
+    raise SystemExit(0)
+for k in ("easy", "medium", "hard"):
+    if k not in obj or not isinstance(obj[k], (int, float)):
+        print(f"missing_or_invalid_{k}")
+        raise SystemExit(0)
+print("ok")
+PY
+)
+if [[ "$diffplan_ok" != "ok" ]]; then
+  fail "Difficulty-plan malformed: ${diffplan_json}"
 fi
 
 log "Fetching activity..."
