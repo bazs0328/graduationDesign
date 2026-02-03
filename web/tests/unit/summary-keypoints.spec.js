@@ -1,18 +1,25 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { createRouter, createMemoryHistory } from 'vue-router'
 
 import App from '@/App.vue'
+import { routes } from '@/router'
 import { apiGet, apiPost } from '@/api'
 
-vi.mock('@/api', () => ({
-  apiGet: vi.fn(),
-  apiPost: vi.fn()
-}))
+vi.mock('@/api', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    apiGet: vi.fn(),
+    apiPost: vi.fn()
+  }
+})
 
 const docFixture = {
   id: 'doc-1',
   user_id: 'user_test',
+  kb_id: 'kb-1',
   filename: 'sample.txt',
   file_type: 'txt',
   num_chunks: 1,
@@ -22,21 +29,38 @@ const docFixture = {
   created_at: new Date().toISOString()
 }
 
+const kbFixture = { id: 'kb-1', name: 'Default' }
+
 function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+async function mountAppWithRouter() {
+  localStorage.setItem('gradtutor_user_id', 'test')
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes
+  })
+  await router.push('/')
+  await router.isReady()
+  const wrapper = mount(App, {
+    global: {
+      plugins: [router]
+    }
+  })
+  await flushPromises()
+  await nextTick()
+  return { wrapper, router }
 }
 
 beforeEach(() => {
   apiGet.mockReset()
   apiPost.mockReset()
+  localStorage.clear()
 
   apiGet.mockImplementation((path) => {
-    if (path.startsWith('/api/kb')) {
-      return Promise.resolve([])
-    }
-    if (path.startsWith('/api/docs')) {
-      return Promise.resolve([docFixture])
-    }
+    if (path.startsWith('/api/kb')) return Promise.resolve([kbFixture])
+    if (path.startsWith('/api/docs')) return Promise.resolve([docFixture])
     if (path.startsWith('/api/progress')) {
       return Promise.resolve({
         total_docs: 1,
@@ -49,16 +73,12 @@ beforeEach(() => {
         last_activity: null
       })
     }
-    if (path.startsWith('/api/activity')) {
-      return Promise.resolve({ items: [] })
-    }
+    if (path.startsWith('/api/activity')) return Promise.resolve({ items: [] })
     return Promise.resolve({})
   })
 
   apiPost.mockImplementation((path) => {
-    if (path === '/api/summary') {
-      return Promise.resolve({ summary: 'ok', cached: false })
-    }
+    if (path === '/api/summary') return Promise.resolve({ summary: 'ok', cached: false })
     if (path === '/api/keypoints') {
       return Promise.resolve({
         keypoints: [{ text: 'k1', explanation: 'explanation for k1', page: 1 }],
@@ -71,18 +91,21 @@ beforeEach(() => {
 
 describe('Summary/Keypoints payloads', () => {
   it('sends boolean force on summarize', async () => {
-    const wrapper = mount(App)
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await router.push('/summary')
     await flushPromises()
     await nextTick()
+    await nextTick()
 
-    const summaryTab = wrapper.findAll('button').find((btn) => btn.text() === 'Summary')
-    expect(summaryTab).toBeTruthy()
-    await summaryTab.trigger('click')
+    const docSelect = wrapper.find('select')
+    expect(docSelect.exists()).toBe(true)
+    await docSelect.setValue('doc-1')
     await nextTick()
 
     const summarizeBtn = wrapper
       .findAll('button')
-      .find((btn) => btn.text().toLowerCase().includes('summarize'))
+      .find((btn) => btn.text().includes('生成摘要'))
     expect(summarizeBtn).toBeTruthy()
     await summarizeBtn.trigger('click')
 
@@ -93,18 +116,21 @@ describe('Summary/Keypoints payloads', () => {
   })
 
   it('sends boolean force on keypoints', async () => {
-    const wrapper = mount(App)
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await router.push('/summary')
     await flushPromises()
     await nextTick()
+    await nextTick()
 
-    const summaryTab = wrapper.findAll('button').find((btn) => btn.text() === 'Summary')
-    expect(summaryTab).toBeTruthy()
-    await summaryTab.trigger('click')
+    const docSelect = wrapper.find('select')
+    expect(docSelect.exists()).toBe(true)
+    await docSelect.setValue('doc-1')
     await nextTick()
 
     const keypointsBtn = wrapper
       .findAll('button')
-      .find((btn) => btn.text().toLowerCase().includes('extract keypoints'))
+      .find((btn) => btn.text().includes('提取要点'))
     expect(keypointsBtn).toBeTruthy()
     await keypointsBtn.trigger('click')
 
@@ -115,17 +141,21 @@ describe('Summary/Keypoints payloads', () => {
   })
 
   it('renders keypoints with text, explanation, and source', async () => {
-    const wrapper = mount(App)
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await router.push('/summary')
     await flushPromises()
     await nextTick()
+    await nextTick()
 
-    const summaryTab = wrapper.findAll('button').find((btn) => btn.text() === 'Summary')
-    await summaryTab.trigger('click')
+    const docSelect = wrapper.find('select')
+    expect(docSelect.exists()).toBe(true)
+    await docSelect.setValue('doc-1')
     await nextTick()
 
     const keypointsBtn = wrapper
       .findAll('button')
-      .find((btn) => btn.text().toLowerCase().includes('extract keypoints'))
+      .find((btn) => btn.text().includes('提取要点'))
     await keypointsBtn.trigger('click')
     await flushPromises()
     await nextTick()

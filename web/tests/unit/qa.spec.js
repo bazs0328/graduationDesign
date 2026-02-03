@@ -1,18 +1,26 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { createRouter, createMemoryHistory } from 'vue-router'
 
 import App from '@/App.vue'
+import { routes } from '@/router'
 import { apiGet, apiPost } from '@/api'
 
-vi.mock('@/api', () => ({
-  apiGet: vi.fn(),
-  apiPost: vi.fn()
-}))
+vi.mock('@/api', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    apiGet: vi.fn(),
+    apiPost: vi.fn()
+  }
+})
 
+const kbFixture = { id: 'kb-1', name: 'Default' }
 const docFixture = {
   id: 'doc-1',
   user_id: 'user_test',
+  kb_id: 'kb-1',
   filename: 'sample.txt',
   file_type: 'txt',
   num_chunks: 1,
@@ -31,12 +39,31 @@ function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
+async function mountAppWithRouter() {
+  localStorage.setItem('gradtutor_user_id', 'test')
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes
+  })
+  await router.push('/')
+  await router.isReady()
+  const wrapper = mount(App, {
+    global: {
+      plugins: [router]
+    }
+  })
+  await flushPromises()
+  await nextTick()
+  return { wrapper, router }
+}
+
 beforeEach(() => {
   apiGet.mockReset()
   apiPost.mockReset()
+  localStorage.clear()
 
   apiGet.mockImplementation((path) => {
-    if (path.startsWith('/api/kb')) return Promise.resolve([])
+    if (path.startsWith('/api/kb')) return Promise.resolve([kbFixture])
     if (path.startsWith('/api/docs')) return Promise.resolve([docFixture])
     if (path.startsWith('/api/progress')) {
       return Promise.resolve({
@@ -55,62 +82,66 @@ beforeEach(() => {
     return Promise.resolve({})
   })
 
-  apiPost.mockImplementation((path, body) => {
+  apiPost.mockImplementation((path) => {
     if (path === '/api/qa') return Promise.resolve(qaResponse)
     return Promise.resolve({})
   })
 })
 
 describe('Q&A', () => {
-  it('sends doc_id and question on Ask', async () => {
-    const wrapper = mount(App)
+  it('sends kb_id and question on Ask', async () => {
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await router.push('/qa')
     await flushPromises()
     await nextTick()
-
-    const qaTab = wrapper.findAll('button').find((btn) => btn.text() === 'Q&A')
-    expect(qaTab).toBeTruthy()
-    await qaTab.trigger('click')
     await nextTick()
 
-    const select = wrapper.find('select')
-    await select.setValue('doc-1')
+    const kbSelect = wrapper.find('select')
+    expect(kbSelect.exists()).toBe(true)
+    await kbSelect.setValue('kb-1')
+    await flushPromises()
     await nextTick()
 
     const textarea = wrapper.find('textarea')
     await textarea.setValue('What is a matrix?')
     await nextTick()
 
-    const askBtn = wrapper.findAll('button').find((btn) => btn.text() === 'Ask')
-    expect(askBtn).toBeTruthy()
-    await askBtn.trigger('click')
+    const inputContainer = wrapper.find('textarea').element.closest('div')
+    const sendBtnEl = inputContainer?.querySelector('button')
+    expect(sendBtnEl).toBeTruthy()
+    sendBtnEl?.click()
     await flushPromises()
     await nextTick()
 
     expect(apiPost).toHaveBeenCalledWith(
       '/api/qa',
       expect.objectContaining({
-        doc_id: 'doc-1',
+        kb_id: 'kb-1',
         question: 'What is a matrix?'
       })
     )
   })
 
   it('renders answer and sources in qa-log', async () => {
-    const wrapper = mount(App)
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await router.push('/qa')
+    await flushPromises()
+    await nextTick()
+    await nextTick()
+
+    const kbSelect = wrapper.find('select')
+    expect(kbSelect.exists()).toBe(true)
+    await kbSelect.setValue('kb-1')
     await flushPromises()
     await nextTick()
 
-    const qaTab = wrapper.findAll('button').find((btn) => btn.text() === 'Q&A')
-    await qaTab.trigger('click')
-    await nextTick()
-
-    await wrapper.find('select').setValue('doc-1')
-    await nextTick()
     await wrapper.find('textarea').setValue('What is a matrix?')
     await nextTick()
-
-    const askBtn = wrapper.findAll('button').find((btn) => btn.text() === 'Ask')
-    await askBtn.trigger('click')
+    const inputContainer = wrapper.find('textarea').element.closest('div')
+    const sendBtnEl = inputContainer?.querySelector('button')
+    sendBtnEl?.click()
     await flushPromises()
     await nextTick()
 

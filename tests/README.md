@@ -24,4 +24,5 @@
 - **后端**: `pytest` 或 `python -m pytest`
 - **前端单元**: `cd web && npm test`
 - **前端 E2E**: `cd web && npm run test:e2e`
-- **Smoke**: `bash tests/smoke/dev_smoke.sh`
+- **Smoke**: `bash tests/smoke/dev_smoke.sh`（需后端已启动；可设置 `API_BASE`、`SMOKE_USER_ID`、`SMOKE_DOC_FILE`）
+- **Windows 下运行 Smoke**：需在 **Git Bash** 或 **WSL** 中执行上述 bash 脚本；或设置环境变量后在同一环境下运行。
