@@ -1,0 +1,22 @@
+---
+alwaysApply: true
+---
+
+# 技能自动调用规则
+
+## 何时触发
+在动手实现用户需求之前，必须执行「技能匹配」步骤。
+
+## 流程
+1. **查看技能列表**：阅读本仓库根目录 `AGENTS.md` 中的 `<available_skills>`（或当前上下文中已列出的 available skills）。
+2. **匹配任务**：根据用户当前请求，对照每个 `<skill>` 的 `<description>`，判断是否有技能与任务明显相关（例如：做 PDF/文档 → pdf/docx；做前端页面/仪表盘 → frontend-design；测 Web → webapp-testing；写 Vue 组件/最佳实践 → vue 相关技能；建 MCP 服务 → mcp-builder；写/改技能 → skill-creator）。
+3. **若有匹配**：
+   - 在终端执行：`npx openskills read <skill-name>`（多个技能用逗号：`npx openskills read skill-one,skill-two`）。
+   - 等待命令输出，将技能内容纳入后续推理。
+   - 按该技能中的说明完成任务，而不是仅凭通用知识实现。
+4. **若无匹配**：按项目惯例与现有规则直接实现即可。
+
+## 注意
+- 仅使用 `<available_skills>` 中列出的技能名称，不要编造名称。
+- 若某技能内容已在当前对话中被加载过，无需再次执行 `openskills read`。
+- 在 Agent 模式下你才有权限执行终端命令；若在 Ask 模式，请提示用户「请切换到 Agent 模式以便我执行 openskills read」。

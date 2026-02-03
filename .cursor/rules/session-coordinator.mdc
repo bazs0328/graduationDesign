@@ -6,6 +6,8 @@ alwaysApply: false
 
 # Session Coordination & Continuity
 
+**Scope:** This rule governs **in-session** state, checkpoints, and handoff within a single conversation. For cross-day progress and todo lists, see `development-journal.mdc`. For context pruning and retention priority only, see `memory-management.mdc`—do not duplicate progress/summary formats here.
+
 ## 🔄 Session State Tracking
 
 ### Active Session Format

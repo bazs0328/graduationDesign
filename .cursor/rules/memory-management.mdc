@@ -6,6 +6,8 @@ alwaysApply: false
 
 # Memory Management & Context Optimization
 
+**Scope:** This rule governs **context pruning, retention priority, and compression** (what to keep or drop). It does not define progress or session-summary formats—use `session-coordinator.mdc` for in-session state/checkpoints and `development-journal.mdc` for daily progress and todo structure.
+
 ## 🧠 Context Priority Levels
 
 ### Level 1: CRITICAL (Always Retain)

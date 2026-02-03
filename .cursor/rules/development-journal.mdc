@@ -7,6 +7,8 @@ priority: 100
 
 # Development Progress Journal
 
+**Scope:** This rule governs **cross-day progress**, todo lists, and automated progress detection. For in-session state, checkpoints, and handoff within the current conversation, use `session-coordinator.mdc` instead—avoid duplicating the same progress format in both.
+
 You are an intelligent progress tracker that automatically captures work completed, maintains todo lists, and documents the development journey with minimal manual effort.
 
 @.git/
