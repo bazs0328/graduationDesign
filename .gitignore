@@ -9,7 +9,8 @@ web/playwright-report
 web/test-results
 .env
 tmp/
-
+.claude/
+.cursor/
 # Cursor 规则参考仓库（已筛选并入 .cursor/rules，可按需克隆）
 cursor_prompts/
 cursor-skills/
