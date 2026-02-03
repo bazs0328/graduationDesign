@@ -45,15 +45,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Check for API key
+        id: check
+        env:
+          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+        run: echo "has_key=$([ -n "$QWEN_API_KEY" ] && echo true || echo false)" >> $GITHUB_OUTPUT
       - name: Prepare backend env
+        if: steps.check.outputs.has_key == 'true'
+        env:
+          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+          QWEN_BASE_URL: ${{ secrets.QWEN_BASE_URL }}
+          QWEN_MODEL: ${{ secrets.QWEN_MODEL }}
+          QWEN_EMBEDDING_MODEL: ${{ secrets.QWEN_EMBEDDING_MODEL }}
         run: |
           cat > backend/.env <<EOF
           LLM_PROVIDER=qwen
           EMBEDDING_PROVIDER=qwen
-          QWEN_API_KEY=${{ secrets.QWEN_API_KEY }}
-          QWEN_BASE_URL=${{ secrets.QWEN_BASE_URL || 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1' }}
-          QWEN_MODEL=${{ secrets.QWEN_MODEL || 'qwen-plus' }}
-          QWEN_EMBEDDING_MODEL=${{ secrets.QWEN_EMBEDDING_MODEL || 'text-embedding-v4' }}
+          QWEN_API_KEY=${QWEN_API_KEY}
+          QWEN_BASE_URL=${QWEN_BASE_URL:-https://dashscope-intl.aliyuncs.com/compatible-mode/v1}
+          QWEN_MODEL=${QWEN_MODEL:-qwen-plus}
+          QWEN_EMBEDDING_MODEL=${QWEN_EMBEDDING_MODEL:-text-embedding-v4}
           DATA_DIR=data
           CHUNK_SIZE=1000
           CHUNK_OVERLAP=150
@@ -65,8 +76,10 @@ jobs:
           RAG_BM25_WEIGHT=0.3
           EOF
       - name: Start backend
+        if: steps.check.outputs.has_key == 'true'
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
       - name: Wait for health
+        if: steps.check.outputs.has_key == 'true'
         run: |
           for i in $(seq 1 30); do
             if curl -fsS http://localhost:8000/api/health | grep -q ok; then
@@ -78,7 +91,8 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.dev.yml logs backend
           exit 1
       - name: Run smoke
+        if: steps.check.outputs.has_key == 'true'
         run: bash tests/smoke/dev_smoke.sh
       - name: Shutdown
-        if: always()
+        if: always() && steps.check.outputs.has_key == 'true'
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v
