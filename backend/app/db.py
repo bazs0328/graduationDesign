@@ -134,6 +134,77 @@ def ensure_schema():
                 )
             conn.commit()
 
+        result = conn.execute(text("PRAGMA table_info(keypoints_v2)"))
+        cols = {row[1] for row in result}
+        if not cols:
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS keypoints_v2 ("
+                    "id VARCHAR PRIMARY KEY, "
+                    "user_id VARCHAR NOT NULL, "
+                    "doc_id VARCHAR NOT NULL, "
+                    "kb_id VARCHAR, "
+                    "text TEXT NOT NULL, "
+                    "explanation TEXT, "
+                    "source VARCHAR, "
+                    "page INTEGER, "
+                    "chunk INTEGER, "
+                    "mastery_level FLOAT DEFAULT 0.0, "
+                    "attempt_count INTEGER DEFAULT 0, "
+                    "correct_count INTEGER DEFAULT 0, "
+                    "created_at DATETIME, "
+                    "updated_at DATETIME, "
+                    "FOREIGN KEY(user_id) REFERENCES users(id), "
+                    "FOREIGN KEY(doc_id) REFERENCES documents(id), "
+                    "FOREIGN KEY(kb_id) REFERENCES knowledge_bases(id)"
+                    ")"
+                )
+            )
+            conn.commit()
+        else:
+            if "kb_id" not in cols:
+                conn.execute(text("ALTER TABLE keypoints_v2 ADD COLUMN kb_id VARCHAR"))
+                conn.execute(
+                    text(
+                        "UPDATE keypoints_v2 SET kb_id = ("
+                        "SELECT kb_id FROM documents WHERE documents.id = keypoints_v2.doc_id"
+                        ") WHERE kb_id IS NULL"
+                    )
+                )
+            if "source" not in cols:
+                conn.execute(text("ALTER TABLE keypoints_v2 ADD COLUMN source VARCHAR"))
+            if "page" not in cols:
+                conn.execute(text("ALTER TABLE keypoints_v2 ADD COLUMN page INTEGER"))
+            if "chunk" not in cols:
+                conn.execute(text("ALTER TABLE keypoints_v2 ADD COLUMN chunk INTEGER"))
+            if "mastery_level" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE keypoints_v2 ADD COLUMN mastery_level FLOAT DEFAULT 0.0"
+                    )
+                )
+            if "attempt_count" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE keypoints_v2 ADD COLUMN attempt_count INTEGER DEFAULT 0"
+                    )
+                )
+            if "correct_count" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE keypoints_v2 ADD COLUMN correct_count INTEGER DEFAULT 0"
+                    )
+                )
+            if "created_at" not in cols:
+                conn.execute(
+                    text("ALTER TABLE keypoints_v2 ADD COLUMN created_at DATETIME")
+                )
+            if "updated_at" not in cols:
+                conn.execute(
+                    text("ALTER TABLE keypoints_v2 ADD COLUMN updated_at DATETIME")
+                )
+            conn.commit()
+
 
 def get_db():
     db = SessionLocal()

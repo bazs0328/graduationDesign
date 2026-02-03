@@ -1,11 +1,14 @@
 import json
 from typing import Optional
 
+from sqlalchemy.orm import Session
+
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.core.llm import get_llm
 from app.core.vectorstore import get_vectorstore
+from app.models import Keypoint
 from app.utils.json_tools import safe_json_loads
 
 KEYPOINT_SYSTEM = (
@@ -72,6 +75,145 @@ def _attach_source(user_id: str, doc_id: str, point: dict) -> dict:
     except Exception:
         pass
     return point
+
+
+def _build_keypoint_id(doc_id: str, index: int) -> str:
+    """Build a stable keypoint id for a document."""
+    safe_prefix = (doc_id or "doc")[:8]
+    return f"KP-{safe_prefix}-{index:03d}"
+
+
+def save_keypoints_to_db(
+    db: Session,
+    user_id: str,
+    doc_id: str,
+    points: list[dict],
+    kb_id: Optional[str] = None,
+    overwrite: bool = False,
+) -> list[Keypoint]:
+    """Persist keypoints to DB and vectorstore with stable ids."""
+    if overwrite:
+        db.query(Keypoint).filter(
+            Keypoint.user_id == user_id, Keypoint.doc_id == doc_id
+        ).delete()
+        db.commit()
+        try:
+            vectorstore = get_vectorstore(user_id)
+            vectorstore.delete(where={"doc_id": doc_id, "type": "keypoint"})
+        except Exception:
+            pass
+
+    vectorstore = get_vectorstore(user_id)
+    saved: list[Keypoint] = []
+    for idx, point in enumerate(points, start=1):
+        parsed = _parse_point(point) if isinstance(point, (dict, str)) else None
+        if not parsed or not parsed.get("text"):
+            continue
+        kp_id = _build_keypoint_id(doc_id, idx)
+        keypoint = Keypoint(
+            id=kp_id,
+            user_id=user_id,
+            doc_id=doc_id,
+            kb_id=kb_id,
+            text=parsed["text"],
+            explanation=point.get("explanation") if isinstance(point, dict) else None,
+            source=point.get("source") if isinstance(point, dict) else None,
+            page=point.get("page") if isinstance(point, dict) else None,
+            chunk=point.get("chunk") if isinstance(point, dict) else None,
+        )
+        db.add(keypoint)
+        saved.append(keypoint)
+        vectorstore.add_texts(
+            [keypoint.text],
+            metadatas=[
+                {
+                    "keypoint_id": kp_id,
+                    "doc_id": doc_id,
+                    "kb_id": kb_id,
+                    "type": "keypoint",
+                }
+            ],
+            ids=[kp_id],
+        )
+    db.commit()
+    return saved
+
+
+def match_keypoints_by_concepts(
+    user_id: str,
+    doc_id: str,
+    concepts: list[str],
+    max_distance: float = 0.7,
+    top_k: int = 3,
+) -> list[str]:
+    """Match concept text to keypoint ids using vector similarity search."""
+    if not concepts:
+        return []
+    vectorstore = get_vectorstore(user_id)
+    query = " ".join([c for c in concepts if c])
+    if not query.strip():
+        return []
+    try:
+        results = vectorstore.similarity_search_with_score(
+            query, k=top_k, filter={"doc_id": doc_id, "type": "keypoint"}
+        )
+    except Exception:
+        return []
+
+    matched = []
+    for doc, score in results:
+        meta = getattr(doc, "metadata", {}) or {}
+        kp_id = meta.get("keypoint_id")
+        if not kp_id:
+            continue
+        if score <= max_distance:
+            matched.append(kp_id)
+    return matched
+
+
+def match_keypoints_by_kb(
+    user_id: str,
+    kb_id: str,
+    concepts: list[str],
+    max_distance: float = 0.7,
+    top_k: int = 5,
+) -> list[str]:
+    """Match concept text to keypoint ids within a knowledge base."""
+    if not concepts:
+        return []
+    vectorstore = get_vectorstore(user_id)
+    query = " ".join([c for c in concepts if c])
+    if not query.strip():
+        return []
+    try:
+        results = vectorstore.similarity_search_with_score(
+            query, k=top_k, filter={"kb_id": kb_id, "type": "keypoint"}
+        )
+    except Exception:
+        return []
+
+    matched = []
+    for doc, score in results:
+        meta = getattr(doc, "metadata", {}) or {}
+        kp_id = meta.get("keypoint_id")
+        if not kp_id:
+            continue
+        if score <= max_distance:
+            matched.append(kp_id)
+    return matched
+
+
+def update_keypoint_mastery(db: Session, keypoint_id: str, is_correct: bool) -> None:
+    """Update mastery stats for a keypoint based on quiz result."""
+    keypoint = db.query(Keypoint).filter(Keypoint.id == keypoint_id).first()
+    if not keypoint:
+        return
+    keypoint.attempt_count = (keypoint.attempt_count or 0) + 1
+    if is_correct:
+        keypoint.correct_count = (keypoint.correct_count or 0) + 1
+    if keypoint.attempt_count:
+        keypoint.mastery_level = keypoint.correct_count / keypoint.attempt_count
+    db.commit()
 
 
 def extract_keypoints(

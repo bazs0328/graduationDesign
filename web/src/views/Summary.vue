@@ -90,7 +90,12 @@
           </div>
           <p v-else-if="keypointsError" class="text-sm text-destructive">{{ keypointsError }}</p>
           <div v-else-if="keypoints.length" class="grid grid-cols-1 gap-4">
-            <div v-for="(point, idx) in keypoints" :key="idx" class="p-4 bg-background border border-border rounded-xl hover:border-primary/30 transition-all group">
+            <div
+              v-for="(point, idx) in keypoints"
+              :key="point?.id || idx"
+              class="p-4 bg-background border border-border rounded-xl hover:border-primary/30 transition-all group"
+              :class="masteryBorderClass(point)"
+            >
               <div class="flex gap-4">
                 <div class="flex-shrink-0 w-6 h-6 bg-primary/10 text-primary rounded-full flex items-center justify-center text-xs font-bold">
                   {{ idx + 1 }}
@@ -100,6 +105,22 @@
                   <p v-if="typeof point !== 'string' && point.explanation" class="text-sm text-muted-foreground">
                     {{ point.explanation }}
                   </p>
+                  <div v-if="getMasteryLevel(point) !== null" class="flex items-center gap-2">
+                    <span
+                      class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border"
+                      :class="masteryBadgeClass(point)"
+                    >
+                      {{ masteryLabel(point) }}
+                    </span>
+                    <span class="text-[10px] text-muted-foreground">{{ masteryPercent(point) }}%</span>
+                    <button
+                      v-if="isWeakMastery(point)"
+                      class="ml-auto text-[10px] font-bold text-destructive hover:underline"
+                      @click="goToQuiz"
+                    >
+                      去测验
+                    </button>
+                  </div>
                   <div v-if="typeof point !== 'string' && (point.source || point.page || point.chunk)" class="flex items-center gap-2 pt-1">
                     <span class="text-[10px] font-bold uppercase text-primary/60">来源：</span>
                     <span class="text-[10px] bg-accent px-2 py-0.5 rounded-full text-accent-foreground">
@@ -122,9 +143,11 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { FileText, Sparkles, Layers, RefreshCw } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
 
+const router = useRouter()
 const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
 const resolvedUserId = computed(() => userId.value || 'default')
 const docs = ref([])
@@ -146,6 +169,57 @@ const selectedKbName = computed(() => {
   const kb = kbs.value.find(k => k.id === doc.kb_id)
   return kb ? kb.name : '未知'
 })
+
+function getMasteryLevel(point) {
+  if (!point || typeof point !== 'object') return null
+  const level = Number(point.mastery_level)
+  return Number.isFinite(level) ? Math.max(0, Math.min(level, 1)) : null
+}
+
+function masteryState(point) {
+  const level = getMasteryLevel(point)
+  if (level === null) return null
+  if (level >= 0.7) return 'mastered'
+  if (level >= 0.3) return 'partial'
+  return 'weak'
+}
+
+function masteryLabel(point) {
+  const state = masteryState(point)
+  if (state === 'mastered') return '已掌握'
+  if (state === 'partial') return '部分掌握'
+  if (state === 'weak') return '待学习'
+  return ''
+}
+
+function masteryPercent(point) {
+  const level = getMasteryLevel(point)
+  return level === null ? 0 : Math.round(level * 100)
+}
+
+function masteryBadgeClass(point) {
+  const state = masteryState(point)
+  if (state === 'mastered') return 'bg-green-500/10 text-green-600 border-green-500/30'
+  if (state === 'partial') return 'bg-amber-500/10 text-amber-600 border-amber-500/30'
+  if (state === 'weak') return 'bg-red-500/10 text-red-600 border-red-500/30'
+  return ''
+}
+
+function masteryBorderClass(point) {
+  const state = masteryState(point)
+  if (state === 'mastered') return 'border-green-500/30 hover:border-green-500/50'
+  if (state === 'partial') return 'border-amber-500/30 hover:border-amber-500/50'
+  if (state === 'weak') return 'border-red-500/30 hover:border-red-500/50'
+  return ''
+}
+
+function isWeakMastery(point) {
+  return masteryState(point) === 'weak'
+}
+
+function goToQuiz() {
+  router.push('/quiz')
+}
 
 async function refreshKbs() {
   try {

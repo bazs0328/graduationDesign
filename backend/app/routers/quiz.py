@@ -26,6 +26,11 @@ from app.services.learner_profile import (
     get_or_create_profile,
     update_profile_after_quiz,
 )
+from app.services.keypoints import (
+    match_keypoints_by_concepts,
+    match_keypoints_by_kb,
+    update_keypoint_mastery,
+)
 from app.services.quiz import generate_quiz
 from app.services.text_extraction import extract_text
 from app.utils.document_validator import DocumentValidator
@@ -236,6 +241,20 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
         explanations.append(q.get("explanation", ""))
         if is_correct:
             correct += 1
+        concepts = q.get("concepts") or []
+        if concepts:
+            if quiz.doc_id:
+                matched_keypoints = match_keypoints_by_concepts(
+                    resolved_user_id, quiz.doc_id, concepts
+                )
+            elif quiz.kb_id:
+                matched_keypoints = match_keypoints_by_kb(
+                    resolved_user_id, quiz.kb_id, concepts
+                )
+            else:
+                matched_keypoints = []
+            for keypoint_id in matched_keypoints:
+                update_keypoint_mastery(db, keypoint_id, is_correct)
 
     score = correct / total if total else 0.0
     first_five_wrong = sum(1 for item in results[:5] if not item)

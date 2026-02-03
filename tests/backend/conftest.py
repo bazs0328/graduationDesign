@@ -46,7 +46,12 @@ def seeded_session():
     kb_id = "kb-1"
     doc_id = "doc-1"
 
-    user = User(id=user_id, name="Test")
+    user = User(
+        id=user_id,
+        username=user_id,
+        password_hash="test_hash",
+        name="Test",
+    )
     kb = KnowledgeBase(id=kb_id, user_id=user_id, name="Test KB")
     doc = Document(
         id=doc_id,

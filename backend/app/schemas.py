@@ -202,9 +202,21 @@ class KeypointItem(BaseModel):
     chunk: Optional[int] = None
 
 
+class KeypointItemV2(BaseModel):
+    id: str
+    text: str
+    explanation: Optional[str] = None
+    source: Optional[str] = None
+    page: Optional[int] = None
+    chunk: Optional[int] = None
+    mastery_level: float = 0.0
+    attempt_count: int = 0
+    correct_count: int = 0
+
+
 class KeypointsResponse(BaseModel):
     doc_id: str
-    keypoints: List[KeypointItem]
+    keypoints: List[KeypointItemV2]
     cached: bool = False
 
 
@@ -263,7 +275,17 @@ class RecommendationItem(BaseModel):
     actions: List[RecommendationAction]
 
 
+class LearningPathItem(BaseModel):
+    keypoint_id: str
+    text: str
+    doc_id: str
+    doc_name: Optional[str] = None
+    mastery_level: float
+    priority: str
+
+
 class RecommendationsResponse(BaseModel):
     kb_id: str
     kb_name: Optional[str] = None
     items: List[RecommendationItem]
+    learning_path: List[LearningPathItem] = []
