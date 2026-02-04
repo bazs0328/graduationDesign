@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+from collections import defaultdict
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -19,6 +20,7 @@ from app.schemas import (
     QuizSubmitRequest,
     QuizSubmitResponse,
     NextQuizRecommendation,
+    WrongQuestionGroup,
 )
 from app.services.learner_profile import (
     extract_weak_concepts,
@@ -68,6 +70,28 @@ def _split_counts(total: int, ratios: dict[str, float]) -> dict[str, int]:
     return counts
 
 
+def _group_wrong_questions_by_concept(
+    questions: list[dict], results: list[bool]
+) -> list[WrongQuestionGroup]:
+    """Group wrong questions by concept name."""
+    grouped: dict[str, list[int]] = defaultdict(list)
+    for idx, (question, is_correct) in enumerate(zip(questions, results)):
+        if is_correct:
+            continue
+        concepts = question.get("concepts") or []
+        if not isinstance(concepts, list):
+            continue
+        for concept in concepts:
+            concept_name = str(concept).strip()
+            if concept_name:
+                grouped[concept_name].append(idx + 1)
+
+    return [
+        WrongQuestionGroup(concept=concept, question_indices=indices)
+        for concept, indices in sorted(grouped.items())
+    ]
+
+
 @router.post("/quiz/generate", response_model=QuizGenerateResponse)
 def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
     resolved_user_id = ensure_user(db, payload.user_id)
@@ -111,6 +135,7 @@ def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
                         count,
                         difficulty,
                         kb_id=payload.kb_id,
+                        focus_concepts=payload.focus_concepts,
                         style_prompt=payload.style_prompt,
                         reference_questions=payload.reference_questions,
                     )
@@ -126,6 +151,7 @@ def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
                 payload.count,
                 difficulty,
                 kb_id=payload.kb_id,
+                focus_concepts=payload.focus_concepts,
                 style_prompt=payload.style_prompt,
                 reference_questions=payload.reference_questions,
             )
@@ -259,7 +285,10 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
     score = correct / total if total else 0.0
     first_five_wrong = sum(1 for item in results[:5] if not item)
     weak_concepts = extract_weak_concepts(questions, results)
-    update_profile_after_quiz(db, resolved_user_id, score, weak_concepts)
+    _, profile_delta = update_profile_after_quiz(
+        db, resolved_user_id, score, weak_concepts
+    )
+    wrong_questions_by_concept = _group_wrong_questions_by_concept(questions, results)
 
     feedback = None
     next_quiz_recommendation = None
@@ -292,4 +321,6 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
         explanations=explanations,
         feedback=feedback,
         next_quiz_recommendation=next_quiz_recommendation,
+        profile_delta=profile_delta,
+        wrong_questions_by_concept=wrong_questions_by_concept,
     )

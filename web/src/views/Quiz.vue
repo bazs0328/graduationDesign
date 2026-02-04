@@ -78,6 +78,31 @@
           <p class="text-sm font-medium">
             {{ quizResult.correct }} / {{ quizResult.total }} 正确
           </p>
+          <div v-if="hasProfileDelta" class="space-y-2 text-left">
+            <p class="text-xs font-bold uppercase tracking-widest text-primary">能力变化</p>
+            <div class="grid grid-cols-2 gap-3 text-xs font-semibold">
+              <div class="bg-accent/40 rounded-lg p-3 space-y-1">
+                <p class="text-muted-foreground">准确率</p>
+                <p :class="profileDelta.recent_accuracy_delta >= 0 ? 'text-green-600' : 'text-red-600'">
+                  <span>{{ profileDelta.recent_accuracy_delta >= 0 ? '+' : '' }}</span>
+                  <AnimatedNumber :value="profileDelta.recent_accuracy_delta * 100" :decimals="1" />
+                  %
+                  <span class="ml-1">{{ profileDelta.recent_accuracy_delta >= 0 ? '↑' : '↓' }}</span>
+                </p>
+              </div>
+              <div class="bg-accent/40 rounded-lg p-3 space-y-1">
+                <p class="text-muted-foreground">挫败感</p>
+                <p :class="profileDelta.frustration_delta <= 0 ? 'text-green-600' : 'text-red-600'">
+                  <span>{{ profileDelta.frustration_delta >= 0 ? '+' : '' }}</span>
+                  <AnimatedNumber :value="profileDelta.frustration_delta" :decimals="2" />
+                  <span class="ml-1">{{ profileDelta.frustration_delta <= 0 ? '↓' : '↑' }}</span>
+                </p>
+              </div>
+            </div>
+            <div v-if="profileDelta.ability_level_changed" class="text-xs font-semibold text-primary bg-primary/10 border border-primary/30 rounded-lg px-3 py-2">
+              能力等级更新！继续保持进步节奏。
+            </div>
+          </div>
           <div v-if="quizResult.feedback" class="mt-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-left space-y-2">
             <p class="text-xs font-bold uppercase tracking-widest text-amber-600">学习建议</p>
             <p class="text-sm text-amber-700">{{ quizResult.feedback.message }}</p>
@@ -99,7 +124,7 @@
         </div>
 
         <div v-else-if="quiz" class="space-y-6">
-          <div v-for="(q, idx) in quiz.questions" :key="idx" class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4 transition-all" :class="{ 'border-primary/50 ring-1 ring-primary/20': quizResult }">
+          <div v-for="(q, idx) in quiz.questions" :id="`question-${idx + 1}`" :key="idx" class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4 transition-all" :class="{ 'border-primary/50 ring-1 ring-primary/20': quizResult }">
             <div class="flex items-start gap-4">
               <div class="flex-shrink-0 w-8 h-8 bg-accent text-accent-foreground rounded-lg flex items-center justify-center font-bold">
                 {{ idx + 1 }}
@@ -161,6 +186,35 @@
               再测一次
             </button>
           </div>
+          <div v-if="hasWrongGroups" class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-lg font-bold">错题知识点归类</h3>
+                <p class="text-xs text-muted-foreground">点击题号可跳转到对应题目</p>
+              </div>
+              <button
+                class="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity"
+                @click="generateTargetedQuiz"
+              >
+                针对薄弱点再练
+              </button>
+            </div>
+            <div class="grid grid-cols-1 gap-3">
+              <div v-for="group in wrongQuestionGroups" :key="group.concept" class="border border-border rounded-lg p-4 bg-accent/20">
+                <p class="text-sm font-semibold text-primary">{{ group.concept }}</p>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  <button
+                    v-for="index in group.question_indices"
+                    :key="index"
+                    class="px-3 py-1 text-xs font-semibold rounded-full bg-background border border-input hover:border-primary hover:text-primary transition-colors"
+                    @click="scrollToQuestion(index)"
+                  >
+                    第 {{ index }} 题
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div v-else class="bg-card border border-border rounded-xl p-20 flex flex-col items-center justify-center text-center space-y-6">
@@ -181,6 +235,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { PenTool, Sparkles, RefreshCw, CheckCircle2, XCircle } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
+import AnimatedNumber from '../components/ui/AnimatedNumber.vue'
 
 const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
 const resolvedUserId = computed(() => userId.value || 'default')
@@ -197,6 +252,11 @@ const busy = ref({
   submit: false
 })
 
+const profileDelta = computed(() => quizResult.value?.profile_delta || null)
+const hasProfileDelta = computed(() => !!profileDelta.value)
+const wrongQuestionGroups = computed(() => quizResult.value?.wrong_questions_by_concept || [])
+const hasWrongGroups = computed(() => wrongQuestionGroups.value.length > 0)
+
 async function refreshKbs() {
   try {
     kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(resolvedUserId.value)}`)
@@ -205,7 +265,7 @@ async function refreshKbs() {
   }
 }
 
-async function generateQuiz() {
+async function generateQuiz(options = {}) {
   if (!selectedKbId.value) return
   busy.value.quiz = true
   quiz.value = null
@@ -217,6 +277,9 @@ async function generateQuiz() {
       count: quizCount.value,
       user_id: resolvedUserId.value,
       auto_adapt: autoAdapt.value
+    }
+    if (options.focusConcepts?.length) {
+      payload.focus_concepts = options.focusConcepts
     }
     if (!autoAdapt.value) {
       payload.difficulty = quizDifficulty.value
@@ -245,6 +308,28 @@ async function submitQuiz() {
     console.error(err)
   } finally {
     busy.value.submit = false
+  }
+}
+
+function generateTargetedQuiz() {
+  const concepts = [
+    ...new Set(
+      wrongQuestionGroups.value
+        .map((group) => group.concept)
+        .filter((concept) => concept && String(concept).trim())
+    )
+  ]
+  if (!concepts.length) {
+    generateQuiz()
+    return
+  }
+  generateQuiz({ focusConcepts: concepts })
+}
+
+function scrollToQuestion(index) {
+  const target = document.getElementById(`question-${index}`)
+  if (target) {
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 }
 

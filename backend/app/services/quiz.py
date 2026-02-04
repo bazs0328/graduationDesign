@@ -51,12 +51,18 @@ def _build_context(
     doc_id: Optional[str],
     kb_id: Optional[str],
     reference_questions: Optional[str],
+    focus_concepts: Optional[List[str]] = None,
 ) -> str:
     """Build context from doc_id or kb_id (vectorstore), reference_questions, or placeholder."""
+    query = "key concepts and definitions"
+    if focus_concepts:
+        cleaned = [str(item).strip() for item in focus_concepts if str(item).strip()]
+        if cleaned:
+            query = ", ".join(cleaned)
     if doc_id:
         vectorstore = get_vectorstore(user_id)
         docs = vectorstore.similarity_search(
-            "key concepts and definitions", k=6, filter={"doc_id": doc_id}
+            query, k=6, filter={"doc_id": doc_id}
         )
         if not docs:
             raise ValueError("No relevant context found for quiz generation")
@@ -64,7 +70,7 @@ def _build_context(
     if kb_id:
         vectorstore = get_vectorstore(user_id)
         docs = vectorstore.similarity_search(
-            "key concepts and definitions", k=6, filter={"kb_id": kb_id}
+            query, k=6, filter={"kb_id": kb_id}
         )
         if not docs:
             raise ValueError("No relevant context found for quiz generation")
@@ -81,9 +87,17 @@ def _build_extra_instructions(
     style_prompt: Optional[str],
     reference_questions: Optional[str],
     context_is_from_reference: bool,
+    focus_concepts: Optional[List[str]] = None,
 ) -> str:
     """Build extra prompt section for mimic (style / reference questions)."""
     parts = []
+    if focus_concepts:
+        cleaned = [str(item).strip() for item in focus_concepts if str(item).strip()]
+        if cleaned:
+            parts.append(
+                "Focus on the following concepts when generating questions:\n"
+                f"{', '.join(cleaned)}\n\n"
+            )
     if reference_questions and not context_is_from_reference:
         text = reference_questions.strip()
         if len(text) > REFERENCE_QUESTIONS_MAX_CHARS:
@@ -103,15 +117,18 @@ def generate_quiz(
     count: int,
     difficulty: str,
     kb_id: Optional[str] = None,
+    focus_concepts: Optional[List[str]] = None,
     style_prompt: Optional[str] = None,
     reference_questions: Optional[str] = None,
 ) -> List[dict]:
-    context = _build_context(user_id, doc_id, kb_id, reference_questions)
+    context = _build_context(
+        user_id, doc_id, kb_id, reference_questions, focus_concepts
+    )
     context_is_from_reference = not doc_id and not kb_id and bool(
         reference_questions and reference_questions.strip()
     )
     extra = _build_extra_instructions(
-        style_prompt, reference_questions, context_is_from_reference
+        style_prompt, reference_questions, context_is_from_reference, focus_concepts
     )
 
     llm = get_llm(temperature=0.4)

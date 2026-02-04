@@ -15,12 +15,14 @@ def _mock_generate_quiz(*args, **kwargs):
             "options": ["A", "B", "C", "D"],
             "answer_index": 0,
             "explanation": "Mock explanation 1",
+            "concepts": ["概念A"],
         },
         {
             "question": "Mock question 2?",
             "options": ["W", "X", "Y", "Z"],
             "answer_index": 1,
             "explanation": "Mock explanation 2",
+            "concepts": ["概念B"],
         },
     ]
 
@@ -156,7 +158,7 @@ def test_quiz_submit_after_generate(client, seeded_session):
         json={
             "quiz_id": quiz_id,
             "user_id": seeded_session["user_id"],
-            "answers": [0, 1],
+            "answers": [1, 1],
         },
     )
     assert submit.status_code == 200
@@ -166,6 +168,15 @@ def test_quiz_submit_after_generate(client, seeded_session):
     assert sub["total"] == 2
     assert len(sub["results"]) == 2
     assert len(sub["explanations"]) == 2
+    assert "profile_delta" in sub
+    assert "recent_accuracy_delta" in sub["profile_delta"]
+    assert "frustration_delta" in sub["profile_delta"]
+    assert "ability_level_changed" in sub["profile_delta"]
+    assert "wrong_questions_by_concept" in sub
+    assert any(
+        group["concept"] == "概念A" and 1 in group["question_indices"]
+        for group in sub["wrong_questions_by_concept"]
+    )
 
 
 def test_quiz_generate_with_nonexistent_doc_returns_404(client, seeded_session):

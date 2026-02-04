@@ -98,6 +98,7 @@ class QuizGenerateRequest(BaseModel):
     difficulty: Optional[str] = None
     auto_adapt: bool = True
     user_id: Optional[str] = None
+    focus_concepts: Optional[List[str]] = None
     style_prompt: Optional[str] = None
     reference_questions: Optional[str] = None
 
@@ -131,6 +132,18 @@ class NextQuizRecommendation(BaseModel):
     focus_concepts: List[str] = []
 
 
+class ProfileDelta(BaseModel):
+    theta_delta: float
+    frustration_delta: float
+    recent_accuracy_delta: float
+    ability_level_changed: bool
+
+
+class WrongQuestionGroup(BaseModel):
+    concept: str
+    question_indices: List[int]
+
+
 class QuizSubmitResponse(BaseModel):
     score: float
     correct: int
@@ -139,6 +152,8 @@ class QuizSubmitResponse(BaseModel):
     explanations: List[str]
     feedback: Optional[QuizFeedback] = None
     next_quiz_recommendation: Optional[NextQuizRecommendation] = None
+    profile_delta: Optional[ProfileDelta] = None
+    wrong_questions_by_concept: List[WrongQuestionGroup] = []
 
 
 class DifficultyPlan(BaseModel):

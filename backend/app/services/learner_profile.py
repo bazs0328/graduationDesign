@@ -1,11 +1,11 @@
 import json
 from collections import Counter
-from typing import Iterable, List
+from typing import Iterable, List, Tuple
 
 from sqlalchemy.orm import Session
 
 from app.models import LearnerProfile
-from app.schemas import DifficultyPlan
+from app.schemas import DifficultyPlan, ProfileDelta
 
 ABILITY_LEVELS = ("beginner", "intermediate", "advanced")
 
@@ -91,9 +91,13 @@ def update_profile_after_quiz(
     user_id: str,
     accuracy: float,
     wrong_concepts: List[str],
-) -> LearnerProfile:
+) -> Tuple[LearnerProfile, ProfileDelta]:
     """Update learner profile based on quiz results."""
     profile = get_or_create_profile(db, user_id)
+    before_theta = profile.theta
+    before_ability_level = profile.ability_level
+    before_frustration = profile.frustration_score
+    before_recent_accuracy = profile.recent_accuracy
 
     if profile.total_attempts == 0:
         profile.recent_accuracy = accuracy
@@ -124,7 +128,14 @@ def update_profile_after_quiz(
     _maybe_update_ability(profile)
     db.commit()
     db.refresh(profile)
-    return profile
+
+    delta = ProfileDelta(
+        theta_delta=profile.theta - before_theta,
+        frustration_delta=profile.frustration_score - before_frustration,
+        recent_accuracy_delta=profile.recent_accuracy - before_recent_accuracy,
+        ability_level_changed=profile.ability_level != before_ability_level,
+    )
+    return profile, delta
 
 
 def _maybe_update_ability(profile: LearnerProfile) -> None:

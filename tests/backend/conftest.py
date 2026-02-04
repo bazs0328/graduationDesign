@@ -9,6 +9,16 @@ from pathlib import Path
 _test_data_dir = tempfile.mkdtemp(prefix="gradtutor_test_")
 os.environ["DATA_DIR"] = _test_data_dir
 
+# Set test API keys before any app imports to avoid initialization errors
+# These are dummy values since tests mock LLM calls
+os.environ.setdefault("LLM_PROVIDER", "qwen")
+os.environ.setdefault("EMBEDDING_PROVIDER", "dashscope")
+os.environ.setdefault("QWEN_API_KEY", "test_key_for_pytest")
+os.environ.setdefault("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+os.environ.setdefault("QWEN_MODEL", "qwen-plus")
+os.environ.setdefault("QWEN_EMBEDDING_MODEL", "text-embedding-v4")
+os.environ.setdefault("DASHSCOPE_EMBEDDING_MODEL", "qwen3-vl-embedding")
+
 # Ensure backend is on path (conftest lives in tests/backend/)
 _project_root = Path(__file__).resolve().parent.parent.parent
 _backend = _project_root / "backend"
