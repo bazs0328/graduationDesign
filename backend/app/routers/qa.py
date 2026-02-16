@@ -9,6 +9,7 @@ from app.core.knowledge_bases import ensure_kb
 from app.db import get_db
 from app.models import ChatMessage, ChatSession, Document, QARecord
 from app.schemas import QARequest, QAResponse, SourceSnippet
+from app.services.learner_profile import get_or_create_profile, get_weak_concepts
 from app.services.qa import answer_question
 
 router = APIRouter()
@@ -84,6 +85,9 @@ def ask_question(payload: QARequest, db: Session = Depends(get_db)):
             history_rows = list(reversed(history_rows))
             history = "\n".join(f"{row.role}: {row.content}" for row in history_rows)
 
+    profile = get_or_create_profile(db, resolved_user_id)
+    weak_concepts = get_weak_concepts(profile)
+
     answer, sources = answer_question(
         resolved_user_id,
         payload.question,
@@ -92,6 +96,8 @@ def ask_question(payload: QARequest, db: Session = Depends(get_db)):
         history=history,
         top_k=payload.top_k,
         fetch_k=payload.fetch_k,
+        ability_level=profile.ability_level,
+        weak_concepts=weak_concepts,
     )
 
     record = QARecord(
@@ -143,4 +149,5 @@ def ask_question(payload: QARequest, db: Session = Depends(get_db)):
         answer=answer,
         sources=[SourceSnippet(**s) for s in sources],
         session_id=session.id if session else None,
+        ability_level=profile.ability_level,
     )

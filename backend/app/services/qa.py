@@ -8,21 +8,68 @@ from app.services.lexical import bm25_search
 from app.core.vectorstore import get_vectorstore
 
 
-QA_SYSTEM = (
-    "You are a helpful tutor. Answer based on the provided context. "
-    "If the answer is not in the context, say you do not know. "
-    "Cite sources using bracket numbers like [1], [2]."
+_QA_HUMAN_TEMPLATE = (
+    "Conversation history:\n{history}\n\nQuestion: {question}\n\nContext:\n{context}\n\nAnswer:"
 )
 
-QA_PROMPT = ChatPromptTemplate.from_messages(
-    [
-        ("system", QA_SYSTEM),
-        (
-            "human",
-            "Conversation history:\n{history}\n\nQuestion: {question}\n\nContext:\n{context}\n\nAnswer:",
-        ),
-    ]
-)
+ADAPTIVE_SYSTEM_PROMPTS = {
+    "beginner": (
+        "你是一位耐心的辅导老师，正在帮助一位初学者。\n"
+        "- 使用简单易懂的日常语言，避免专业术语。\n"
+        "- 遇到必须使用的术语时，用括号给出通俗解释。\n"
+        "- 多用类比和生活中的例子帮助理解。\n"
+        "- 回答结构清晰，尽量分步骤讲解。\n"
+        "- 在回答末尾给出一个简短的理解检查问题。"
+    ),
+    "intermediate": (
+        "你是一位专业的学习导师，正在帮助一位有一定基础的学习者。\n"
+        "- 可以适当使用专业术语，但对关键术语给出简要解释。\n"
+        "- 回答兼顾深度与易读性。\n"
+        "- 适当提及相关概念之间的联系。\n"
+        "- 鼓励学习者进一步思考和拓展。"
+    ),
+    "advanced": (
+        "你是一位学术顾问，正在与一位高水平学习者交流。\n"
+        "- 可以自由使用专业术语和学术表达。\n"
+        "- 提供深入分析，讨论底层原理和边界情况。\n"
+        "- 给出可继续研究的方向或扩展阅读线索。\n"
+        "- 鼓励批判性思考，并提出开放式问题。"
+    ),
+}
+
+
+def build_adaptive_system_prompt(
+    ability_level: str = "intermediate",
+    weak_concepts: list[str] | None = None,
+) -> str:
+    normalized_level = (ability_level or "intermediate").strip().lower()
+    if normalized_level not in ADAPTIVE_SYSTEM_PROMPTS:
+        normalized_level = "intermediate"
+    base_prompt = ADAPTIVE_SYSTEM_PROMPTS[normalized_level]
+
+    prompt_parts = [base_prompt]
+    if weak_concepts:
+        concepts = [concept.strip() for concept in weak_concepts if concept and concept.strip()]
+        if concepts:
+            prompt_parts.append(
+                "学习者当前薄弱知识点："
+                + "、".join(concepts[:5])
+                + "。如果问题涉及这些知识点，请给出更细致的解释。"
+            )
+    prompt_parts.append(
+        "仅根据提供的上下文回答问题。如果上下文中没有相关信息，请明确说明不知道。"
+        "使用 [1]、[2] 这种形式标注引用来源。"
+    )
+    return "\n".join(prompt_parts)
+
+
+def build_qa_prompt(system_prompt: str) -> ChatPromptTemplate:
+    return ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            ("human", _QA_HUMAN_TEMPLATE),
+        ]
+    )
 
 
 def answer_question(
@@ -33,6 +80,8 @@ def answer_question(
     history: str | None = None,
     top_k: int | None = None,
     fetch_k: int | None = None,
+    ability_level: str = "intermediate",
+    weak_concepts: list[str] | None = None,
 ) -> Tuple[str, List[dict]]:
     docs = retrieve_documents(
         user_id=user_id,
@@ -47,8 +96,13 @@ def answer_question(
 
     sources, context = build_sources_and_context(docs)
 
+    system_prompt = build_adaptive_system_prompt(
+        ability_level=ability_level,
+        weak_concepts=weak_concepts,
+    )
+    qa_prompt = build_qa_prompt(system_prompt)
     llm = get_llm(temperature=0.2)
-    msg = QA_PROMPT.format_messages(
+    msg = qa_prompt.format_messages(
         question=question, context=context, history=history or "None"
     )
     result = llm.invoke(msg)

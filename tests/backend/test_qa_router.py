@@ -1,4 +1,5 @@
 """Tests for QA router."""
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.models import ChatMessage
@@ -39,6 +40,31 @@ def test_qa_with_kb_id_success(client, seeded_session):
     assert data["answer"] == "mock answer from LLM"
     assert isinstance(data["sources"], list)
     assert len(data["sources"]) > 0
+
+
+def test_qa_passes_adaptive_profile_to_service(client, seeded_session):
+    """POST /api/qa passes profile ability/weak concepts and returns ability_level."""
+    profile = SimpleNamespace(ability_level="advanced")
+    with (
+        patch("app.routers.qa.get_or_create_profile", return_value=profile),
+        patch("app.routers.qa.get_weak_concepts", return_value=["矩阵", "特征值"]),
+        patch("app.routers.qa.answer_question", side_effect=_mock_answer) as mocked_answer,
+    ):
+        resp = client.post(
+            "/api/qa",
+            json={
+                "kb_id": seeded_session["kb_id"],
+                "user_id": seeded_session["user_id"],
+                "question": "What is a matrix?",
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ability_level"] == "advanced"
+    kwargs = mocked_answer.call_args.kwargs
+    assert kwargs["ability_level"] == "advanced"
+    assert kwargs["weak_concepts"] == ["矩阵", "特征值"]
 
 
 def test_qa_with_invalid_session_id_returns_404(client, seeded_session):

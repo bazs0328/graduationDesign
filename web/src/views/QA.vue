@@ -31,6 +31,13 @@
               <div class="flex items-center gap-2 mb-1 opacity-70 text-[10px] font-bold uppercase tracking-wider">
                 <component :is="msg.role === 'question' ? 'User' : 'Bot'" class="w-3 h-3" />
                 {{ msg.role === 'question' ? '你' : 'AI 辅导' }}
+                <span
+                  v-if="msg.role !== 'question' && msg.abilityLevel"
+                  class="ml-auto px-1.5 py-0.5 rounded-full border text-[9px] font-semibold normal-case tracking-normal"
+                  :class="getLevelMeta(msg.abilityLevel).badgeClass"
+                >
+                  {{ getLevelMeta(msg.abilityLevel).text }}
+                </span>
               </div>
               <p class="text-sm leading-relaxed whitespace-pre-wrap">{{ msg.content }}</p>
               
@@ -141,6 +148,17 @@
             <p>选择知识库以开始提问</p>
           </div>
         </div>
+
+        <div class="bg-card border border-border rounded-xl p-4 shadow-sm">
+          <p class="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">学习适应等级</p>
+          <div class="mt-2 flex items-center justify-between gap-3">
+            <p class="text-sm font-semibold">{{ currentLevelMeta.text }}</p>
+            <span class="text-[10px] font-semibold px-2 py-1 rounded-full border" :class="currentLevelMeta.badgeClass">
+              {{ currentLevelMeta.code }}
+            </span>
+          </div>
+          <p class="mt-2 text-xs text-muted-foreground">{{ currentLevelMeta.description }}</p>
+        </div>
       </aside>
     </div>
   </div>
@@ -159,10 +177,32 @@ const selectedKbId = ref('')
 const selectedDocId = ref('')
 const qaInput = ref('')
 const qaMessages = ref([])
+const qaAbilityLevel = ref('intermediate')
 const busy = ref({
   qa: false
 })
 const scrollContainer = ref(null)
+
+const LEVEL_LABELS = {
+  beginner: {
+    text: '基础模式',
+    code: 'BEGINNER',
+    badgeClass: 'text-green-700 bg-green-100 border-green-200',
+    description: '回答会更通俗、分步骤，并尽量减少术语。',
+  },
+  intermediate: {
+    text: '进阶模式',
+    code: 'INTERMEDIATE',
+    badgeClass: 'text-blue-700 bg-blue-100 border-blue-200',
+    description: '回答兼顾清晰度与专业度，适合有一定基础的学习者。',
+  },
+  advanced: {
+    text: '专家模式',
+    code: 'ADVANCED',
+    badgeClass: 'text-purple-700 bg-purple-100 border-purple-200',
+    description: '回答会更深入，包含更多术语、原理和扩展思路。',
+  },
+}
 
 const selectedKb = computed(() => {
   return kbs.value.find(k => k.id === selectedKbId.value) || null
@@ -171,6 +211,20 @@ const selectedKb = computed(() => {
 const selectedDoc = computed(() => {
   return docsInKb.value.find(d => d.id === selectedDocId.value) || null
 })
+
+const currentLevelMeta = computed(() => getLevelMeta(qaAbilityLevel.value))
+
+function normalizeAbilityLevel(level) {
+  const normalized = (level || '').toString().trim().toLowerCase()
+  if (normalized === 'beginner' || normalized === 'intermediate' || normalized === 'advanced') {
+    return normalized
+  }
+  return 'intermediate'
+}
+
+function getLevelMeta(level) {
+  return LEVEL_LABELS[normalizeAbilityLevel(level)] || LEVEL_LABELS.intermediate
+}
 
 async function refreshKbs() {
   try {
@@ -189,6 +243,16 @@ async function refreshDocsInKb() {
     docsInKb.value = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(selectedKbId.value)}`)
   } catch (err) {
     console.error(err)
+  }
+}
+
+async function refreshAbilityLevel() {
+  try {
+    const profile = await apiGet(`/api/profile?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    qaAbilityLevel.value = normalizeAbilityLevel(profile?.ability_level)
+  } catch (err) {
+    console.error(err)
+    qaAbilityLevel.value = 'intermediate'
   }
 }
 
@@ -214,7 +278,14 @@ async function askQuestion() {
     }
 
     const res = await apiPost('/api/qa', payload)
-    qaMessages.value.push({ role: 'answer', content: res.answer, sources: res.sources })
+    const responseLevel = normalizeAbilityLevel(res?.ability_level || qaAbilityLevel.value)
+    qaAbilityLevel.value = responseLevel
+    qaMessages.value.push({
+      role: 'answer',
+      content: res.answer,
+      sources: res.sources,
+      abilityLevel: responseLevel,
+    })
   } catch (err) {
     qaMessages.value.push({ role: 'answer', content: '错误：' + err.message })
   } finally {
@@ -232,7 +303,7 @@ function scrollToBottom() {
 }
 
 onMounted(async () => {
-  await refreshKbs()
+  await Promise.all([refreshKbs(), refreshAbilityLevel()])
 })
 
 watch(selectedKbId, () => {

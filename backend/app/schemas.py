@@ -89,6 +89,7 @@ class QAResponse(BaseModel):
     answer: str
     sources: List[SourceSnippet] = []
     session_id: Optional[str] = None
+    ability_level: Optional[str] = None
 
 
 class QuizGenerateRequest(BaseModel):
