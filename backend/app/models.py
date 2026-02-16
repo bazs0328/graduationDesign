@@ -156,3 +156,15 @@ class LearnerProfile(Base):
     total_attempts = Column(Integer, default=0)
     consecutive_low_scores = Column(Integer, default=0)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class KeypointDependency(Base):
+    __tablename__ = "keypoint_dependencies"
+
+    id = Column(String, primary_key=True, index=True)
+    kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=False, index=True)
+    from_keypoint_id = Column(String, ForeignKey("keypoints_v2.id"), nullable=False)
+    to_keypoint_id = Column(String, ForeignKey("keypoints_v2.id"), nullable=False)
+    relation = Column(String, default="prerequisite")
+    confidence = Column(Float, default=1.0)
+    created_at = Column(DateTime, default=datetime.utcnow)

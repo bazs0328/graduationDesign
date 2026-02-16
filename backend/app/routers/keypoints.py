@@ -11,6 +11,7 @@ from app.db import get_db
 from app.models import Document, Keypoint, KeypointRecord
 from app.schemas import KeypointItemV2, KeypointsRequest, KeypointsResponse
 from app.services.keypoints import extract_keypoints, save_keypoints_to_db
+from app.services.learning_path import invalidate_dependency_cache
 from app.utils.json_tools import safe_json_loads
 
 router = APIRouter()
@@ -137,6 +138,9 @@ def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(get_db))
         kb_id=doc.kb_id,
         overwrite=payload.force,
     )
+    # Invalidate learning-path dependency cache so it rebuilds with new keypoints
+    invalidate_dependency_cache(db, doc.kb_id)
+
     store = [
         {
             "text": kp.text,

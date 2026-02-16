@@ -298,6 +298,15 @@ class LearningPathItem(BaseModel):
     doc_name: Optional[str] = None
     mastery_level: float
     priority: str
+    step: int = 0
+    prerequisites: List[str] = []
+    action: str = "study"
+
+
+class LearningPathEdge(BaseModel):
+    from_id: str
+    to_id: str
+    relation: str = "prerequisite"
 
 
 class RecommendationsResponse(BaseModel):
@@ -305,3 +314,4 @@ class RecommendationsResponse(BaseModel):
     kb_name: Optional[str] = None
     items: List[RecommendationItem]
     learning_path: List[LearningPathItem] = []
+    learning_path_edges: List[LearningPathEdge] = []
