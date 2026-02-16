@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,44 +7,18 @@ from sqlalchemy.orm import Session
 from app.core.knowledge_bases import ensure_kb
 from app.core.users import ensure_user
 from app.db import get_db
-from app.models import Document, Keypoint, KeypointRecord, QARecord, Quiz, SummaryRecord
+from app.models import Document, KeypointRecord, QARecord, Quiz, SummaryRecord
 from app.schemas import (
-    LearningPathItem,
     RecommendationAction,
     RecommendationItem,
     RecommendationsResponse,
 )
 from app.services.learner_profile import get_or_create_profile, get_weak_concepts
+from app.services.learning_path import generate_learning_path
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def _build_learning_path(
-    keypoints: list[Keypoint], doc_map: dict[str, str], limit: int = 10
-) -> list[LearningPathItem]:
-    sorted_keypoints = sorted(
-        keypoints, key=lambda item: (item.mastery_level or 0.0, item.attempt_count or 0)
-    )
-    items: list[LearningPathItem] = []
-    for keypoint in sorted_keypoints[:limit]:
-        mastery_level = keypoint.mastery_level or 0.0
-        if mastery_level < 0.3:
-            priority = "high"
-        elif mastery_level < 0.7:
-            priority = "medium"
-        else:
-            priority = "low"
-        items.append(
-            LearningPathItem(
-                keypoint_id=keypoint.id,
-                text=keypoint.text,
-                doc_id=keypoint.doc_id,
-                doc_name=doc_map.get(keypoint.doc_id),
-                mastery_level=mastery_level,
-                priority=priority,
-            )
-        )
-    return items
 
 
 @router.get("/recommendations", response_model=RecommendationsResponse)
@@ -113,16 +88,13 @@ def get_recommendations(
         .all()
     }
 
-    doc_map = {doc.id: doc.filename for doc in docs}
-    keypoints = (
-        db.query(Keypoint)
-        .filter(
-            Keypoint.user_id == resolved_user_id,
-            Keypoint.kb_id == kb.id,
+    try:
+        learning_path, learning_path_edges = generate_learning_path(
+            db, resolved_user_id, kb.id, limit=10
         )
-        .all()
-    )
-    learning_path = _build_learning_path(keypoints, doc_map, limit=10)
+    except Exception:
+        logger.exception("Failed to generate learning path, returning empty")
+        learning_path, learning_path_edges = [], []
 
     ranked_items = []
     for doc in docs:
@@ -188,4 +160,5 @@ def get_recommendations(
         kb_name=kb.name,
         items=items,
         learning_path=learning_path,
+        learning_path_edges=learning_path_edges,
     )

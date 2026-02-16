@@ -91,3 +91,9 @@ export async function getDifficultyPlan(userId) {
   const query = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
   return apiGet(`/api/profile/difficulty-plan${query}`)
 }
+
+export async function buildLearningPath(userId, kbId, force = false) {
+  const params = new URLSearchParams({ kb_id: kbId, force: String(force) })
+  if (userId) params.set('user_id', userId)
+  return apiPost(`/api/learning-path/build?${params}`)
+}

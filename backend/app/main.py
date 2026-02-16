@@ -12,6 +12,7 @@ from app.routers import (
     health,
     keypoints,
     knowledge_bases,
+    learning_path,
     progress,
     qa,
     quiz,
@@ -47,6 +48,7 @@ def create_app() -> FastAPI:
     app.include_router(quiz.router, prefix="/api")
     app.include_router(profile.router, prefix="/api")
     app.include_router(recommendations.router, prefix="/api")
+    app.include_router(learning_path.router, prefix="/api")
     app.include_router(progress.router, prefix="/api")
 
     return app

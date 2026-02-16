@@ -205,6 +205,28 @@ def ensure_schema():
                 )
             conn.commit()
 
+        # -- keypoint_dependencies table --
+        result = conn.execute(text("PRAGMA table_info(keypoint_dependencies)"))
+        cols = {row[1] for row in result}
+        if not cols:
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS keypoint_dependencies ("
+                    "id VARCHAR PRIMARY KEY, "
+                    "kb_id VARCHAR NOT NULL, "
+                    "from_keypoint_id VARCHAR NOT NULL, "
+                    "to_keypoint_id VARCHAR NOT NULL, "
+                    "relation VARCHAR DEFAULT 'prerequisite', "
+                    "confidence FLOAT DEFAULT 1.0, "
+                    "created_at DATETIME, "
+                    "FOREIGN KEY(kb_id) REFERENCES knowledge_bases(id), "
+                    "FOREIGN KEY(from_keypoint_id) REFERENCES keypoints_v2(id), "
+                    "FOREIGN KEY(to_keypoint_id) REFERENCES keypoints_v2(id)"
+                    ")"
+                )
+            )
+            conn.commit()
+
 
 def get_db():
     db = SessionLocal()

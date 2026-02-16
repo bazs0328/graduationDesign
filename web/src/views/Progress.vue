@@ -78,9 +78,89 @@
             <p>该知识库暂无推荐。</p>
           </div>
         </section>
+
+        <!-- Learning Path -->
+        <section class="bg-card border border-border rounded-xl p-8 shadow-sm space-y-6">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <GitBranch class="w-6 h-6 text-primary" />
+              <h2 class="text-2xl font-bold">学习路径</h2>
+            </div>
+            <div class="flex items-center gap-2">
+              <button @click="rebuildPath" class="p-2 hover:bg-accent rounded-lg transition-colors text-xs flex items-center gap-1" :disabled="busy.pathBuild">
+                <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': busy.pathBuild }" />
+                <span class="hidden sm:inline">重建</span>
+              </button>
+            </div>
+          </div>
+
+          <div v-if="learningPath.length" class="space-y-4">
+            <!-- ECharts graph -->
+            <div class="border border-border rounded-lg bg-background p-2">
+              <VChart ref="pathChartRef" class="w-full h-[360px]" :option="pathChartOption" autoresize />
+            </div>
+
+            <!-- Legend -->
+            <div class="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-foreground">文档颜色：</span>
+                <span v-for="(color, docName) in docColorLegend" :key="docName" class="inline-flex items-center gap-1">
+                  <span class="w-3 h-3 rounded-full inline-block" :style="{ background: color }"></span>
+                  <span class="truncate max-w-[100px]">{{ docName }}</span>
+                </span>
+              </div>
+              <span class="text-border">|</span>
+              <div class="flex items-center gap-3">
+                <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-foreground inline-block"></span> 待学习</span>
+                <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-foreground/40 inline-block"></span> 已掌握</span>
+              </div>
+            </div>
+
+            <!-- Step list (compact) -->
+            <details class="group">
+              <summary class="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
+                <ChevronDown class="w-4 h-4 transition-transform group-open:rotate-180" />
+                查看详细步骤列表（{{ learningPath.length }} 项）
+              </summary>
+              <div class="mt-3 space-y-2 max-h-[300px] overflow-y-auto pr-2">
+                <div v-for="item in learningPath" :key="item.keypoint_id"
+                  class="flex items-start gap-3 p-3 border border-border rounded-lg text-sm"
+                  :class="{ 'opacity-50': item.priority === 'completed' }">
+                  <span class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
+                    :class="stepBadgeClass(item.priority)">
+                    {{ item.step }}
+                  </span>
+                  <div class="flex-1 min-w-0 space-y-1">
+                    <p class="font-medium leading-tight">{{ item.text }}</p>
+                    <div class="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span class="truncate max-w-[120px]">{{ item.doc_name || '文档' }}</span>
+                      <span>·</span>
+                      <span>掌握度 {{ Math.round(item.mastery_level * 100) }}%</span>
+                    </div>
+                    <div v-if="item.prerequisites.length" class="text-xs text-orange-500">
+                      需先学习：{{ item.prerequisites.join('、') }}
+                    </div>
+                  </div>
+                  <button v-if="item.priority !== 'completed'"
+                    class="flex-shrink-0 px-3 py-1 bg-primary/10 text-primary rounded-md text-xs font-medium hover:bg-primary/20 transition-colors"
+                    @click="goToAction(item)">
+                    {{ actionBtnLabel(item.action) }}
+                  </button>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <!-- Empty state -->
+          <div v-else-if="!busy.recommendations" class="py-12 text-center text-muted-foreground bg-accent/20 rounded-xl space-y-2">
+            <GitBranch class="w-10 h-10 mx-auto opacity-30" />
+            <p>请先为知识库内的文档生成知识点</p>
+            <p class="text-xs">生成知识点后，系统将自动分析知识点间的依赖关系并规划学习路径</p>
+          </div>
+        </section>
       </div>
 
-      <!-- Right: Activity Feed -->
+    <!-- Right: Activity Feed -->
       <section class="bg-card border border-border rounded-xl p-6 shadow-sm flex flex-col h-[750px]">
         <div class="flex items-center gap-3 mb-6">
           <Activity class="w-6 h-6 text-primary" />
@@ -112,6 +192,7 @@
 
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { 
   BarChart2, 
   FileText, 
@@ -123,21 +204,35 @@ import {
   RefreshCw,
   Clock,
   TrendingUp,
-  CheckCircle2
+  CheckCircle2,
+  GitBranch,
+  ChevronDown
 } from 'lucide-vue-next'
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { GraphChart } from 'echarts/charts'
+import { TooltipComponent, LegendComponent } from 'echarts/components'
+import VChart from 'vue-echarts'
 import LearnerProfileCard from '../components/LearnerProfileCard.vue'
-import { apiGet, getProfile } from '../api'
+import { apiGet, apiPost, getProfile, buildLearningPath } from '../api'
 
+use([CanvasRenderer, GraphChart, TooltipComponent, LegendComponent])
+
+const router = useRouter()
 const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
 const resolvedUserId = computed(() => userId.value || 'default')
 const progress = ref(null)
 const profile = ref(null)
 const activity = ref([])
 const recommendations = ref([])
+const learningPath = ref([])
+const learningPathEdges = ref([])
 const kbs = ref([])
 const selectedKbId = ref('')
+const pathChartRef = ref(null)
 const busy = ref({
-  recommendations: false
+  recommendations: false,
+  pathBuild: false,
 })
 
 const topStats = computed(() => {
@@ -196,10 +291,25 @@ async function fetchRecommendations() {
   try {
     const res = await apiGet(`/api/recommendations?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(selectedKbId.value)}&limit=6`)
     recommendations.value = res.items || []
+    learningPath.value = res.learning_path || []
+    learningPathEdges.value = res.learning_path_edges || []
   } catch (err) {
     console.error(err)
   } finally {
     busy.value.recommendations = false
+  }
+}
+
+async function rebuildPath() {
+  if (!selectedKbId.value) return
+  busy.value.pathBuild = true
+  try {
+    await buildLearningPath(resolvedUserId.value, selectedKbId.value, true)
+    await fetchRecommendations()
+  } catch (err) {
+    console.error(err)
+  } finally {
+    busy.value.pathBuild = false
   }
 }
 
@@ -231,6 +341,119 @@ function actionLabel(type) {
     case 'review': return '复习'
     case 'challenge': return '挑战'
     default: return type
+  }
+}
+
+// -- Learning path chart --
+const DOC_PALETTE = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
+
+const docColorMap = computed(() => {
+  const map = {}
+  const docIds = [...new Set(learningPath.value.map(i => i.doc_id))]
+  docIds.forEach((id, idx) => { map[id] = DOC_PALETTE[idx % DOC_PALETTE.length] })
+  return map
+})
+
+const docColorLegend = computed(() => {
+  const legend = {}
+  for (const item of learningPath.value) {
+    const name = item.doc_name || item.doc_id
+    if (!legend[name]) legend[name] = docColorMap.value[item.doc_id]
+  }
+  return legend
+})
+
+const pathChartOption = computed(() => {
+  if (!learningPath.value.length) return {}
+
+  const colors = docColorMap.value
+  const nodes = learningPath.value.map((item) => {
+    const isMastered = item.mastery_level >= 0.8
+    const sizeMap = { high: 50, medium: 40, low: 30, completed: 25 }
+    return {
+      id: item.keypoint_id,
+      name: item.text.length > 18 ? item.text.slice(0, 18) + '…' : item.text,
+      symbolSize: sizeMap[item.priority] || 35,
+      x: item.step * 120,
+      y: Object.keys(colors).indexOf(colors[item.doc_id]?.toString()) * 80 + Math.random() * 30,
+      itemStyle: {
+        color: colors[item.doc_id] || '#666',
+        opacity: isMastered ? 0.35 : 1,
+        borderColor: isMastered ? '#888' : colors[item.doc_id] || '#666',
+        borderWidth: 2,
+      },
+      label: {
+        show: true,
+        position: 'bottom',
+        fontSize: 10,
+        color: 'inherit',
+        overflow: 'truncate',
+        width: 100,
+      },
+      tooltip: {
+        formatter: () => {
+          const prereqs = item.prerequisites.length ? `<br/><span style="color:#f59e0b">前置：${item.prerequisites.join('、')}</span>` : ''
+          return `<b>${item.text}</b><br/>文档：${item.doc_name || '—'}<br/>掌握度：${Math.round(item.mastery_level * 100)}%<br/>优先级：${item.priority}${prereqs}`
+        }
+      },
+      _raw: item,
+    }
+  })
+
+  const links = learningPathEdges.value
+    .filter(e => nodes.some(n => n.id === e.from_id) && nodes.some(n => n.id === e.to_id))
+    .map(e => ({
+      source: e.from_id,
+      target: e.to_id,
+      lineStyle: { color: '#999', width: 1.5, curveness: 0.2 },
+      symbol: ['none', 'arrow'],
+      symbolSize: [0, 8],
+    }))
+
+  return {
+    tooltip: { trigger: 'item', backgroundColor: 'rgba(0,0,0,0.75)', textStyle: { color: '#fff', fontSize: 12 } },
+    series: [{
+      type: 'graph',
+      layout: 'force',
+      roam: true,
+      draggable: true,
+      force: { repulsion: 200, gravity: 0.05, edgeLength: [80, 200] },
+      data: nodes,
+      links,
+      edgeSymbol: ['none', 'arrow'],
+      edgeSymbolSize: [0, 8],
+      emphasis: {
+        focus: 'adjacency',
+        lineStyle: { width: 3 },
+      },
+      lineStyle: { opacity: 0.6 },
+    }],
+    animationDuration: 800,
+  }
+})
+
+function stepBadgeClass(priority) {
+  const map = {
+    high: 'bg-red-500/15 text-red-600 border border-red-500/30',
+    medium: 'bg-yellow-500/15 text-yellow-600 border border-yellow-500/30',
+    low: 'bg-green-500/15 text-green-600 border border-green-500/30',
+    completed: 'bg-muted text-muted-foreground border border-border',
+  }
+  return map[priority] || map.medium
+}
+
+function actionBtnLabel(action) {
+  const map = { study: '去学习', quiz: '去测验', review: '去复习' }
+  return map[action] || '去学习'
+}
+
+function goToAction(item) {
+  if (item.action === 'quiz') {
+    router.push('/quiz')
+  } else if (item.action === 'study') {
+    router.push('/summary')
+  } else {
+    router.push('/qa')
   }
 }
 
