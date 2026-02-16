@@ -28,7 +28,7 @@ DEPENDENCY_SYSTEM = (
     "- Do NOT output every possible association; only strong prerequisites.\n"
     "- Within the same document, infer order from the knowledge progression.\n"
     "- Across documents, infer from semantic dependency (e.g. 'derivatives' requires 'limits').\n"
-    "- Return a JSON array of objects: [{\"from_id\": \"...\", \"to_id\": \"...\"}]\n"
+    '- Return a JSON array of objects: [{{"from_id": "...", "to_id": "..."}}]\n'
     "  where from_id is the prerequisite and to_id depends on it.\n"
     "- If there are no clear prerequisites, return an empty array [].\n"
     "- Return ONLY the JSON array, no extra text."
