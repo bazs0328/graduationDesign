@@ -1,4 +1,12 @@
+import { useToast } from './composables/useToast'
+
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+
+let globalErrorToast = false
+
+export function enableGlobalErrorToast() {
+  globalErrorToast = true
+}
 
 async function request(path, options = {}) {
   const fullUrl = `${API_BASE}${path}`
@@ -10,39 +18,48 @@ async function request(path, options = {}) {
     signal = controller.signal
     abortId = setTimeout(() => controller.abort(), 15000)
   }
-  const res = await fetch(fullUrl, { ...options, signal })
-  if (abortId) clearTimeout(abortId)
-  if (!res.ok) {
-    const text = await res.text()
-    try {
-      const data = JSON.parse(text)
-      if (data && data.detail) {
-        if (Array.isArray(data.detail)) {
-          const message = data.detail
-            .map((item) => {
-              if (!item || typeof item !== 'object') {
-                return String(item)
-              }
-              const loc = Array.isArray(item.loc) ? item.loc.join('.') : ''
-              const msg = item.msg || item.message || JSON.stringify(item)
-              return loc ? `${loc}: ${msg}` : msg
-            })
-            .join('; ')
-          throw new Error(message)
+  try {
+    const res = await fetch(fullUrl, { ...options, signal })
+    if (abortId) clearTimeout(abortId)
+    if (!res.ok) {
+      const text = await res.text()
+      try {
+        const data = JSON.parse(text)
+        if (data && data.detail) {
+          if (Array.isArray(data.detail)) {
+            const message = data.detail
+              .map((item) => {
+                if (!item || typeof item !== 'object') {
+                  return String(item)
+                }
+                const loc = Array.isArray(item.loc) ? item.loc.join('.') : ''
+                const msg = item.msg || item.message || JSON.stringify(item)
+                return loc ? `${loc}: ${msg}` : msg
+              })
+              .join('; ')
+            throw new Error(message)
+          }
+          if (typeof data.detail === 'string') {
+            throw new Error(data.detail)
+          }
+          throw new Error(JSON.stringify(data.detail))
         }
-        if (typeof data.detail === 'string') {
-          throw new Error(data.detail)
+      } catch (err) {
+        if (err instanceof Error && err.message) {
+          throw err
         }
-        throw new Error(JSON.stringify(data.detail))
       }
-    } catch (err) {
-      if (err instanceof Error && err.message) {
-        throw err
-      }
+      throw new Error(text || `Request failed: ${res.status}`)
     }
-    throw new Error(text || `Request failed: ${res.status}`)
+    return res.json()
+  } catch (err) {
+    if (abortId) clearTimeout(abortId)
+    if (globalErrorToast) {
+      const { showToast } = useToast()
+      showToast(err.message || '请求失败', 'error')
+    }
+    throw err
   }
-  return res.json()
 }
 
 export async function apiGet(path) {

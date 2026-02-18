@@ -146,6 +146,9 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { FileText, Sparkles, Layers, RefreshCw } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
+import { useToast } from '../composables/useToast'
+
+const { showToast } = useToast()
 
 const router = useRouter()
 const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
@@ -224,16 +227,16 @@ function goToQuiz() {
 async function refreshKbs() {
   try {
     kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(resolvedUserId.value)}`)
-  } catch (err) {
-    console.error(err)
+  } catch {
+    // error toast handled globally
   }
 }
 
 async function refreshDocs() {
   try {
     docs.value = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}`)
-  } catch (err) {
-    console.error(err)
+  } catch {
+    // error toast handled globally
   }
 }
 
@@ -250,8 +253,9 @@ async function generateSummary(force = false) {
     })
     summary.value = res.summary
     summaryCached.value = !!res.cached
-  } catch (err) {
-    summary.value = '错误：' + err.message
+    showToast('摘要生成完成', 'success')
+  } catch {
+    // error toast handled globally
   } finally {
     busy.value.summary = false
   }
@@ -271,9 +275,9 @@ async function generateKeypoints(force = false) {
     })
     keypoints.value = res.keypoints || []
     keypointsCached.value = !!res.cached
-  } catch (err) {
-    keypointsError.value = '错误：' + (err?.message || String(err))
-    console.error(err)
+    showToast('要点提取完成', 'success')
+  } catch {
+    keypointsError.value = '提取失败，请重试'
   } finally {
     busy.value.keypoints = false
   }

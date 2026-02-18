@@ -215,6 +215,9 @@ import { TooltipComponent, LegendComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import LearnerProfileCard from '../components/LearnerProfileCard.vue'
 import { apiGet, apiPost, getProfile, buildLearningPath } from '../api'
+import { useToast } from '../composables/useToast'
+
+const { showToast } = useToast()
 
 use([CanvasRenderer, GraphChart, TooltipComponent, LegendComponent])
 
@@ -263,16 +266,16 @@ const kbStatItems = computed(() => {
 async function fetchProgress() {
   try {
     progress.value = await apiGet(`/api/progress?user_id=${encodeURIComponent(resolvedUserId.value)}`)
-  } catch (err) {
-    console.error(err)
+  } catch {
+    // error toast handled globally
   }
 }
 
 async function fetchProfile() {
   try {
     profile.value = await getProfile(resolvedUserId.value)
-  } catch (err) {
-    console.error(err)
+  } catch {
+    // error toast handled globally
   }
 }
 
@@ -280,8 +283,8 @@ async function fetchActivity() {
   try {
     const res = await apiGet(`/api/activity?user_id=${encodeURIComponent(resolvedUserId.value)}`)
     activity.value = res.items || []
-  } catch (err) {
-    console.error(err)
+  } catch {
+    // error toast handled globally
   }
 }
 
@@ -293,8 +296,8 @@ async function fetchRecommendations() {
     recommendations.value = res.items || []
     learningPath.value = res.learning_path || []
     learningPathEdges.value = res.learning_path_edges || []
-  } catch (err) {
-    console.error(err)
+  } catch {
+    // error toast handled globally
   } finally {
     busy.value.recommendations = false
   }
@@ -305,9 +308,10 @@ async function rebuildPath() {
   busy.value.pathBuild = true
   try {
     await buildLearningPath(resolvedUserId.value, selectedKbId.value, true)
+    showToast('学习路径已重建', 'success')
     await fetchRecommendations()
-  } catch (err) {
-    console.error(err)
+  } catch {
+    // error toast handled globally
   } finally {
     busy.value.pathBuild = false
   }
@@ -316,8 +320,8 @@ async function rebuildPath() {
 async function refreshKbs() {
   try {
     kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(resolvedUserId.value)}`)
-  } catch (err) {
-    console.error(err)
+  } catch {
+    // error toast handled globally
   }
 }
 

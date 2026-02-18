@@ -75,9 +75,6 @@
               <span>刷新列表</span>
             </button>
           </div>
-          <p v-if="statusMessage" class="text-sm text-center" :class="(statusMessage.includes('错误') || statusMessage.includes('Error')) ? 'text-destructive' : 'text-green-500'">
-            {{ statusMessage }}
-          </p>
         </div>
       </section>
 
@@ -125,6 +122,9 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { Upload, FileText, Database, X, RefreshCw } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
+import { useToast } from '../composables/useToast'
+
+const { showToast } = useToast()
 
 const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
 const resolvedUserId = computed(() => userId.value || 'default')
@@ -134,7 +134,6 @@ const selectedKbId = ref('')
 const kbNameInput = ref('')
 const uploadFile = ref(null)
 const dragActive = ref(false)
-const statusMessage = ref('')
 const busy = ref({
   upload: false,
   kb: false,
@@ -157,22 +156,19 @@ async function refreshKbs() {
     if (!found) {
       selectedKbId.value = kbs.value.length ? kbs.value[0].id : ''
     }
-  } catch (err) {
-    statusMessage.value = '加载知识库失败：' + err.message
+  } catch {
+    // error toast handled globally
   }
 }
 
 async function refreshDocs() {
   busy.value.refresh = true
-  statusMessage.value = ''
   try {
     const kbParam = selectedKbId.value ? `&kb_id=${encodeURIComponent(selectedKbId.value)}` : ''
     const result = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}${kbParam}`)
     docs.value = result
-    statusMessage.value = `已刷新，共 ${result.length} 个文档`
-    setTimeout(() => { statusMessage.value = '' }, 2000)
-  } catch (err) {
-    statusMessage.value = '加载文档失败：' + err.message
+  } catch {
+    // error toast handled globally
   } finally {
     busy.value.refresh = false
   }
@@ -181,7 +177,6 @@ async function refreshDocs() {
 async function uploadDoc() {
   if (!uploadFile.value) return
   busy.value.upload = true
-  statusMessage.value = ''
   try {
     const form = new FormData()
     form.append('file', uploadFile.value)
@@ -190,11 +185,11 @@ async function uploadDoc() {
       form.append('kb_id', selectedKbId.value)
     }
     await apiPost('/api/docs/upload', form, true)
-    statusMessage.value = '上传完成。'
+    showToast('文档上传成功', 'success')
     uploadFile.value = null
     await refreshDocs()
-  } catch (err) {
-    statusMessage.value = '错误：' + err.message
+  } catch {
+    // error toast handled globally
   } finally {
     busy.value.upload = false
   }
@@ -203,20 +198,20 @@ async function uploadDoc() {
 async function createKb() {
   if (!kbNameInput.value) return
   busy.value.kb = true
-  statusMessage.value = ''
   try {
     const res = await apiPost('/api/kb', {
       name: kbNameInput.value,
       user_id: resolvedUserId.value
     })
+    showToast('知识库创建成功', 'success')
     kbNameInput.value = ''
     await refreshKbs()
     if (res?.id) {
       selectedKbId.value = res.id
     }
     await refreshDocs()
-  } catch (err) {
-    statusMessage.value = '错误：' + err.message
+  } catch {
+    // error toast handled globally
   } finally {
     busy.value.kb = false
   }

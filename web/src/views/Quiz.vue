@@ -236,6 +236,9 @@ import { ref, onMounted, computed } from 'vue'
 import { PenTool, Sparkles, RefreshCw, CheckCircle2, XCircle } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
 import AnimatedNumber from '../components/ui/AnimatedNumber.vue'
+import { useToast } from '../composables/useToast'
+
+const { showToast } = useToast()
 
 const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
 const resolvedUserId = computed(() => userId.value || 'default')
@@ -260,8 +263,8 @@ const hasWrongGroups = computed(() => wrongQuestionGroups.value.length > 0)
 async function refreshKbs() {
   try {
     kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(resolvedUserId.value)}`)
-  } catch (err) {
-    console.error(err)
+  } catch {
+    // error toast handled globally
   }
 }
 
@@ -286,8 +289,9 @@ async function generateQuiz(options = {}) {
     }
     const res = await apiPost('/api/quiz/generate', payload)
     quiz.value = res
-  } catch (err) {
-    console.error(err)
+    showToast(`已生成 ${res.questions?.length || 0} 道题目`, 'success')
+  } catch {
+    // error toast handled globally
   } finally {
     busy.value.quiz = false
   }
@@ -304,8 +308,9 @@ async function submitQuiz() {
       user_id: resolvedUserId.value
     })
     quizResult.value = res
-  } catch (err) {
-    console.error(err)
+    showToast(`测验已批改，得分 ${Math.round(res.score * 100)}%`, 'success')
+  } catch {
+    // error toast handled globally
   } finally {
     busy.value.submit = false
   }

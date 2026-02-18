@@ -168,6 +168,9 @@
 import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { MessageSquare, Send, Trash2, Database, FileText, Sparkles, User, Bot } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
+import { useToast } from '../composables/useToast'
+
+const { showToast } = useToast()
 
 const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
 const resolvedUserId = computed(() => userId.value || 'default')
@@ -229,8 +232,8 @@ function getLevelMeta(level) {
 async function refreshKbs() {
   try {
     kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(resolvedUserId.value)}`)
-  } catch (err) {
-    console.error(err)
+  } catch {
+    // error toast handled globally
   }
 }
 
@@ -241,8 +244,8 @@ async function refreshDocsInKb() {
   }
   try {
     docsInKb.value = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(selectedKbId.value)}`)
-  } catch (err) {
-    console.error(err)
+  } catch {
+    // error toast handled globally
   }
 }
 
@@ -250,8 +253,7 @@ async function refreshAbilityLevel() {
   try {
     const profile = await apiGet(`/api/profile?user_id=${encodeURIComponent(resolvedUserId.value)}`)
     qaAbilityLevel.value = normalizeAbilityLevel(profile?.ability_level)
-  } catch (err) {
-    console.error(err)
+  } catch {
     qaAbilityLevel.value = 'intermediate'
   }
 }
