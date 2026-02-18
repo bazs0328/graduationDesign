@@ -225,7 +225,7 @@
 
 ### UX-P0（全局基础设施，做一次全站受益）
 
-- [ ] **全局 Toast / Notification 组件**
+- [x] **全局 Toast / Notification 组件**
   - 现状：操作成功无反馈；错误靠 `console.error` 或混在内容区（`summary.value = '错误：' + err.message`）；问答报错混在聊天气泡里
   - 方案：封装全局 Toast 组件（success / error / warning / info），通过 `provide/inject` 或 Pinia 暴露 `showToast()` 给全站使用
   - 验收标准：
