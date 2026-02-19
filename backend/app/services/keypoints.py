@@ -12,10 +12,16 @@ from app.models import Keypoint
 from app.utils.json_tools import safe_json_loads
 
 KEYPOINT_SYSTEM = (
-    "You are a learning assistant. Extract concise key knowledge points from the material. "
-    "Each point should be a short sentence focused on definitions, formulas, steps, or core ideas. "
-    "Return JSON array of objects: [{{text: string, explanation?: string}}, ...]. "
-    "Explanation is optional, a brief clarification or elaboration."
+    "你是一位知识提取专家。从材料中提取核心和关键的知识点。"
+    "重点关注：(1) 可以独立学习的独立概念/理论/方法，"
+    "(2) 关键定义、公式、原理或关键步骤，"
+    "(3) 重要的关系或模式。"
+    "每个知识点应该简洁且聚焦 - 避免冗长的描述。"
+    "优先考虑深度和重要性，而非数量。"
+    "返回 JSON 数组：[{{text: string, explanation?: string}}, ...]。"
+    "text 应该是简洁清晰的陈述（通常 10-30 个字）。"
+    "explanation 是可选的，仅在提供必要说明时添加（保持简短，不超过 50 个字）。"
+    "\n\n重要：所有输出必须使用中文（简体中文）。"
 )
 
 CHUNK_PROMPT = ChatPromptTemplate.from_messages(
@@ -23,7 +29,10 @@ CHUNK_PROMPT = ChatPromptTemplate.from_messages(
         ("system", KEYPOINT_SYSTEM),
         (
             "human",
-            "Extract up to 5 keypoints from this chunk. Return JSON array of objects only.\n\n{chunk}",
+            "从此文档片段中提取 3-5 个核心知识点。专注于最重要的概念，"
+            "忽略次要细节。每个知识点必须独立且有意义。"
+            "仅返回 JSON 对象数组（不要其他文本）。"
+            "所有内容必须使用中文（简体中文）。\n\n文档片段：\n{chunk}",
         ),
     ]
 )
@@ -33,8 +42,15 @@ FINAL_PROMPT = ChatPromptTemplate.from_messages(
         ("system", KEYPOINT_SYSTEM),
         (
             "human",
-            "Merge and deduplicate these keypoints into 10-15 clear points. "
-            "Return JSON array of objects [{{text, explanation?}}] only.\n\n{points}",
+            "审查并精炼这些知识点。你的任务：\n"
+            "1. 删除重复项并合并相似的点\n"
+            "2. 仅保留最重要和核心的点（优先深度而非广度）\n"
+            "3. 确保每个点独立且可以独立存在\n"
+            "4. 使文本简洁且聚焦 - 删除不必要的词语\n"
+            "5. 保持解释简短，如果冗余则删除\n"
+            "目标：8-12 个核心要点（如果能抓住核心，更少更好）。"
+            "仅返回 JSON 数组 [{{text, explanation?}}]（不要其他文本）。"
+            "所有内容必须使用中文（简体中文）。\n\n知识点列表：\n{points}",
         ),
     ]
 )

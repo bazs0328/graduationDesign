@@ -32,11 +32,19 @@
             </select>
           </div>
           <div class="flex flex-col gap-2 pt-2">
+            <label class="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                v-model="forceRefresh"
+                type="checkbox"
+                class="w-4 h-4 rounded border-input text-primary focus:ring-primary"
+              />
+              <span class="text-muted-foreground">强制刷新（绕过缓存）</span>
+            </label>
             <Button
               class="w-full"
               :disabled="!selectedDocId"
               :loading="busy.summary"
-              @click="generateSummary()"
+              @click="generateSummary(forceRefresh)"
             >
               {{ busy.summary ? '生成中…' : '生成摘要' }}
             </Button>
@@ -45,7 +53,7 @@
               variant="secondary"
               :disabled="!selectedDocId"
               :loading="busy.keypoints"
-              @click="generateKeypoints()"
+              @click="generateKeypoints(forceRefresh)"
             >
               {{ busy.keypoints ? '提取中…' : '提取要点' }}
             </Button>
@@ -225,6 +233,7 @@ const summaryCached = ref(false)
 const keypoints = ref([])
 const keypointsCached = ref(false)
 const keypointsError = ref('')
+const forceRefresh = ref(false)
 const busy = ref({
   summary: false,
   keypoints: false,
