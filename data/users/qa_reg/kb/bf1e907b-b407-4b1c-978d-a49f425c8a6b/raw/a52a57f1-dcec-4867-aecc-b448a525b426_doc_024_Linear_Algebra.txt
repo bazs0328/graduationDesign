@@ -1,9 +1,0 @@
-Topic: Linear Algebra. This document focuses on linear algebra basics.
-
-Definition KEY_024: KEY_024 refers to a core concept in linear algebra with practical implications.
-
-This section provides examples, common pitfalls, and brief intuition.
-
-Related mention 1: KEY_025 is discussed briefly as a contrasting idea.
-
-Related mention 2: KEY_026 is discussed briefly as a contrasting idea.

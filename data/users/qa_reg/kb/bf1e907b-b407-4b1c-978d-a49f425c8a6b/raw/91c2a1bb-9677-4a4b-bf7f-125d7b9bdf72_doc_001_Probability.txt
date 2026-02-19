@@ -1,9 +1,0 @@
-Topic: Probability. This document focuses on probability basics.
-
-Definition KEY_001: KEY_001 refers to a core concept in probability with practical implications.
-
-This section provides examples, common pitfalls, and brief intuition.
-
-Related mention 1: KEY_002 is discussed briefly as a contrasting idea.
-
-Related mention 2: KEY_003 is discussed briefly as a contrasting idea.

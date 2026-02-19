@@ -1,9 +1,0 @@
-Topic: Probability. This document focuses on probability basics.
-
-Definition KEY_025: KEY_025 refers to a core concept in probability with practical implications.
-
-This section provides examples, common pitfalls, and brief intuition.
-
-Related mention 1: KEY_026 is discussed briefly as a contrasting idea.
-
-Related mention 2: KEY_027 is discussed briefly as a contrasting idea.
