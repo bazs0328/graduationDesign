@@ -1,4 +1,4 @@
-from typing import List
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -7,7 +7,12 @@ from sqlalchemy.orm import Session
 from app.core.knowledge_bases import ensure_kb
 from app.core.users import ensure_user
 from app.db import get_db
-from app.schemas import LearningPathEdge, LearningPathItem
+from app.schemas import (
+    LearningPathEdge,
+    LearningPathItem,
+    LearningPathModule,
+    LearningPathStage,
+)
 from app.services.learning_path import build_dependency_graph, generate_learning_path
 
 router = APIRouter()
@@ -23,6 +28,9 @@ class LearningPathGetResponse(BaseModel):
     kb_id: str
     items: List[LearningPathItem] = []
     edges: List[LearningPathEdge] = []
+    stages: List[LearningPathStage] = []
+    modules: List[LearningPathModule] = []
+    path_summary: Dict[str, Any] = {}
 
 
 @router.post("/learning-path/build", response_model=LearningPathBuildResponse)
@@ -62,5 +70,14 @@ def get_path(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     limit = max(1, min(limit, 50))
-    items, edges = generate_learning_path(db, resolved_user_id, kb.id, limit=limit)
-    return LearningPathGetResponse(kb_id=kb.id, items=items, edges=edges)
+    items, edges, stages, modules, path_summary = generate_learning_path(
+        db, resolved_user_id, kb.id, limit=limit
+    )
+    return LearningPathGetResponse(
+        kb_id=kb.id,
+        items=items,
+        edges=edges,
+        stages=stages,
+        modules=modules,
+        path_summary=path_summary,
+    )
