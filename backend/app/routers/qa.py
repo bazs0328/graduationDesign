@@ -103,6 +103,7 @@ def ask_question(payload: QARequest, db: Session = Depends(get_db)):
         fetch_k=payload.fetch_k,
         ability_level=profile.ability_level,
         weak_concepts=weak_concepts,
+        focus_keypoint=payload.focus,
     )
 
     record = QARecord(
@@ -148,7 +149,7 @@ def ask_question(payload: QARequest, db: Session = Depends(get_db)):
             )
         )
 
-    _update_mastery_from_qa(db, resolved_user_id, payload.question, doc_id, kb_id)
+    _update_mastery_from_qa(db, resolved_user_id, payload.question, doc_id, kb_id, payload.focus)
 
     db.commit()
 
@@ -166,8 +167,41 @@ def _update_mastery_from_qa(
     question: str,
     doc_id: str | None,
     kb_id: str | None,
+    focus_keypoint_text: str | None = None,
 ) -> None:
     """Match the user's question to keypoints and record a study interaction."""
+    from app.models import Keypoint
+    
+    # 优先：如果指定了 focus_keypoint_text（从学习路径跳转），直接查找匹配的知识点
+    if focus_keypoint_text and focus_keypoint_text.strip():
+        focus_text = focus_keypoint_text.strip()
+        query = db.query(Keypoint).filter(Keypoint.user_id == user_id)
+        if doc_id:
+            query = query.filter(Keypoint.doc_id == doc_id)
+        elif kb_id:
+            query = query.filter(Keypoint.kb_id == kb_id)
+        else:
+            return
+        
+        # 精确匹配或模糊匹配知识点文本
+        matched_kp = query.filter(Keypoint.text == focus_text).first()
+        if not matched_kp:
+            # 尝试模糊匹配（去除空格和标点）
+            import re
+            normalized_focus = re.sub(r'[^\w\s]', '', focus_text.lower().strip())
+            for kp in query.all():
+                normalized_kp_text = re.sub(r'[^\w\s]', '', kp.text.lower().strip())
+                if normalized_kp_text == normalized_focus or normalized_focus in normalized_kp_text:
+                    matched_kp = kp
+                    break
+        
+        if matched_kp:
+            result = record_study_interaction(db, matched_kp.id)
+            if result:
+                logger.info(f"QA mastery updated for keypoint {matched_kp.id} (focus match)")
+            return
+    
+    # 回退：使用向量搜索匹配问题文本到知识点
     filter_dict: dict = {"type": "keypoint"}
     if doc_id:
         filter_dict["doc_id"] = doc_id
@@ -181,14 +215,20 @@ def _update_mastery_from_qa(
         results = vectorstore.similarity_search_with_score(
             question, k=3, filter=filter_dict,
         )
-    except Exception:
-        logger.debug("QA mastery: vector search failed", exc_info=True)
+    except Exception as e:
+        logger.debug(f"QA mastery: vector search failed: {e}", exc_info=True)
         return
 
+    updated_count = 0
     for doc_result, score in results:
         if score > 1.0:
             continue
         meta = getattr(doc_result, "metadata", {}) or {}
         kp_id = meta.get("keypoint_id")
         if kp_id:
-            record_study_interaction(db, kp_id)
+            result = record_study_interaction(db, kp_id)
+            if result:
+                updated_count += 1
+    
+    if updated_count > 0:
+        logger.info(f"QA mastery updated for {updated_count} keypoint(s) (vector search match)")

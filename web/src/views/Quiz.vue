@@ -1,5 +1,20 @@
 <template>
   <div class="space-y-8 max-w-6xl mx-auto">
+    <section
+      v-if="hasPathContext"
+      class="bg-primary/5 border border-primary/20 rounded-xl px-4 py-3 space-y-1"
+    >
+      <p class="text-[10px] font-bold uppercase tracking-widest text-primary">学习路径上下文</p>
+      <p class="text-sm text-muted-foreground">
+        <span v-if="entryKbContextId">
+          当前知识库：<span class="font-semibold text-foreground">{{ entryKbContextName }}</span>
+        </span>
+        <span v-if="entryFocusContext">
+          <span v-if="entryKbContextId"> · </span>
+          重点概念：<span class="font-semibold text-foreground">{{ entryFocusContext }}</span>
+        </span>
+      </p>
+    </section>
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
       <!-- Left: Quiz Generation -->
       <aside class="space-y-6">
@@ -257,6 +272,7 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { PenTool, Sparkles, CheckCircle2, XCircle } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
 import AnimatedNumber from '../components/ui/AnimatedNumber.vue'
@@ -266,6 +282,7 @@ import LoadingOverlay from '../components/ui/LoadingOverlay.vue'
 import { masteryLabel, masteryPercent, masteryBadgeClass, masteryBorderClass } from '../utils/mastery'
 
 const { showToast } = useToast()
+const route = useRoute()
 
 const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
 const resolvedUserId = computed(() => userId.value || 'default')
@@ -288,6 +305,22 @@ const wrongQuestionGroups = computed(() => quizResult.value?.wrong_questions_by_
 const hasWrongGroups = computed(() => wrongQuestionGroups.value.length > 0)
 const masteryUpdates = computed(() => quizResult.value?.mastery_updates || [])
 const hasMasteryUpdates = computed(() => masteryUpdates.value.length > 0)
+const entryKbContextId = computed(() => normalizeQueryString(route.query.kb_id))
+const entryFocusContext = computed(() => normalizeQueryString(route.query.focus).trim())
+const hasPathContext = computed(() => Boolean(entryKbContextId.value || entryFocusContext.value))
+const entryKbContextName = computed(() => {
+  if (!entryKbContextId.value) return ''
+  const kb = kbs.value.find((item) => item.id === entryKbContextId.value)
+  if (kb?.name) return kb.name
+  return `${entryKbContextId.value.slice(0, 8)}...`
+})
+
+function normalizeQueryString(value) {
+  if (Array.isArray(value)) {
+    return value[0] || ''
+  }
+  return typeof value === 'string' ? value : ''
+}
 
 async function refreshKbs() {
   try {
@@ -369,5 +402,14 @@ function scrollToQuestion(index) {
 
 onMounted(async () => {
   await refreshKbs()
+  const queryKbId = normalizeQueryString(route.query.kb_id)
+  if (queryKbId && kbs.value.some((kb) => kb.id === queryKbId)) {
+    selectedKbId.value = queryKbId
+  }
+
+  const queryFocus = normalizeQueryString(route.query.focus).trim()
+  if (queryFocus && selectedKbId.value) {
+    await generateQuiz({ focusConcepts: [queryFocus] })
+  }
 })
 </script>

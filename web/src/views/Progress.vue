@@ -474,11 +474,31 @@ function actionBtnLabel(action) {
 
 function goToAction(item) {
   if (item.action === 'quiz') {
-    router.push('/quiz')
+    router.push({
+      path: '/quiz',
+      query: {
+        kb_id: selectedKbId.value || '',
+        focus: item.text || '',
+      },
+    })
   } else if (item.action === 'study') {
-    router.push('/summary')
+    // 去学习应该跳转到 QA 页面，让用户通过问答来学习知识点
+    router.push({
+      path: '/qa',
+      query: {
+        kb_id: selectedKbId.value || '',
+        focus: item.text || '',
+      },
+    })
   } else {
-    router.push('/qa')
+    // review 动作也跳转到 QA
+    router.push({
+      path: '/qa',
+      query: {
+        kb_id: selectedKbId.value || '',
+        focus: item.text || '',
+      },
+    })
   }
 }
 

@@ -1,5 +1,20 @@
 <template>
   <div class="space-y-8 max-w-6xl mx-auto">
+    <section
+      v-if="entryDocContextId || entryKeypointText"
+      class="bg-primary/5 border border-primary/20 rounded-xl px-4 py-3 space-y-1"
+    >
+      <p class="text-[10px] font-bold uppercase tracking-widest text-primary">学习路径上下文</p>
+      <p class="text-sm text-muted-foreground">
+        <span v-if="entryDocContextId">
+          当前目标文档：<span class="font-semibold text-foreground">{{ entryDocContextName }}</span>
+        </span>
+        <span v-if="entryKeypointText">
+          <span v-if="entryDocContextId"> · </span>
+          学习目标：<span class="font-semibold text-foreground">{{ entryKeypointText }}</span>
+        </span>
+      </p>
+    </section>
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
       <!-- Sidebar: Doc Selection -->
       <aside class="space-y-6">
@@ -95,40 +110,76 @@
             <div
               v-for="(point, idx) in keypoints"
               :key="point?.id || idx"
-              class="p-4 bg-background border border-border rounded-xl hover:border-primary/30 transition-all group"
-              :class="masteryBorderClass(point)"
+              :data-target-keypoint="isTargetKeypoint(point) ? 'true' : undefined"
+              class="p-5 bg-background border rounded-xl hover:border-primary/30 transition-all group"
+              :class="isTargetKeypoint(point) ? 'border-primary ring-2 ring-primary/30 bg-primary/5' : masteryBorderClass(point)"
             >
-              <div class="flex gap-4">
-                <div class="flex-shrink-0 w-6 h-6 bg-primary/10 text-primary rounded-full flex items-center justify-center text-xs font-bold">
-                  {{ idx + 1 }}
+              <div class="space-y-4">
+                <!-- Header: Number + Title -->
+                <div class="flex gap-3 items-start">
+                  <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+                    :class="isTargetKeypoint(point) ? 'bg-primary text-primary-foreground ring-2 ring-primary/50' : 'bg-primary/10 text-primary'">
+                    {{ idx + 1 }}
+                  </div>
+                  <div class="flex-1 space-y-2">
+                    <p class="font-medium leading-snug text-base" :class="isTargetKeypoint(point) ? 'text-primary' : ''">
+                      {{ typeof point === 'string' ? point : point.text }}
+                    </p>
+                    <div v-if="isTargetKeypoint(point)" class="text-xs font-semibold text-primary bg-primary/10 px-2 py-1 rounded-full inline-block">
+                      当前学习目标
+                    </div>
+                  </div>
                 </div>
-                <div class="space-y-2 flex-1">
-                  <p class="font-medium leading-snug">{{ typeof point === 'string' ? point : point.text }}</p>
-                  <p v-if="typeof point !== 'string' && point.explanation" class="text-sm text-muted-foreground">
-                    {{ point.explanation }}
-                  </p>
-                  <div v-if="getMasteryLevel(point) !== null" class="flex items-center gap-2">
+
+                <!-- Explanation -->
+                <p v-if="typeof point !== 'string' && point.explanation" class="text-sm text-muted-foreground pl-11">
+                  {{ point.explanation }}
+                </p>
+
+                <!-- Mastery Progress -->
+                <div v-if="getMasteryLevel(point) !== null" class="space-y-2 pl-11">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-xs font-semibold text-muted-foreground">掌握度</span>
+                    <span class="text-xs font-bold" :class="masteryBadgeClass(point).includes('bg-green') ? 'text-green-500' : masteryBadgeClass(point).includes('bg-yellow') ? 'text-yellow-500' : 'text-red-500'">
+                      {{ masteryPercent(point) }}%
+                    </span>
+                  </div>
+                  <div class="w-full h-2 bg-muted rounded-full overflow-hidden">
+                    <div
+                      class="h-full transition-all duration-500"
+                      :class="masteryBadgeClass(point).includes('bg-green') ? 'bg-green-500' : masteryBadgeClass(point).includes('bg-yellow') ? 'bg-yellow-500' : 'bg-red-500'"
+                      :style="{ width: `${masteryPercent(point)}%` }"
+                    ></div>
+                  </div>
+                  <div class="flex items-center gap-2">
                     <span
                       class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border"
                       :class="masteryBadgeClass(point)"
                     >
                       {{ masteryLabel(point) }}
                     </span>
-                    <span class="text-[10px] text-muted-foreground">{{ masteryPercent(point) }}%</span>
-                    <button
-                      v-if="isWeakMastery(point)"
-                      class="ml-auto text-[10px] font-bold text-destructive hover:underline"
-                      @click="goToQuiz"
-                    >
-                      去测验
-                    </button>
-                  </div>
-                  <div v-if="typeof point !== 'string' && (point.source || point.page || point.chunk)" class="flex items-center gap-2 pt-1">
-                    <span class="text-[10px] font-bold uppercase text-primary/60">来源：</span>
-                    <span class="text-[10px] bg-accent px-2 py-0.5 rounded-full text-accent-foreground">
-                      {{ [point.source, point.page ? `p.${point.page}` : '', point.chunk ? `c.${point.chunk}` : ''].filter(Boolean).join(' ') }}
+                    <span v-if="typeof point !== 'string' && point.attempt_count > 0" class="text-[10px] text-muted-foreground">
+                      已尝试 {{ point.attempt_count }} 次
                     </span>
                   </div>
+                </div>
+
+                <!-- Source Info -->
+                <div v-if="typeof point !== 'string' && (point.source || point.page || point.chunk)" class="flex items-center gap-2 pt-2 pl-11 border-t border-border/50">
+                  <span class="text-[10px] font-bold uppercase text-primary/60">来源：</span>
+                  <span class="text-[10px] bg-accent px-2 py-0.5 rounded-full text-accent-foreground">
+                    {{ [point.source, point.page ? `p.${point.page}` : '', point.chunk ? `c.${point.chunk}` : ''].filter(Boolean).join(' ') }}
+                  </span>
+                </div>
+
+                <!-- View Details Link -->
+                <div v-if="getMasteryLevel(point) !== null" class="pt-2 pl-11 border-t border-border/50">
+                  <button
+                    class="text-xs text-primary hover:underline font-medium"
+                    @click="goToProgress(point)"
+                  >
+                    查看学习路径 →
+                  </button>
                 </div>
               </div>
             </div>
@@ -144,8 +195,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, computed, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { FileText, Sparkles, Layers } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
@@ -163,6 +214,7 @@ import {
 const { showToast } = useToast()
 
 const router = useRouter()
+const route = useRoute()
 const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
 const resolvedUserId = computed(() => userId.value || 'default')
 const docs = ref([])
@@ -185,6 +237,29 @@ const selectedKbName = computed(() => {
   const kb = kbs.value.find(k => k.id === doc.kb_id)
   return kb ? kb.name : '未知'
 })
+const entryDocContextId = computed(() => normalizeQueryString(route.query.doc_id))
+const entryKeypointText = computed(() => normalizeQueryString(route.query.keypoint_text).trim())
+const entryDocContextName = computed(() => {
+  if (!entryDocContextId.value) return ''
+  const doc = docs.value.find((d) => d.id === entryDocContextId.value)
+  if (doc?.filename) return doc.filename
+  return `${entryDocContextId.value.slice(0, 8)}...`
+})
+
+function isTargetKeypoint(point) {
+  if (!entryKeypointText.value) return false
+  const pointText = typeof point === 'string' ? point : point.text || ''
+  return pointText.trim() === entryKeypointText.value.trim()
+}
+
+function scrollToTargetKeypoint() {
+  nextTick(() => {
+    const targetEl = document.querySelector('[data-target-keypoint="true"]')
+    if (targetEl) {
+      targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  })
+}
 
 function getMasteryLevel(point) {
   if (!point || typeof point !== 'object') return null
@@ -213,8 +288,20 @@ function isWeakMastery(point) {
   return lv !== null && _isWeakMastery(lv)
 }
 
-function goToQuiz() {
-  router.push('/quiz')
+function goToProgress(point) {
+  const doc = docs.value.find((d) => d.id === selectedDocId.value)
+  const kbId = doc?.kb_id || ''
+  router.push({
+    path: '/progress',
+    query: kbId ? { kb_id: kbId } : {},
+  })
+}
+
+function normalizeQueryString(value) {
+  if (Array.isArray(value)) {
+    return value[0] || ''
+  }
+  return typeof value === 'string' ? value : ''
 }
 
 async function refreshKbs() {
@@ -261,14 +348,26 @@ async function generateKeypoints(force = false) {
   keypointsCached.value = false
   keypointsError.value = ''
   try {
-    const res = await apiPost('/api/keypoints', {
+    const payload = {
       doc_id: selectedDocId.value,
       user_id: resolvedUserId.value,
       force
-    })
+    }
+    // 如果是从学习路径跳转过来的，传递目标知识点文本以记录学习行为
+    if (entryKeypointText.value) {
+      payload.study_keypoint_text = entryKeypointText.value
+    }
+    const res = await apiPost('/api/keypoints', payload)
     keypoints.value = res.keypoints || []
     keypointsCached.value = !!res.cached
     showToast('要点提取完成', 'success')
+    if (entryKeypointText.value) {
+      // 等待 DOM 更新完成后再滚动
+      await nextTick()
+      setTimeout(() => {
+        scrollToTargetKeypoint()
+      }, 100)
+    }
   } catch {
     keypointsError.value = '提取失败，请重试'
   } finally {
@@ -280,6 +379,11 @@ onMounted(async () => {
   busy.value.init = true
   try {
     await Promise.all([refreshKbs(), refreshDocs()])
+    const queryDocId = normalizeQueryString(route.query.doc_id)
+    if (queryDocId && docs.value.some((d) => d.id === queryDocId)) {
+      selectedDocId.value = queryDocId
+      await Promise.all([generateSummary(), generateKeypoints()])
+    }
   } finally {
     busy.value.init = false
   }

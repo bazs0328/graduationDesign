@@ -41,6 +41,7 @@ ADAPTIVE_SYSTEM_PROMPTS = {
 def build_adaptive_system_prompt(
     ability_level: str = "intermediate",
     weak_concepts: list[str] | None = None,
+    focus_keypoint: str | None = None,
 ) -> str:
     normalized_level = (ability_level or "intermediate").strip().lower()
     if normalized_level not in ADAPTIVE_SYSTEM_PROMPTS:
@@ -48,6 +49,17 @@ def build_adaptive_system_prompt(
     base_prompt = ADAPTIVE_SYSTEM_PROMPTS[normalized_level]
 
     prompt_parts = [base_prompt]
+    
+    # 如果指定了学习路径中的目标知识点，优先强调它
+    if focus_keypoint and focus_keypoint.strip():
+        # 转义大括号以避免 f-string 解析错误
+        escaped_focus = focus_keypoint.strip().replace("{", "{{").replace("}", "}}")
+        prompt_parts.append(
+            f"重要提示：学习者当前正在学习以下知识点：「{escaped_focus}」。"
+            f"请确保你的回答重点围绕这个知识点展开，帮助学习者深入理解这个概念。"
+            f"如果问题与这个知识点相关，请给出更详细和针对性的解释。"
+        )
+    
     if weak_concepts:
         concepts = [concept.strip() for concept in weak_concepts if concept and concept.strip()]
         if concepts:
@@ -82,6 +94,7 @@ def answer_question(
     fetch_k: int | None = None,
     ability_level: str = "intermediate",
     weak_concepts: list[str] | None = None,
+    focus_keypoint: str | None = None,
 ) -> Tuple[str, List[dict]]:
     docs = retrieve_documents(
         user_id=user_id,
@@ -99,6 +112,7 @@ def answer_question(
     system_prompt = build_adaptive_system_prompt(
         ability_level=ability_level,
         weak_concepts=weak_concepts,
+        focus_keypoint=focus_keypoint,
     )
     qa_prompt = build_qa_prompt(system_prompt)
     llm = get_llm(temperature=0.2)
