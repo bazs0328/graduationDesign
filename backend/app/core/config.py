@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     qwen_model: str = "qwen-plus"
     qwen_embedding_model: str = "text-embedding-v4"
     dashscope_embedding_model: str = "qwen3-vl-embedding"
+    dashscope_base_url: str | None = None  # If None, uses default. Set to "https://dashscope-intl.aliyuncs.com/api/v1" for international
 
     chunk_size: int = 1000
     chunk_overlap: int = 150

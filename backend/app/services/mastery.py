@@ -82,8 +82,22 @@ def mastery_priority(level: float) -> str:
 
 
 def mastery_action(level: float, attempt_count: int) -> str:
+    """
+    Determine the recommended action based on mastery level and attempt count.
+    
+    Logic:
+    - If mastered (>= 0.8): review to maintain
+    - If never quizzed (attempt_count == 0): quiz first to assess current level
+    - If quizzed but very low mastery (< 0.3): study to build foundation
+    - Otherwise: continue quizzing to improve
+    """
     if level >= MASTERY_MASTERED:
         return "review"
+    # Prioritize quiz for new keypoints to assess understanding
     if attempt_count == 0:
+        return "quiz"
+    # If quizzed but mastery is very low, suggest study first
+    if level < MASTERY_PARTIAL:
         return "study"
+    # Continue quizzing for moderate mastery levels
     return "quiz"

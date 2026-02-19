@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import tempfile
 from collections import defaultdict
@@ -37,6 +38,8 @@ from app.services.mastery import record_quiz_result
 from app.services.quiz import generate_quiz
 from app.services.text_extraction import extract_text
 from app.utils.document_validator import DocumentValidator
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -159,11 +162,13 @@ def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
             difficulty_label = difficulty
         parsed = [QuizQuestion(**q) for q in questions]
     except ValueError as exc:
+        logger.exception("Quiz generation validation error")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception("Quiz generation failed with unexpected error")
         raise HTTPException(
             status_code=500,
-            detail="Quiz generation failed. Check LLM output or model settings.",
+            detail=f"Quiz generation failed: {str(exc)}. Check LLM output or model settings.",
         ) from exc
 
     quiz_id = str(uuid4())

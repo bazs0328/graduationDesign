@@ -25,18 +25,38 @@ class QwenEmbeddings(Embeddings):
 
 
 class DashScopeVLEmbeddings(Embeddings):
-    def __init__(self, api_key: str, model: str):
+    def __init__(self, api_key: str, model: str, base_url: str | None = None):
         self.api_key = api_key
         self.model = model
+        self.base_url = base_url
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        import logging
+        logger = logging.getLogger(__name__)
+        
         dashscope.api_key = self.api_key
+        # Configure base URL for international endpoint if provided
+        if self.base_url:
+            dashscope.base_http_api_url = self.base_url
+            logger.debug(f"Using DashScope base URL: {self.base_url}")
+        
         embeddings = []
         for text in texts:
-            resp = dashscope.MultiModalEmbedding.call(
-                model=self.model,
-                input=[{"text": str(text)}],
-            )
+            try:
+                resp = dashscope.MultiModalEmbedding.call(
+                    model=self.model,
+                    input=[{"text": str(text)}],
+                )
+            except Exception as e:
+                error_msg = str(e)
+                if "Failed to resolve" in error_msg or "No address associated" in error_msg:
+                    raise ConnectionError(
+                        f"DashScope DNS resolution failed. "
+                        f"If you're outside China, set DASHSCOPE_BASE_URL=https://dashscope-intl.aliyuncs.com/api/v1 "
+                        f"or switch to EMBEDDING_PROVIDER=qwen. Error: {error_msg}"
+                    ) from e
+                raise ValueError(f"DashScope embedding API call failed: {error_msg}") from e
+            
             if not resp:
                 raise ValueError("DashScope embedding failed: empty response")
             status_code = resp.get("status_code")
@@ -116,9 +136,12 @@ def get_embeddings():
     if provider in ("dashscope", "qwen_vl", "qwen3_vl"):
         if not settings.qwen_api_key:
             raise ValueError("QWEN_API_KEY is not set")
+        # Use international endpoint if configured, otherwise use default (China region)
+        base_url = settings.dashscope_base_url
         return DashScopeVLEmbeddings(
             api_key=settings.qwen_api_key,
             model=settings.dashscope_embedding_model,
+            base_url=base_url,
         )
     if provider == "deepseek":
         if settings.deepseek_embedding_model:

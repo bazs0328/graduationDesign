@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -7,6 +8,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from app.core.llm import get_llm
 from app.core.vectorstore import get_vectorstore
 from app.utils.json_tools import safe_json_loads
+
+logger = logging.getLogger(__name__)
 
 # Max length for reference_questions to avoid exceeding model context
 REFERENCE_QUESTIONS_MAX_CHARS = 8000
@@ -147,33 +150,98 @@ def generate_quiz(
         style_prompt, reference_questions, context_is_from_reference, focus_concepts
     )
 
-    llm = get_llm(temperature=0.4)
-    if extra:
-        human_msg = QUIZ_MIMIC_HUMAN_TEMPLATE.format(
-            count=count,
-            difficulty=difficulty,
-            extra_instructions=extra,
-            context=context,
-        )
-        msg_list = [
-            SystemMessage(content=QUIZ_MIMIC_SYSTEM),
-            HumanMessage(content=human_msg),
-        ]
-        result = llm.invoke(msg_list)
-    else:
-        messages = QUIZ_PROMPT.format_messages(
-            count=count, difficulty=difficulty, context=context
-        )
-        result = llm.invoke(messages)
+    try:
+        llm = get_llm(temperature=0.4)
+    except Exception as e:
+        logger.error(f"Failed to initialize LLM: {e}")
+        raise ValueError(f"Failed to initialize LLM: {str(e)}")
 
-    data = safe_json_loads(result.content)
+    try:
+        if extra:
+            human_msg = QUIZ_MIMIC_HUMAN_TEMPLATE.format(
+                count=count,
+                difficulty=difficulty,
+                extra_instructions=extra,
+                context=context,
+            )
+            msg_list = [
+                SystemMessage(content=QUIZ_MIMIC_SYSTEM),
+                HumanMessage(content=human_msg),
+            ]
+            result = llm.invoke(msg_list)
+        else:
+            messages = QUIZ_PROMPT.format_messages(
+                count=count, difficulty=difficulty, context=context
+            )
+            result = llm.invoke(messages)
+    except Exception as e:
+        logger.error(f"LLM invocation failed: {e}")
+        raise ValueError(f"Failed to generate quiz questions from LLM: {str(e)}")
+    
+    if not hasattr(result, 'content') or not result.content:
+        logger.error("LLM returned empty or invalid response")
+        raise ValueError("LLM returned empty or invalid response")
+
+    try:
+        data = safe_json_loads(result.content)
+    except Exception as e:
+        logger.error(f"Failed to parse LLM JSON response: {e}")
+        logger.debug(f"LLM response content: {result.content[:500]}")
+        raise ValueError(f"Failed to parse quiz questions from LLM response: {str(e)}")
+
     if isinstance(data, dict):
         data = data.get("questions", [])
+    
+    if not isinstance(data, list):
+        logger.error(f"Expected list of questions, got {type(data)}: {data}")
+        raise ValueError(f"Expected list of questions, got {type(data).__name__}")
+
+    if len(data) == 0:
+        logger.warning("LLM returned empty question list")
+        raise ValueError("No questions generated. Please check context or try again.")
+
+    # Validate and normalize each question
+    validated_questions = []
+    for idx, q in enumerate(data):
+        if not isinstance(q, dict):
+            logger.warning(f"Question {idx} is not a dict, skipping: {q}")
+            continue
+        
+        # Ensure required fields exist
+        required_fields = ["question", "options", "answer_index", "explanation"]
+        missing_fields = [f for f in required_fields if f not in q]
+        if missing_fields:
+            logger.warning(f"Question {idx} missing fields {missing_fields}, skipping")
+            continue
+        
+        # Normalize types
+        if not isinstance(q.get("options"), list) or len(q["options"]) != 4:
+            logger.warning(f"Question {idx} has invalid options, skipping")
+            continue
+        
+        if not isinstance(q.get("answer_index"), int) or q["answer_index"] < 0 or q["answer_index"] >= 4:
+            logger.warning(f"Question {idx} has invalid answer_index, skipping")
+            continue
+        
+        # Ensure concepts is a list
+        if "concepts" not in q or not isinstance(q.get("concepts"), list):
+            q["concepts"] = []
+        
+        validated_questions.append(q)
+    
+    if len(validated_questions) == 0:
+        logger.error("No valid questions after validation")
+        raise ValueError("No valid questions generated. Please check LLM output format.")
 
     if keypoint_ids:
-        for q in data:
-            if isinstance(q, dict) and "keypoint_ids" not in q:
+        for q in validated_questions:
+            if "keypoint_ids" not in q:
                 q["keypoint_ids"] = keypoint_ids
 
-    json.dumps(data)  # validate serializable
-    return data
+    try:
+        json.dumps(validated_questions)  # validate serializable
+    except TypeError as e:
+        logger.error(f"Questions are not JSON serializable: {e}")
+        raise ValueError(f"Generated questions are not JSON serializable: {str(e)}")
+    
+    return validated_questions

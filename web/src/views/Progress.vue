@@ -320,7 +320,7 @@ import {
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { GraphChart } from 'echarts/charts'
-import { TooltipComponent, LegendComponent } from 'echarts/components'
+import { TooltipComponent, LegendComponent, GraphicComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import LearnerProfileCard from '../components/LearnerProfileCard.vue'
 import { apiGet, getProfile, buildLearningPath } from '../api'
@@ -330,7 +330,7 @@ import { MASTERY_MASTERED, masteryPercent } from '../utils/mastery'
 
 const { showToast } = useToast()
 
-use([CanvasRenderer, GraphChart, TooltipComponent, LegendComponent])
+use([CanvasRenderer, GraphChart, TooltipComponent, LegendComponent, GraphicComponent])
 
 const STAGE_ORDER = ['foundation', 'intermediate', 'advanced', 'application']
 const STAGE_META = {
