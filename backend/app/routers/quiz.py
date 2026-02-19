@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session
 from app.core.knowledge_bases import ensure_kb
 from app.core.users import ensure_user
 from app.db import get_db
-from app.models import Document, Quiz, QuizAttempt
+from app.models import Document, Keypoint, Quiz, QuizAttempt
 from app.schemas import (
+    MasteryUpdate,
     ParseReferenceResponse,
     QuizGenerateRequest,
     QuizGenerateResponse,
@@ -31,8 +32,8 @@ from app.services.learner_profile import (
 from app.services.keypoints import (
     match_keypoints_by_concepts,
     match_keypoints_by_kb,
-    update_keypoint_mastery,
 )
+from app.services.mastery import record_quiz_result
 from app.services.quiz import generate_quiz
 from app.services.text_extraction import extract_text
 from app.utils.document_validator import DocumentValidator
@@ -245,6 +246,24 @@ def parse_reference_pdf(file: UploadFile = File(...)):
                 pass
 
 
+def _resolve_keypoints_for_question(
+    q: dict, user_id: str, doc_id: str | None, kb_id: str | None,
+) -> list[str]:
+    """Get keypoint_ids for a question: prefer pre-bound ids, fallback to concept search."""
+    kp_ids = q.get("keypoint_ids")
+    if kp_ids and isinstance(kp_ids, list):
+        return [k for k in kp_ids if isinstance(k, str)]
+
+    concepts = q.get("concepts") or []
+    if not concepts:
+        return []
+    if doc_id:
+        return match_keypoints_by_concepts(user_id, doc_id, concepts)
+    if kb_id:
+        return match_keypoints_by_kb(user_id, kb_id, concepts)
+    return []
+
+
 @router.post("/quiz/submit", response_model=QuizSubmitResponse)
 def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
     resolved_user_id = ensure_user(db, payload.user_id)
@@ -259,6 +278,7 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
     results = []
     explanations = []
     correct = 0
+    mastery_deltas: dict[str, tuple[float, float]] = {}
 
     for idx, q in enumerate(questions):
         expected = q.get("answer_index")
@@ -268,20 +288,32 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
         explanations.append(q.get("explanation", ""))
         if is_correct:
             correct += 1
-        concepts = q.get("concepts") or []
-        if concepts:
-            if quiz.doc_id:
-                matched_keypoints = match_keypoints_by_concepts(
-                    resolved_user_id, quiz.doc_id, concepts
+
+        kp_ids = _resolve_keypoints_for_question(
+            q, resolved_user_id, quiz.doc_id, quiz.kb_id
+        )
+        for kp_id in kp_ids:
+            delta = record_quiz_result(db, kp_id, is_correct)
+            if delta and kp_id not in mastery_deltas:
+                mastery_deltas[kp_id] = delta
+
+    mastery_updates: list[MasteryUpdate] = []
+    if mastery_deltas:
+        kp_rows = (
+            db.query(Keypoint)
+            .filter(Keypoint.id.in_(mastery_deltas.keys()))
+            .all()
+        )
+        kp_text_map = {kp.id: kp.text for kp in kp_rows}
+        for kp_id, (old_lv, new_lv) in mastery_deltas.items():
+            mastery_updates.append(
+                MasteryUpdate(
+                    keypoint_id=kp_id,
+                    text=kp_text_map.get(kp_id, ""),
+                    old_level=old_lv,
+                    new_level=new_lv,
                 )
-            elif quiz.kb_id:
-                matched_keypoints = match_keypoints_by_kb(
-                    resolved_user_id, quiz.kb_id, concepts
-                )
-            else:
-                matched_keypoints = []
-            for keypoint_id in matched_keypoints:
-                update_keypoint_mastery(db, keypoint_id, is_correct)
+            )
 
     score = correct / total if total else 0.0
     first_five_wrong = sum(1 for item in results[:5] if not item)
@@ -324,4 +356,5 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
         next_quiz_recommendation=next_quiz_recommendation,
         profile_delta=profile_delta,
         wrong_questions_by_concept=wrong_questions_by_concept,
+        mastery_updates=mastery_updates,
     )

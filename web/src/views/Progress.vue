@@ -152,7 +152,7 @@
                     <div class="flex items-center gap-2 text-xs text-muted-foreground">
                       <span class="truncate max-w-[120px]">{{ item.doc_name || '文档' }}</span>
                       <span>·</span>
-                      <span>掌握度 {{ Math.round(item.mastery_level * 100) }}%</span>
+                      <span>掌握度 {{ masteryPercent(item.mastery_level) }}%</span>
                     </div>
                     <div v-if="item.prerequisites.length" class="text-xs text-orange-500">
                       需先学习：{{ item.prerequisites.join('、') }}
@@ -237,6 +237,7 @@ import LearnerProfileCard from '../components/LearnerProfileCard.vue'
 import { apiGet, apiPost, getProfile, buildLearningPath } from '../api'
 import { useToast } from '../composables/useToast'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
+import { MASTERY_MASTERED, masteryPercent } from '../utils/mastery'
 
 const { showToast } = useToast()
 
@@ -394,7 +395,7 @@ const pathChartOption = computed(() => {
 
   const colors = docColorMap.value
   const nodes = learningPath.value.map((item) => {
-    const isMastered = item.mastery_level >= 0.8
+    const isMastered = item.mastery_level >= MASTERY_MASTERED
     const sizeMap = { high: 50, medium: 40, low: 30, completed: 25 }
     return {
       id: item.keypoint_id,
@@ -417,7 +418,7 @@ const pathChartOption = computed(() => {
       tooltip: {
         formatter: () => {
           const prereqs = item.prerequisites.length ? `<br/><span style="color:#f59e0b">前置：${item.prerequisites.join('、')}</span>` : ''
-          return `<b>${item.text}</b><br/>文档：${item.doc_name || '—'}<br/>掌握度：${Math.round(item.mastery_level * 100)}%<br/>优先级：${item.priority}${prereqs}`
+          return `<b>${item.text}</b><br/>文档：${item.doc_name || '—'}<br/>掌握度：${masteryPercent(item.mastery_level)}%<br/>优先级：${item.priority}${prereqs}`
         }
       },
       _raw: item,

@@ -187,6 +187,29 @@
               再测一次
             </button>
           </div>
+          <div v-if="hasMasteryUpdates" class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
+            <h3 class="text-lg font-bold">知识点掌握度变化</h3>
+            <div class="grid grid-cols-1 gap-3">
+              <div v-for="mu in masteryUpdates" :key="mu.keypoint_id"
+                class="flex items-center gap-3 p-3 border rounded-lg"
+                :class="masteryBorderClass(mu.new_level)">
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium truncate">{{ mu.text }}</p>
+                  <div class="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                    <span>{{ masteryPercent(mu.old_level) }}%</span>
+                    <span>→</span>
+                    <span class="font-semibold" :class="mu.new_level > mu.old_level ? 'text-green-600' : 'text-red-500'">
+                      {{ masteryPercent(mu.new_level) }}%
+                    </span>
+                  </div>
+                </div>
+                <span class="px-2 py-1 text-[10px] font-bold rounded-full border" :class="masteryBadgeClass(mu.new_level)">
+                  {{ masteryLabel(mu.new_level) }}
+                </span>
+              </div>
+            </div>
+          </div>
+
           <div v-if="hasWrongGroups" class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
             <div class="flex items-center justify-between">
               <div>
@@ -240,6 +263,7 @@ import AnimatedNumber from '../components/ui/AnimatedNumber.vue'
 import { useToast } from '../composables/useToast'
 import Button from '../components/ui/Button.vue'
 import LoadingOverlay from '../components/ui/LoadingOverlay.vue'
+import { masteryLabel, masteryPercent, masteryBadgeClass, masteryBorderClass } from '../utils/mastery'
 
 const { showToast } = useToast()
 
@@ -262,6 +286,8 @@ const profileDelta = computed(() => quizResult.value?.profile_delta || null)
 const hasProfileDelta = computed(() => !!profileDelta.value)
 const wrongQuestionGroups = computed(() => quizResult.value?.wrong_questions_by_concept || [])
 const hasWrongGroups = computed(() => wrongQuestionGroups.value.length > 0)
+const masteryUpdates = computed(() => quizResult.value?.mastery_updates || [])
+const hasMasteryUpdates = computed(() => masteryUpdates.value.length > 0)
 
 async function refreshKbs() {
   try {

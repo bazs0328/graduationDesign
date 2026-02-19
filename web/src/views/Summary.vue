@@ -152,6 +152,13 @@ import { useToast } from '../composables/useToast'
 import Button from '../components/ui/Button.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
+import {
+  masteryLabel as _masteryLabel,
+  masteryPercent as _masteryPercent,
+  masteryBadgeClass as _masteryBadgeClass,
+  masteryBorderClass as _masteryBorderClass,
+  isWeakMastery as _isWeakMastery,
+} from '../utils/mastery'
 
 const { showToast } = useToast()
 
@@ -185,45 +192,25 @@ function getMasteryLevel(point) {
   return Number.isFinite(level) ? Math.max(0, Math.min(level, 1)) : null
 }
 
-function masteryState(point) {
-  const level = getMasteryLevel(point)
-  if (level === null) return null
-  if (level >= 0.7) return 'mastered'
-  if (level >= 0.3) return 'partial'
-  return 'weak'
-}
-
 function masteryLabel(point) {
-  const state = masteryState(point)
-  if (state === 'mastered') return '已掌握'
-  if (state === 'partial') return '部分掌握'
-  if (state === 'weak') return '待学习'
-  return ''
+  const lv = getMasteryLevel(point)
+  return lv === null ? '' : _masteryLabel(lv)
 }
-
 function masteryPercent(point) {
-  const level = getMasteryLevel(point)
-  return level === null ? 0 : Math.round(level * 100)
+  const lv = getMasteryLevel(point)
+  return lv === null ? 0 : _masteryPercent(lv)
 }
-
 function masteryBadgeClass(point) {
-  const state = masteryState(point)
-  if (state === 'mastered') return 'bg-green-500/10 text-green-600 border-green-500/30'
-  if (state === 'partial') return 'bg-amber-500/10 text-amber-600 border-amber-500/30'
-  if (state === 'weak') return 'bg-red-500/10 text-red-600 border-red-500/30'
-  return ''
+  const lv = getMasteryLevel(point)
+  return lv === null ? '' : _masteryBadgeClass(lv)
 }
-
 function masteryBorderClass(point) {
-  const state = masteryState(point)
-  if (state === 'mastered') return 'border-green-500/30 hover:border-green-500/50'
-  if (state === 'partial') return 'border-amber-500/30 hover:border-amber-500/50'
-  if (state === 'weak') return 'border-red-500/30 hover:border-red-500/50'
-  return ''
+  const lv = getMasteryLevel(point)
+  return lv === null ? '' : _masteryBorderClass(lv)
 }
-
 function isWeakMastery(point) {
-  return masteryState(point) === 'weak'
+  const lv = getMasteryLevel(point)
+  return lv !== null && _isWeakMastery(lv)
 }
 
 function goToQuiz() {

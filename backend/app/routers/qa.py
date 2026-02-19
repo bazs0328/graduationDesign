@@ -1,4 +1,5 @@
 import json
+import logging
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,11 +7,15 @@ from sqlalchemy.orm import Session
 
 from app.core.users import ensure_user
 from app.core.knowledge_bases import ensure_kb
+from app.core.vectorstore import get_vectorstore
 from app.db import get_db
 from app.models import ChatMessage, ChatSession, Document, QARecord
 from app.schemas import QARequest, QAResponse, SourceSnippet
 from app.services.learner_profile import get_or_create_profile, get_weak_concepts
+from app.services.mastery import record_study_interaction
 from app.services.qa import answer_question
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -143,6 +148,8 @@ def ask_question(payload: QARequest, db: Session = Depends(get_db)):
             )
         )
 
+    _update_mastery_from_qa(db, resolved_user_id, payload.question, doc_id, kb_id)
+
     db.commit()
 
     return QAResponse(
@@ -151,3 +158,37 @@ def ask_question(payload: QARequest, db: Session = Depends(get_db)):
         session_id=session.id if session else None,
         ability_level=profile.ability_level,
     )
+
+
+def _update_mastery_from_qa(
+    db: Session,
+    user_id: str,
+    question: str,
+    doc_id: str | None,
+    kb_id: str | None,
+) -> None:
+    """Match the user's question to keypoints and record a study interaction."""
+    filter_dict: dict = {"type": "keypoint"}
+    if doc_id:
+        filter_dict["doc_id"] = doc_id
+    elif kb_id:
+        filter_dict["kb_id"] = kb_id
+    else:
+        return
+
+    try:
+        vectorstore = get_vectorstore(user_id)
+        results = vectorstore.similarity_search_with_score(
+            question, k=3, filter=filter_dict,
+        )
+    except Exception:
+        logger.debug("QA mastery: vector search failed", exc_info=True)
+        return
+
+    for doc_result, score in results:
+        if score > 1.0:
+            continue
+        meta = getattr(doc_result, "metadata", {}) or {}
+        kp_id = meta.get("keypoint_id")
+        if kp_id:
+            record_study_interaction(db, kp_id)

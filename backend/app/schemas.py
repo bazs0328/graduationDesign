@@ -145,6 +145,13 @@ class WrongQuestionGroup(BaseModel):
     question_indices: List[int]
 
 
+class MasteryUpdate(BaseModel):
+    keypoint_id: str
+    text: str
+    old_level: float
+    new_level: float
+
+
 class QuizSubmitResponse(BaseModel):
     score: float
     correct: int
@@ -155,6 +162,7 @@ class QuizSubmitResponse(BaseModel):
     next_quiz_recommendation: Optional[NextQuizRecommendation] = None
     profile_delta: Optional[ProfileDelta] = None
     wrong_questions_by_concept: List[WrongQuestionGroup] = []
+    mastery_updates: List[MasteryUpdate] = []
 
 
 class DifficultyPlan(BaseModel):
