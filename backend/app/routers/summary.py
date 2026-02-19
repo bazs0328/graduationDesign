@@ -14,7 +14,7 @@ router = APIRouter()
 
 
 @router.post("/summary", response_model=SummaryResponse)
-def generate_summary(payload: SummaryRequest, db: Session = Depends(get_db)):
+async def generate_summary(payload: SummaryRequest, db: Session = Depends(get_db)):
     def _normalize_summary(value):
         if isinstance(value, str):
             return value
@@ -50,7 +50,7 @@ def generate_summary(payload: SummaryRequest, db: Session = Depends(get_db)):
         text = f.read()
 
     try:
-        summary = summarize_text(text)
+        summary = await summarize_text(text)
     except Exception as exc:
         raise HTTPException(
             status_code=500,

@@ -61,7 +61,7 @@ def _to_keypoint_items(points: list[Keypoint]) -> list[KeypointItemV2]:
 
 
 @router.post("/keypoints", response_model=KeypointsResponse)
-def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(get_db)):
+async def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(get_db)):
     resolved_user_id = ensure_user(db, payload.user_id)
     doc = db.query(Document).filter(Document.id == payload.doc_id).first()
     if not doc:
@@ -119,7 +119,7 @@ def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(get_db))
         raise HTTPException(status_code=500, detail="Document text file not readable.") from open_exc
 
     try:
-        points = extract_keypoints(
+        points = await extract_keypoints(
             text,
             user_id=resolved_user_id,
             doc_id=doc.id,

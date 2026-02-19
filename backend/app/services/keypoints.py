@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Optional
 
@@ -38,6 +39,19 @@ FINAL_PROMPT = ChatPromptTemplate.from_messages(
         ),
     ]
 )
+
+# Larger chunks = fewer LLM calls; cap prevents runaway on huge docs
+_KP_CHUNK_SIZE = 6000
+_KP_CHUNK_OVERLAP = 300
+_MAX_CHUNKS = 15
+
+
+def _sample_chunks(chunks: list[str], max_count: int) -> list[str]:
+    """Evenly sample chunks when there are too many."""
+    if len(chunks) <= max_count:
+        return chunks
+    step = len(chunks) / max_count
+    return [chunks[int(i * step)] for i in range(max_count)]
 
 
 def _parse_point(p) -> dict:
@@ -216,36 +230,39 @@ def update_keypoint_mastery(db: Session, keypoint_id: str, is_correct: bool) -> 
     db.commit()
 
 
-def extract_keypoints(
+async def extract_keypoints(
     text: str,
     user_id: Optional[str] = None,
     doc_id: Optional[str] = None,
 ) -> list[dict]:
     llm = get_llm(temperature=0.2)
-    splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=_KP_CHUNK_SIZE, chunk_overlap=_KP_CHUNK_OVERLAP
+    )
     chunks = splitter.split_text(text)
+    chunks = _sample_chunks(chunks, _MAX_CHUNKS)
 
-    all_points: list[dict] = []
-    for i, chunk in enumerate(chunks):
+    async def _process_chunk(chunk: str) -> list[dict]:
         safe_chunk = chunk.replace("{", "{{").replace("}", "}}")
         msg = CHUNK_PROMPT.format_messages(chunk=safe_chunk)
-        result = llm.invoke(msg)
+        result = await llm.ainvoke(msg)
         try:
             points = safe_json_loads(result.content)
         except Exception:
             points = []
-        if isinstance(points, list):
-            for p in points:
-                parsed = _parse_point(p)
-                if parsed and parsed.get("text"):
-                    all_points.append(parsed)
+        if not isinstance(points, list):
+            return []
+        return [p for p in (_parse_point(p) for p in points) if p and p.get("text")]
+
+    chunk_results = await asyncio.gather(*[_process_chunk(c) for c in chunks])
+    all_points: list[dict] = [p for chunk_pts in chunk_results for p in chunk_pts]
 
     points_str = "\n".join(
         f"- {p.get('text', '')}" + (f" ({p.get('explanation')})" if p.get("explanation") else "")
         for p in all_points
     )
     final_msg = FINAL_PROMPT.format_messages(points=points_str)
-    final_result = llm.invoke(final_msg)
+    final_result = await llm.ainvoke(final_msg)
     try:
         final_points = safe_json_loads(final_result.content)
     except Exception:
