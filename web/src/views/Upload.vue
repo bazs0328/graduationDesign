@@ -11,7 +11,10 @@
         <div class="space-y-4">
           <div class="space-y-2">
             <label class="text-sm font-medium text-muted-foreground uppercase tracking-wider">知识库</label>
-            <div class="flex gap-2 flex-wrap">
+            <div v-if="busy.init">
+              <SkeletonBlock type="list" :lines="2" />
+            </div>
+            <div v-else class="flex gap-2 flex-wrap">
               <select v-model="selectedKbId" class="flex-1 bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary">
                 <option disabled value="">请选择</option>
                 <option v-for="kb in kbs" :key="kb.id" :value="kb.id">{{ kb.name }}</option>
@@ -22,13 +25,14 @@
                 placeholder="新知识库名称"
                 class="flex-1 min-w-[160px] bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary"
               />
-              <button
-                class="px-4 py-2 bg-secondary text-secondary-foreground rounded-lg font-medium hover:bg-secondary/80 transition-colors disabled:opacity-50"
-                :disabled="!kbNameInput || busy.kb"
+              <Button
+                variant="secondary"
+                :disabled="!kbNameInput"
+                :loading="busy.kb"
                 @click="createKb"
               >
-                {{ busy.kb ? '...' : '创建' }}
-              </button>
+                创建
+              </Button>
             </div>
           </div>
 
@@ -58,22 +62,29 @@
           </div>
 
           <div class="flex gap-4 pt-2">
-            <button
-              class="flex-1 flex items-center justify-center gap-2 bg-primary text-primary-foreground rounded-xl py-3 font-bold shadow-lg shadow-primary/25 hover:opacity-90 transition-all disabled:opacity-50"
-              :disabled="!uploadFile || busy.upload"
+            <Button
+              class="flex-1 shadow-lg shadow-primary/25"
+              size="lg"
+              :disabled="!uploadFile"
+              :loading="busy.upload"
               @click="uploadDoc"
             >
-              <UploadIcon class="w-5 h-5" />
+              <template #icon>
+                <UploadIcon class="w-5 h-5" />
+              </template>
               {{ busy.upload ? '上传中…' : '上传到知识库' }}
-            </button>
-            <button
-              class="flex items-center gap-2 px-4 py-3 bg-secondary text-secondary-foreground rounded-xl font-medium hover:bg-secondary/80 transition-colors border border-border"
+            </Button>
+            <Button
+              variant="secondary"
+              class="border border-border"
+              :loading="busy.refresh"
               @click="refreshDocs"
-              :disabled="busy.refresh"
             >
-              <RefreshCw class="w-5 h-5" :class="{ 'animate-spin': busy.refresh }" />
+              <template #icon>
+                <RefreshCw class="w-5 h-5" />
+              </template>
               <span>刷新列表</span>
-            </button>
+            </Button>
           </div>
         </div>
       </section>
@@ -86,12 +97,15 @@
             <h2 class="text-xl font-bold">我的文档</h2>
           </div>
           <span class="text-xs font-bold bg-secondary px-2 py-1 rounded text-secondary-foreground">
-            共 {{ docs.length }} 个
+            {{ busy.init ? '加载中…' : `共 ${docs.length} 个` }}
           </span>
         </div>
 
         <div class="flex-1 overflow-y-auto space-y-4 pr-2">
-          <div v-if="docs.length === 0" class="h-full flex flex-col items-center justify-center text-muted-foreground space-y-2">
+          <div v-if="busy.init" class="space-y-4">
+            <SkeletonBlock type="list" :lines="5" />
+          </div>
+          <div v-else-if="docs.length === 0" class="h-full flex flex-col items-center justify-center text-muted-foreground space-y-2">
             <Database class="w-12 h-12 opacity-20" />
             <p>暂无文档</p>
           </div>
@@ -139,6 +153,8 @@ import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { Upload, FileText, Database, X, RefreshCw } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
+import Button from '../components/ui/Button.vue'
+import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 
 const { showToast } = useToast()
 
@@ -153,7 +169,8 @@ const dragActive = ref(false)
 const busy = ref({
   upload: false,
   kb: false,
-  refresh: false
+  refresh: false,
+  init: false
 })
 const pollingIntervals = ref(new Map()) // 存储每个文档的轮询定时器
 
@@ -332,8 +349,13 @@ function statusClass(status) {
 }
 
 onMounted(async () => {
-  await refreshKbs()
-  await refreshDocs()
+  busy.value.init = true
+  try {
+    await refreshKbs()
+    await refreshDocs()
+  } finally {
+    busy.value.init = false
+  }
 })
 
 watch(selectedKbId, async () => {

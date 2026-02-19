@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-8 max-w-6xl mx-auto">
     <!-- Top Stats Bar -->
-    <section v-if="progress" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+    <section v-if="!busy.init && progress" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
       <div v-for="stat in topStats" :key="stat.label" class="bg-card border border-border rounded-xl p-6 shadow-sm flex items-center gap-4">
         <div class="w-12 h-12 rounded-lg flex items-center justify-center" :class="stat.color">
           <component :is="stat.icon" class="w-6 h-6" />
@@ -12,11 +12,19 @@
         </div>
       </div>
     </section>
+    <section v-else-if="busy.init" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div v-for="index in 4" :key="`top-skeleton-${index}`" class="bg-card border border-border rounded-xl p-6 shadow-sm">
+        <SkeletonBlock type="card" :lines="3" />
+      </div>
+    </section>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
       <!-- Left: KB Breakdown & Recommendations -->
       <div class="lg:col-span-2 space-y-8">
-        <LearnerProfileCard :profile="profile" />
+        <section v-if="busy.init" class="bg-card border border-border rounded-xl p-6 shadow-sm">
+          <SkeletonBlock type="card" :lines="6" />
+        </section>
+        <LearnerProfileCard v-else :profile="profile" />
         <!-- KB Selector & Stats -->
         <section class="bg-card border border-border rounded-xl p-8 shadow-sm space-y-8">
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -30,7 +38,10 @@
             </select>
           </div>
 
-          <div v-if="kbProgress" class="grid grid-cols-2 md:grid-cols-4 gap-6 animate-in fade-in slide-in-from-bottom-2">
+          <div v-if="busy.init" class="py-2">
+            <SkeletonBlock type="card" :lines="5" />
+          </div>
+          <div v-else-if="kbProgress" class="grid grid-cols-2 md:grid-cols-4 gap-6 animate-in fade-in slide-in-from-bottom-2">
             <div v-for="s in kbStatItems" :key="s.label" class="space-y-1">
               <p class="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{{ s.label }}</p>
               <p class="text-xl font-bold">{{ s.value }}</p>
@@ -53,7 +64,10 @@
             </button>
           </div>
 
-          <div v-if="recommendations.length" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div v-if="busy.init" class="space-y-4">
+            <SkeletonBlock type="card" :lines="6" />
+          </div>
+          <div v-else-if="recommendations.length" class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div v-for="item in recommendations" :key="item.doc_id" class="p-5 bg-background border border-border rounded-xl hover:border-primary/30 transition-all group space-y-4">
               <div class="flex items-start justify-between">
                 <div class="flex items-center gap-2">
@@ -94,10 +108,13 @@
             </div>
           </div>
 
-          <div v-if="learningPath.length" class="space-y-4">
+          <div v-if="busy.init" class="space-y-4">
+            <SkeletonBlock type="card" :lines="8" />
+          </div>
+          <div v-else-if="learningPath.length" class="space-y-4">
             <!-- ECharts graph -->
-            <div class="border border-border rounded-lg bg-background p-2">
-              <VChart ref="pathChartRef" class="w-full h-[360px]" :option="pathChartOption" autoresize />
+            <div class="border border-border rounded-lg bg-background p-2" style="height: 376px">
+              <VChart ref="pathChartRef" class="w-full" style="height: 360px; display: block;" :option="pathChartOption" autoresize />
             </div>
 
             <!-- Legend -->
@@ -168,7 +185,10 @@
         </div>
 
         <div class="flex-1 overflow-y-auto space-y-6 pr-2">
-          <div v-if="activity.length === 0" class="h-full flex flex-col items-center justify-center text-muted-foreground opacity-30">
+          <div v-if="busy.init" class="space-y-4">
+            <SkeletonBlock type="list" :lines="6" />
+          </div>
+          <div v-else-if="activity.length === 0" class="h-full flex flex-col items-center justify-center text-muted-foreground opacity-30">
             <Clock class="w-12 h-12 mb-2" />
             <p>暂无最近动态</p>
           </div>
@@ -216,6 +236,7 @@ import VChart from 'vue-echarts'
 import LearnerProfileCard from '../components/LearnerProfileCard.vue'
 import { apiGet, apiPost, getProfile, buildLearningPath } from '../api'
 import { useToast } from '../composables/useToast'
+import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 
 const { showToast } = useToast()
 
@@ -234,6 +255,7 @@ const kbs = ref([])
 const selectedKbId = ref('')
 const pathChartRef = ref(null)
 const busy = ref({
+  init: false,
   recommendations: false,
   pathBuild: false,
 })
@@ -378,8 +400,6 @@ const pathChartOption = computed(() => {
       id: item.keypoint_id,
       name: item.text.length > 18 ? item.text.slice(0, 18) + '…' : item.text,
       symbolSize: sizeMap[item.priority] || 35,
-      x: item.step * 120,
-      y: Object.keys(colors).indexOf(colors[item.doc_id]?.toString()) * 80 + Math.random() * 30,
       itemStyle: {
         color: colors[item.doc_id] || '#666',
         opacity: isMastered ? 0.35 : 1,
@@ -462,10 +482,12 @@ function goToAction(item) {
 }
 
 onMounted(async () => {
-  await fetchProfile()
-  await fetchProgress()
-  await fetchActivity()
-  await refreshKbs()
+  busy.value.init = true
+  try {
+    await Promise.all([fetchProfile(), fetchProgress(), fetchActivity(), refreshKbs()])
+  } finally {
+    busy.value.init = false
+  }
 })
 
 watch(selectedKbId, () => {

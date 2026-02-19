@@ -10,26 +10,30 @@
           </div>
           <div class="space-y-2">
             <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">选择文档</label>
-            <select v-model="selectedDocId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary">
+            <SkeletonBlock v-if="busy.init" type="list" :lines="3" />
+            <select v-else v-model="selectedDocId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary">
               <option disabled value="">请选择</option>
               <option v-for="doc in docs" :key="doc.id" :value="doc.id">{{ doc.filename }}</option>
             </select>
           </div>
           <div class="flex flex-col gap-2 pt-2">
-            <button
-              class="w-full bg-primary text-primary-foreground rounded-lg py-2 font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
-              :disabled="!selectedDocId || busy.summary"
+            <Button
+              class="w-full"
+              :disabled="!selectedDocId"
+              :loading="busy.summary"
               @click="generateSummary()"
             >
               {{ busy.summary ? '生成中…' : '生成摘要' }}
-            </button>
-            <button
-              class="w-full bg-secondary text-secondary-foreground rounded-lg py-2 font-bold hover:bg-secondary/80 transition-colors disabled:opacity-50"
-              :disabled="!selectedDocId || busy.keypoints"
+            </Button>
+            <Button
+              class="w-full"
+              variant="secondary"
+              :disabled="!selectedDocId"
+              :loading="busy.keypoints"
               @click="generateKeypoints()"
             >
               {{ busy.keypoints ? '提取中…' : '提取要点' }}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -60,8 +64,7 @@
           </div>
 
           <div v-if="busy.summary" class="flex flex-col items-center justify-center py-20 space-y-4">
-            <div class="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-            <p class="text-muted-foreground animate-pulse">正在分析文档内容…</p>
+            <LoadingSpinner size="lg" message="正在分析文档内容…" vertical />
           </div>
           <div v-else-if="summary" class="prose prose-invert max-w-none">
             <p class="text-lg leading-relaxed whitespace-pre-wrap">{{ summary }}</p>
@@ -85,8 +88,7 @@
           </div>
 
           <div v-if="busy.keypoints" class="flex flex-col items-center justify-center py-12 space-y-4">
-            <div class="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-            <p class="text-muted-foreground animate-pulse">正在提取核心概念…</p>
+            <LoadingSpinner size="md" message="正在提取核心概念…" vertical />
           </div>
           <p v-else-if="keypointsError" class="text-sm text-destructive">{{ keypointsError }}</p>
           <div v-else-if="keypoints.length" class="grid grid-cols-1 gap-4">
@@ -144,9 +146,12 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { FileText, Sparkles, Layers, RefreshCw } from 'lucide-vue-next'
+import { FileText, Sparkles, Layers } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
+import Button from '../components/ui/Button.vue'
+import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
+import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 
 const { showToast } = useToast()
 
@@ -163,7 +168,8 @@ const keypointsCached = ref(false)
 const keypointsError = ref('')
 const busy = ref({
   summary: false,
-  keypoints: false
+  keypoints: false,
+  init: false
 })
 
 const selectedKbName = computed(() => {
@@ -284,7 +290,11 @@ async function generateKeypoints(force = false) {
 }
 
 onMounted(async () => {
-  await refreshKbs()
-  await refreshDocs()
+  busy.value.init = true
+  try {
+    await Promise.all([refreshKbs(), refreshDocs()])
+  } finally {
+    busy.value.init = false
+  }
 })
 </script>

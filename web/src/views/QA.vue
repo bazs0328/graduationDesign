@@ -97,25 +97,36 @@
             <Database class="w-6 h-6 text-primary" />
             <h2 class="text-xl font-bold">上下文</h2>
           </div>
-          <div class="space-y-2">
-            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">选择知识库</label>
-            <select v-model="selectedKbId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
-              <option disabled value="">请选择</option>
-              <option v-for="kb in kbs" :key="kb.id" :value="kb.id">{{ kb.name || kb.id }}</option>
-            </select>
-          </div>
-          <div class="space-y-2" v-if="selectedKbId">
-            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">限定文档 (可选)</label>
-            <select v-model="selectedDocId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
-              <option value="">不限定（整库问答）</option>
-              <option v-for="doc in docsInKb" :key="doc.id" :value="doc.id">{{ doc.filename }}</option>
-            </select>
-          </div>
+          <template v-if="busy.init">
+            <SkeletonBlock type="list" :lines="3" />
+          </template>
+          <template v-else>
+            <div class="space-y-2">
+              <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">选择知识库</label>
+              <select v-model="selectedKbId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
+                <option disabled value="">请选择</option>
+                <option v-for="kb in kbs" :key="kb.id" :value="kb.id">{{ kb.name || kb.id }}</option>
+              </select>
+            </div>
+            <div class="space-y-2" v-if="selectedKbId">
+              <div class="flex items-center gap-2">
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">限定文档 (可选)</label>
+                <LoadingSpinner v-if="busy.docs" size="sm" />
+              </div>
+              <select v-model="selectedDocId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
+                <option value="">不限定（整库问答）</option>
+                <option v-for="doc in docsInKb" :key="doc.id" :value="doc.id">{{ doc.filename }}</option>
+              </select>
+            </div>
+          </template>
         </div>
 
         <div class="flex-1 bg-card border border-border rounded-xl p-6 shadow-sm flex flex-col min-h-0">
           <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-4">简要统计</h3>
-          <div v-if="selectedKb" class="space-y-4 overflow-y-auto pr-2">
+          <div v-if="busy.init" class="mt-2">
+            <SkeletonBlock type="card" :lines="5" />
+          </div>
+          <div v-else-if="selectedKb" class="space-y-4 overflow-y-auto pr-2">
             <div class="p-3 bg-accent/30 rounded-lg border border-border">
               <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">当前知识库</p>
               <p class="text-sm font-semibold truncate">{{ selectedKb.name || selectedKb.id }}</p>
@@ -169,6 +180,8 @@ import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { MessageSquare, Send, Trash2, Database, FileText, Sparkles, User, Bot } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
+import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
+import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 
 const { showToast } = useToast()
 
@@ -182,7 +195,9 @@ const qaInput = ref('')
 const qaMessages = ref([])
 const qaAbilityLevel = ref('intermediate')
 const busy = ref({
-  qa: false
+  qa: false,
+  init: false,
+  docs: false
 })
 const scrollContainer = ref(null)
 
@@ -240,12 +255,16 @@ async function refreshKbs() {
 async function refreshDocsInKb() {
   if (!selectedKbId.value) {
     docsInKb.value = []
+    busy.value.docs = false
     return
   }
+  busy.value.docs = true
   try {
     docsInKb.value = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(selectedKbId.value)}`)
   } catch {
     // error toast handled globally
+  } finally {
+    busy.value.docs = false
   }
 }
 
@@ -305,7 +324,12 @@ function scrollToBottom() {
 }
 
 onMounted(async () => {
-  await Promise.all([refreshKbs(), refreshAbilityLevel()])
+  busy.value.init = true
+  try {
+    await Promise.all([refreshKbs(), refreshAbilityLevel()])
+  } finally {
+    busy.value.init = false
+  }
 })
 
 watch(selectedKbId, () => {

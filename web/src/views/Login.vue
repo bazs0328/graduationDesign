@@ -76,13 +76,14 @@
 
           <p v-if="errorMessage" class="text-sm text-destructive">{{ errorMessage }}</p>
 
-          <button
+          <Button
             type="submit"
-            class="w-full py-3 bg-primary text-primary-foreground font-semibold rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
-            :disabled="loading"
+            size="lg"
+            class="w-full"
+            :loading="loading"
           >
             {{ loading ? '处理中…' : (isLogin ? '登录' : '注册') }}
-          </button>
+          </Button>
         </form>
       </div>
     </div>
@@ -93,6 +94,7 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { authRegister, authLogin } from '../api'
+import Button from '../components/ui/Button.vue'
 
 const router = useRouter()
 const isLogin = ref(true)

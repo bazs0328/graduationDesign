@@ -45,15 +45,18 @@
               </select>
             </div>
 
-            <button
-              class="w-full bg-primary text-primary-foreground rounded-lg py-3 font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
-              :disabled="!selectedKbId || busy.quiz"
+            <Button
+              class="w-full"
+              size="lg"
+              :disabled="!selectedKbId"
+              :loading="busy.quiz"
               @click="generateQuiz"
             >
-              <Sparkles v-if="!busy.quiz" class="w-5 h-5" />
-              <RefreshCw v-else class="w-5 h-5 animate-spin" />
+              <template #icon>
+                <Sparkles class="w-5 h-5" />
+              </template>
               {{ busy.quiz ? '正在生成题目…' : '生成新测验' }}
-            </button>
+            </Button>
           </div>
         </section>
 
@@ -117,13 +120,9 @@
       </aside>
 
       <!-- Right: Quiz Content -->
-      <section class="lg:col-span-2 space-y-6">
-        <div v-if="busy.quiz" class="bg-card border border-border rounded-xl p-12 flex flex-col items-center justify-center space-y-4">
-          <div class="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-          <p class="text-muted-foreground animate-pulse font-medium">正在根据知识库生成题目…</p>
-        </div>
-
-        <div v-else-if="quiz" class="space-y-6">
+      <section class="lg:col-span-2 space-y-6 relative">
+        <LoadingOverlay :show="busy.quiz" message="正在根据知识库生成题目…" />
+        <div v-if="quiz" class="space-y-6">
           <div v-for="(q, idx) in quiz.questions" :id="`question-${idx + 1}`" :key="idx" class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4 transition-all" :class="{ 'border-primary/50 ring-1 ring-primary/20': quizResult }">
             <div class="flex items-start gap-4">
               <div class="flex-shrink-0 w-8 h-8 bg-accent text-accent-foreground rounded-lg flex items-center justify-center font-bold">
@@ -170,14 +169,16 @@
           </div>
 
           <div class="flex justify-center pt-4">
-            <button
+            <Button
               v-if="!quizResult"
-              class="px-12 py-4 bg-primary text-primary-foreground rounded-xl font-black text-lg shadow-lg hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
+              size="lg"
+              class="px-12 text-lg font-black shadow-lg hover:scale-105"
               @click="submitQuiz"
+              :loading="busy.submit"
               :disabled="busy.submit || Object.keys(quizAnswers).length < quiz.questions.length"
             >
               {{ busy.submit ? '正在批改…' : '提交全部答案' }}
-            </button>
+            </Button>
             <button
               v-else
               class="px-12 py-4 bg-secondary text-secondary-foreground rounded-xl font-black text-lg shadow-lg hover:scale-105 active:scale-95 transition-all"
@@ -233,10 +234,12 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { PenTool, Sparkles, RefreshCw, CheckCircle2, XCircle } from 'lucide-vue-next'
+import { PenTool, Sparkles, CheckCircle2, XCircle } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
 import AnimatedNumber from '../components/ui/AnimatedNumber.vue'
 import { useToast } from '../composables/useToast'
+import Button from '../components/ui/Button.vue'
+import LoadingOverlay from '../components/ui/LoadingOverlay.vue'
 
 const { showToast } = useToast()
 
