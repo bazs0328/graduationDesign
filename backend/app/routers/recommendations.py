@@ -89,12 +89,19 @@ def get_recommendations(
     }
 
     try:
-        learning_path, learning_path_edges = generate_learning_path(
+        (
+            learning_path,
+            learning_path_edges,
+            learning_path_stages,
+            learning_path_modules,
+            learning_path_summary,
+        ) = generate_learning_path(
             db, resolved_user_id, kb.id, limit=10
         )
     except Exception:
         logger.exception("Failed to generate learning path, returning empty")
         learning_path, learning_path_edges = [], []
+        learning_path_stages, learning_path_modules, learning_path_summary = [], [], {}
 
     ranked_items = []
     for doc in docs:
@@ -161,4 +168,7 @@ def get_recommendations(
         items=items,
         learning_path=learning_path,
         learning_path_edges=learning_path_edges,
+        learning_path_stages=learning_path_stages,
+        learning_path_modules=learning_path_modules,
+        learning_path_summary=learning_path_summary,
     )

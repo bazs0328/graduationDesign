@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -311,6 +311,12 @@ class LearningPathItem(BaseModel):
     step: int = 0
     prerequisites: List[str] = []
     action: str = "study"
+    stage: str = "foundation"
+    module: str = "module-1"
+    difficulty: float = 0.5
+    importance: float = 0.5
+    estimated_time: int = 10
+    milestone: bool = False
 
 
 class LearningPathEdge(BaseModel):
@@ -319,9 +325,30 @@ class LearningPathEdge(BaseModel):
     relation: str = "prerequisite"
 
 
+class LearningPathStage(BaseModel):
+    stage_id: str
+    name: str
+    description: str
+    keypoint_ids: List[str] = []
+    milestone_keypoint_id: Optional[str] = None
+    estimated_time: int = 0
+
+
+class LearningPathModule(BaseModel):
+    module_id: str
+    name: str
+    description: str
+    keypoint_ids: List[str] = []
+    prerequisite_modules: List[str] = []
+    estimated_time: int = 0
+
+
 class RecommendationsResponse(BaseModel):
     kb_id: str
     kb_name: Optional[str] = None
     items: List[RecommendationItem]
     learning_path: List[LearningPathItem] = []
     learning_path_edges: List[LearningPathEdge] = []
+    learning_path_stages: List[LearningPathStage] = []
+    learning_path_modules: List[LearningPathModule] = []
+    learning_path_summary: Dict[str, Any] = {}

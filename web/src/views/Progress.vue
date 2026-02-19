@@ -58,6 +58,10 @@
             <div class="flex items-center gap-3">
               <Sparkles class="w-6 h-6 text-primary" />
               <h2 class="text-2xl font-bold">智能推荐</h2>
+              <span v-if="busy.recommendations && !busy.init" class="text-sm text-muted-foreground flex items-center gap-2">
+                <RefreshCw class="w-4 h-4 animate-spin" />
+                <span>正在加载推荐...</span>
+              </span>
             </div>
             <button @click="fetchRecommendations" class="p-2 hover:bg-accent rounded-lg transition-colors" :disabled="busy.recommendations">
               <RefreshCw class="w-5 h-5" :class="{ 'animate-spin': busy.recommendations }" />
@@ -99,22 +103,91 @@
             <div class="flex items-center gap-3">
               <GitBranch class="w-6 h-6 text-primary" />
               <h2 class="text-2xl font-bold">学习路径</h2>
+              <span v-if="busy.pathLoad && !busy.init" class="text-sm text-muted-foreground flex items-center gap-2">
+                <RefreshCw class="w-4 h-4 animate-spin" />
+                <span>正在加载学习路径...</span>
+              </span>
+              <span v-else-if="busy.pathBuild" class="text-sm text-muted-foreground flex items-center gap-2">
+                <RefreshCw class="w-4 h-4 animate-spin" />
+                <span>正在重建学习路径...</span>
+              </span>
             </div>
             <div class="flex items-center gap-2">
-              <button @click="rebuildPath" class="p-2 hover:bg-accent rounded-lg transition-colors text-xs flex items-center gap-1" :disabled="busy.pathBuild">
-                <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': busy.pathBuild }" />
+              <button @click="rebuildPath" class="p-2 hover:bg-accent rounded-lg transition-colors text-xs flex items-center gap-1" :disabled="busy.pathBuild || busy.pathLoad">
+                <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': busy.pathBuild || busy.pathLoad }" />
                 <span class="hidden sm:inline">重建</span>
               </button>
             </div>
           </div>
 
-          <div v-if="busy.init" class="space-y-4">
+          <div v-if="busy.init || busy.pathLoad || busy.pathBuild" class="space-y-4">
             <SkeletonBlock type="card" :lines="8" />
           </div>
-          <div v-else-if="learningPath.length" class="space-y-4">
+          <div v-else-if="learningPath.length" class="space-y-6">
+            <!-- Path summary -->
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <div v-for="stat in pathSummaryCards" :key="stat.label" class="rounded-lg border border-border bg-background p-3 space-y-1">
+                <p class="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{{ stat.label }}</p>
+                <p class="text-lg font-extrabold">{{ stat.value }}</p>
+              </div>
+            </div>
+
+            <!-- Stage & module views -->
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <div class="rounded-lg border border-border p-4 space-y-3">
+                <h3 class="text-sm font-bold">阶段视图</h3>
+                <div class="space-y-3 max-h-[260px] overflow-y-auto pr-1">
+                  <div v-for="stage in displayStages" :key="stage.stage_id" class="rounded-lg border border-border bg-background p-3 space-y-2">
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full" :style="{ background: stageColor(stage.stage_id) }"></span>
+                        <p class="font-semibold text-sm">{{ stage.name }}</p>
+                      </div>
+                      <span class="text-[10px] px-2 py-0.5 rounded-full border border-border text-muted-foreground">
+                        {{ formatMinutes(stage.estimated_time || 0) }}
+                      </span>
+                    </div>
+                    <p class="text-xs text-muted-foreground">{{ stage.description }}</p>
+                    <div class="h-2 rounded-full bg-accent overflow-hidden">
+                      <div class="h-full bg-primary transition-all duration-500" :style="{ width: `${stageProgress(stage)}%` }"></div>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span>进度 {{ stageProgress(stage) }}%</span>
+                      <span>知识点 {{ stage.keypoint_ids.length }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="rounded-lg border border-border p-4 space-y-3">
+                <h3 class="text-sm font-bold">模块视图</h3>
+                <div class="space-y-3 max-h-[260px] overflow-y-auto pr-1">
+                  <div v-for="module in displayModules" :key="module.module_id" class="rounded-lg border border-border bg-background p-3 space-y-2">
+                    <div class="flex items-center justify-between gap-2">
+                      <p class="font-semibold text-sm truncate">{{ module.name }}</p>
+                      <span class="text-[10px] px-2 py-0.5 rounded-full border border-border text-muted-foreground">
+                        {{ formatMinutes(module.estimated_time || 0) }}
+                      </span>
+                    </div>
+                    <p class="text-xs text-muted-foreground">{{ module.description }}</p>
+                    <div class="h-2 rounded-full bg-accent overflow-hidden">
+                      <div class="h-full bg-emerald-500 transition-all duration-500" :style="{ width: `${moduleProgress(module)}%` }"></div>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span>进度 {{ moduleProgress(module) }}%</span>
+                      <span>知识点 {{ module.keypoint_ids.length }}</span>
+                    </div>
+                    <p v-if="module.prerequisite_modules?.length" class="text-[11px] text-orange-500">
+                      前置模块：{{ modulePrereqLabels(module).join('、') }}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- ECharts graph -->
-            <div class="border border-border rounded-lg bg-background p-2" style="height: 376px">
-              <VChart ref="pathChartRef" class="w-full" style="height: 360px; display: block;" :option="pathChartOption" autoresize />
+            <div class="border border-border rounded-lg bg-background p-2" style="height: 396px">
+              <VChart ref="pathChartRef" class="w-full" style="height: 380px; display: block;" :option="pathChartOption" autoresize />
             </div>
 
             <!-- Legend -->
@@ -127,19 +200,28 @@
                 </span>
               </div>
               <span class="text-border">|</span>
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-foreground">阶段：</span>
+                <span v-for="stage in displayStages" :key="stage.stage_id" class="inline-flex items-center gap-1">
+                  <span class="w-2.5 h-2.5 rounded-full inline-block" :style="{ background: stageColor(stage.stage_id) }"></span>
+                  <span>{{ stage.name }}</span>
+                </span>
+              </div>
+              <span class="text-border">|</span>
               <div class="flex items-center gap-3">
                 <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-foreground inline-block"></span> 待学习</span>
                 <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-foreground/40 inline-block"></span> 已掌握</span>
+                <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rotate-45 bg-primary/40 inline-block"></span> 里程碑</span>
               </div>
             </div>
 
-            <!-- Step list (compact) -->
+            <!-- Step list -->
             <details class="group">
               <summary class="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
                 <ChevronDown class="w-4 h-4 transition-transform group-open:rotate-180" />
                 查看详细步骤列表（{{ learningPath.length }} 项）
               </summary>
-              <div class="mt-3 space-y-2 max-h-[300px] overflow-y-auto pr-2">
+              <div class="mt-3 space-y-2 max-h-[320px] overflow-y-auto pr-2">
                 <div v-for="item in learningPath" :key="item.keypoint_id"
                   class="flex items-start gap-3 p-3 border border-border rounded-lg text-sm"
                   :class="{ 'opacity-50': item.priority === 'completed' }">
@@ -148,11 +230,20 @@
                     {{ item.step }}
                   </span>
                   <div class="flex-1 min-w-0 space-y-1">
-                    <p class="font-medium leading-tight">{{ item.text }}</p>
-                    <div class="flex items-center gap-2 text-xs text-muted-foreground">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <p class="font-medium leading-tight">{{ item.text }}</p>
+                      <span v-if="item.milestone" class="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-semibold">里程碑</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
                       <span class="truncate max-w-[120px]">{{ item.doc_name || '文档' }}</span>
                       <span>·</span>
+                      <span>{{ stageLabel(item.stage) }}</span>
+                      <span>·</span>
                       <span>掌握度 {{ masteryPercent(item.mastery_level) }}%</span>
+                      <span>·</span>
+                      <span>难度 {{ Math.round((item.difficulty || 0) * 100) }}</span>
+                      <span>·</span>
+                      <span>约 {{ item.estimated_time || 0 }} 分钟</span>
                     </div>
                     <div v-if="item.prerequisites.length" class="text-xs text-orange-500">
                       需先学习：{{ item.prerequisites.join('、') }}
@@ -169,7 +260,7 @@
           </div>
 
           <!-- Empty state -->
-          <div v-else-if="!busy.recommendations" class="py-12 text-center text-muted-foreground bg-accent/20 rounded-xl space-y-2">
+          <div v-else-if="!busy.pathLoad && !busy.pathBuild" class="py-12 text-center text-muted-foreground bg-accent/20 rounded-xl space-y-2">
             <GitBranch class="w-10 h-10 mx-auto opacity-30" />
             <p>请先为知识库内的文档生成知识点</p>
             <p class="text-xs">生成知识点后，系统将自动分析知识点间的依赖关系并规划学习路径</p>
@@ -213,20 +304,18 @@
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { 
-  BarChart2, 
-  FileText, 
-  PenTool, 
-  MessageSquare, 
-  Database, 
-  Activity, 
-  Sparkles, 
+import {
+  FileText,
+  PenTool,
+  MessageSquare,
+  Database,
+  Activity,
+  Sparkles,
   RefreshCw,
   Clock,
   TrendingUp,
-  CheckCircle2,
   GitBranch,
-  ChevronDown
+  ChevronDown,
 } from 'lucide-vue-next'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -234,7 +323,7 @@ import { GraphChart } from 'echarts/charts'
 import { TooltipComponent, LegendComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import LearnerProfileCard from '../components/LearnerProfileCard.vue'
-import { apiGet, apiPost, getProfile, buildLearningPath } from '../api'
+import { apiGet, getProfile, buildLearningPath } from '../api'
 import { useToast } from '../composables/useToast'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import { MASTERY_MASTERED, masteryPercent } from '../utils/mastery'
@@ -242,6 +331,20 @@ import { MASTERY_MASTERED, masteryPercent } from '../utils/mastery'
 const { showToast } = useToast()
 
 use([CanvasRenderer, GraphChart, TooltipComponent, LegendComponent])
+
+const STAGE_ORDER = ['foundation', 'intermediate', 'advanced', 'application']
+const STAGE_META = {
+  foundation: { name: '基础阶段', description: '先建立核心概念与术语理解。' },
+  intermediate: { name: '进阶阶段', description: '连接概念并形成系统化理解。' },
+  advanced: { name: '高级阶段', description: '攻克复杂推理与综合分析问题。' },
+  application: { name: '应用阶段', description: '迁移到实战场景并完成综合应用。' },
+}
+const STAGE_COLOR_MAP = {
+  foundation: '#3b82f6',
+  intermediate: '#10b981',
+  advanced: '#f59e0b',
+  application: '#ef4444',
+}
 
 const router = useRouter()
 const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
@@ -252,12 +355,16 @@ const activity = ref([])
 const recommendations = ref([])
 const learningPath = ref([])
 const learningPathEdges = ref([])
+const learningPathStages = ref([])
+const learningPathModules = ref([])
+const learningPathSummary = ref({})
 const kbs = ref([])
 const selectedKbId = ref('')
 const pathChartRef = ref(null)
 const busy = ref({
   init: false,
   recommendations: false,
+  pathLoad: false,
   pathBuild: false,
 })
 
@@ -267,13 +374,13 @@ const topStats = computed(() => {
     { label: '文档数', value: progress.value.total_docs, icon: FileText, color: 'bg-blue-500/10 text-blue-500' },
     { label: '测验数', value: progress.value.total_attempts, icon: PenTool, color: 'bg-orange-500/10 text-orange-500' },
     { label: '问答数', value: progress.value.total_questions, icon: MessageSquare, color: 'bg-green-500/10 text-green-500' },
-    { label: '平均分', value: `${Math.round(progress.value.avg_score * 100)}%`, icon: TrendingUp, color: 'bg-purple-500/10 text-purple-500' }
+    { label: '平均分', value: `${Math.round(progress.value.avg_score * 100)}%`, icon: TrendingUp, color: 'bg-purple-500/10 text-purple-500' },
   ]
 })
 
 const kbProgress = computed(() => {
   if (!progress.value || !selectedKbId.value) return null
-  return progress.value.by_kb.find(k => k.kb_id === selectedKbId.value) || null
+  return progress.value.by_kb.find((kb) => kb.kb_id === selectedKbId.value) || null
 })
 
 const kbStatItems = computed(() => {
@@ -282,7 +389,104 @@ const kbStatItems = computed(() => {
     { label: '文档', value: kbProgress.value.total_docs },
     { label: '测验', value: kbProgress.value.total_attempts },
     { label: '问答', value: kbProgress.value.total_questions },
-    { label: '平均分', value: `${Math.round(kbProgress.value.avg_score * 100)}%` }
+    { label: '平均分', value: `${Math.round(kbProgress.value.avg_score * 100)}%` },
+  ]
+})
+
+const itemById = computed(() => {
+  const map = {}
+  for (const item of learningPath.value) {
+    map[item.keypoint_id] = item
+  }
+  return map
+})
+
+const displayStages = computed(() => {
+  if (learningPathStages.value.length) return learningPathStages.value
+  if (!learningPath.value.length) return []
+  const grouped = {}
+  for (const item of learningPath.value) {
+    const stageId = item.stage || 'foundation'
+    if (!grouped[stageId]) grouped[stageId] = []
+    grouped[stageId].push(item)
+  }
+  return STAGE_ORDER
+    .filter((stageId) => grouped[stageId]?.length)
+    .map((stageId) => ({
+      stage_id: stageId,
+      name: stageLabel(stageId),
+      description: STAGE_META[stageId]?.description || '',
+      keypoint_ids: grouped[stageId].map((item) => item.keypoint_id),
+      estimated_time: grouped[stageId].reduce((sum, item) => sum + (item.estimated_time || 0), 0),
+      milestone_keypoint_id: grouped[stageId].find((item) => item.milestone)?.keypoint_id || grouped[stageId][grouped[stageId].length - 1]?.keypoint_id,
+    }))
+})
+
+const displayModules = computed(() => {
+  if (learningPathModules.value.length) return learningPathModules.value
+  if (!learningPath.value.length) return []
+  const grouped = {}
+  for (const item of learningPath.value) {
+    const moduleId = item.module || `doc-${item.doc_id}`
+    if (!grouped[moduleId]) {
+      grouped[moduleId] = {
+        module_id: moduleId,
+        name: item.doc_name ? `${item.doc_name}模块` : `模块 ${Object.keys(grouped).length + 1}`,
+        description: '按文档自动分组的学习模块。',
+        keypoint_ids: [],
+        prerequisite_modules: [],
+        estimated_time: 0,
+      }
+    }
+    grouped[moduleId].keypoint_ids.push(item.keypoint_id)
+    grouped[moduleId].estimated_time += item.estimated_time || 0
+  }
+  return Object.values(grouped)
+})
+
+const moduleNameMap = computed(() => {
+  const map = {}
+  for (const module of displayModules.value) {
+    map[module.module_id] = module.name
+  }
+  return map
+})
+
+const summaryResolved = computed(() => {
+  if (learningPathSummary.value && Object.keys(learningPathSummary.value).length) {
+    return learningPathSummary.value
+  }
+  const totalItems = learningPath.value.length
+  const completedItems = learningPath.value.filter((item) => item.priority === 'completed').length
+  const totalEstimatedTime = learningPath.value.reduce((sum, item) => sum + (item.estimated_time || 0), 0)
+  let currentStage = 'completed'
+  for (const stage of displayStages.value) {
+    const unfinished = stage.keypoint_ids.some((keypointId) => itemById.value[keypointId]?.priority !== 'completed')
+    if (unfinished) {
+      currentStage = stage.stage_id
+      break
+    }
+  }
+  return {
+    total_items: totalItems,
+    completed_items: completedItems,
+    completion_rate: totalItems ? completedItems / totalItems : 0,
+    total_estimated_time: totalEstimatedTime,
+    stages_count: displayStages.value.length,
+    modules_count: displayModules.value.length,
+    current_stage: currentStage,
+    current_stage_label: currentStage === 'completed' ? '全部完成' : stageLabel(currentStage),
+  }
+})
+
+const pathSummaryCards = computed(() => {
+  const summary = summaryResolved.value
+  return [
+    { label: '总时长', value: formatMinutes(summary.total_estimated_time || 0) },
+    { label: '阶段数', value: summary.stages_count || 0 },
+    { label: '模块数', value: summary.modules_count || 0 },
+    { label: '完成度', value: `${Math.round((summary.completion_rate || 0) * 100)}%` },
+    { label: '当前阶段', value: summary.current_stage_label || stageLabel(summary.current_stage) },
   ]
 })
 
@@ -317,12 +521,27 @@ async function fetchRecommendations() {
   try {
     const res = await apiGet(`/api/recommendations?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(selectedKbId.value)}&limit=6`)
     recommendations.value = res.items || []
-    learningPath.value = res.learning_path || []
-    learningPathEdges.value = res.learning_path_edges || []
   } catch {
     // error toast handled globally
   } finally {
     busy.value.recommendations = false
+  }
+}
+
+async function fetchLearningPath() {
+  if (!selectedKbId.value) return
+  busy.value.pathLoad = true
+  try {
+    const res = await apiGet(`/api/learning-path?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(selectedKbId.value)}&limit=20`)
+    learningPath.value = res.items || []
+    learningPathEdges.value = res.edges || []
+    learningPathStages.value = res.stages || []
+    learningPathModules.value = res.modules || []
+    learningPathSummary.value = res.path_summary || {}
+  } catch {
+    // error toast handled globally
+  } finally {
+    busy.value.pathLoad = false
   }
 }
 
@@ -332,7 +551,7 @@ async function rebuildPath() {
   try {
     await buildLearningPath(resolvedUserId.value, selectedKbId.value, true)
     showToast('学习路径已重建', 'success')
-    await fetchRecommendations()
+    await fetchLearningPath()
   } catch {
     // error toast handled globally
   } finally {
@@ -343,6 +562,10 @@ async function rebuildPath() {
 async function refreshKbs() {
   try {
     kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    // Auto-select first KB if none selected and KBs exist
+    if (!selectedKbId.value && kbs.value.length > 0) {
+      selectedKbId.value = kbs.value[0].id
+    }
   } catch {
     // error toast handled globally
   }
@@ -371,12 +594,46 @@ function actionLabel(type) {
   }
 }
 
+function stageLabel(stageId) {
+  return STAGE_META[stageId]?.name || stageId || '阶段'
+}
+
+function stageColor(stageId) {
+  return STAGE_COLOR_MAP[stageId] || '#64748b'
+}
+
+function formatMinutes(minutes) {
+  const m = Number(minutes) || 0
+  if (m >= 60) {
+    const h = Math.floor(m / 60)
+    const r = m % 60
+    return r ? `${h}h${r}m` : `${h}h`
+  }
+  return `${m}m`
+}
+
+function stageProgress(stage) {
+  if (!stage?.keypoint_ids?.length) return 0
+  const completed = stage.keypoint_ids.filter((keypointId) => itemById.value[keypointId]?.priority === 'completed').length
+  return Math.round((completed / stage.keypoint_ids.length) * 100)
+}
+
+function moduleProgress(module) {
+  if (!module?.keypoint_ids?.length) return 0
+  const completed = module.keypoint_ids.filter((keypointId) => itemById.value[keypointId]?.priority === 'completed').length
+  return Math.round((completed / module.keypoint_ids.length) * 100)
+}
+
+function modulePrereqLabels(module) {
+  return (module.prerequisite_modules || []).map((moduleId) => moduleNameMap.value[moduleId] || moduleId)
+}
+
 // -- Learning path chart --
 const DOC_PALETTE = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 
 const docColorMap = computed(() => {
   const map = {}
-  const docIds = [...new Set(learningPath.value.map(i => i.doc_id))]
+  const docIds = [...new Set(learningPath.value.map((item) => item.doc_id))]
   docIds.forEach((id, idx) => { map[id] = DOC_PALETTE[idx % DOC_PALETTE.length] })
   return map
 })
@@ -394,18 +651,32 @@ const pathChartOption = computed(() => {
   if (!learningPath.value.length) return {}
 
   const colors = docColorMap.value
+  const stageIds = displayStages.value.length
+    ? displayStages.value.map((stage) => stage.stage_id)
+    : [...new Set(learningPath.value.map((item) => item.stage || 'foundation'))]
+  const stageIndexMap = {}
+  stageIds.forEach((stageId, idx) => { stageIndexMap[stageId] = idx })
+
+  const stageCounts = {}
   const nodes = learningPath.value.map((item) => {
+    const stageId = item.stage || 'foundation'
+    const rowIdx = stageCounts[stageId] || 0
+    stageCounts[stageId] = rowIdx + 1
+    const stageIdx = stageIndexMap[stageId] ?? 0
     const isMastered = item.mastery_level >= MASTERY_MASTERED
-    const sizeMap = { high: 50, medium: 40, low: 30, completed: 25 }
+    const baseSize = 24 + Math.round((item.importance || 0.5) * 18)
     return {
       id: item.keypoint_id,
-      name: item.text.length > 18 ? item.text.slice(0, 18) + '…' : item.text,
-      symbolSize: sizeMap[item.priority] || 35,
+      name: item.text.length > 20 ? `${item.text.slice(0, 20)}…` : item.text,
+      x: 80 + stageIdx * 240 + (item.milestone ? 12 : 0),
+      y: 60 + rowIdx * 86,
+      symbol: item.milestone ? 'diamond' : 'circle',
+      symbolSize: item.milestone ? baseSize + 6 : baseSize,
       itemStyle: {
         color: colors[item.doc_id] || '#666',
         opacity: isMastered ? 0.35 : 1,
-        borderColor: isMastered ? '#888' : colors[item.doc_id] || '#666',
-        borderWidth: 2,
+        borderColor: stageColor(stageId),
+        borderWidth: item.milestone ? 3 : 2,
       },
       label: {
         show: true,
@@ -413,47 +684,62 @@ const pathChartOption = computed(() => {
         fontSize: 10,
         color: 'inherit',
         overflow: 'truncate',
-        width: 100,
+        width: 120,
       },
       tooltip: {
         formatter: () => {
           const prereqs = item.prerequisites.length ? `<br/><span style="color:#f59e0b">前置：${item.prerequisites.join('、')}</span>` : ''
-          return `<b>${item.text}</b><br/>文档：${item.doc_name || '—'}<br/>掌握度：${masteryPercent(item.mastery_level)}%<br/>优先级：${item.priority}${prereqs}`
-        }
+          return `<b>${item.text}</b><br/>阶段：${stageLabel(stageId)}<br/>模块：${item.module || '—'}<br/>掌握度：${masteryPercent(item.mastery_level)}%<br/>难度：${Math.round((item.difficulty || 0) * 100)}<br/>重要性：${Math.round((item.importance || 0) * 100)}<br/>预计时长：${item.estimated_time || 0} 分钟${prereqs}`
+        },
       },
-      _raw: item,
     }
   })
 
+  const nodeIdSet = new Set(nodes.map((node) => node.id))
   const links = learningPathEdges.value
-    .filter(e => nodes.some(n => n.id === e.from_id) && nodes.some(n => n.id === e.to_id))
-    .map(e => ({
-      source: e.from_id,
-      target: e.to_id,
-      lineStyle: { color: '#999', width: 1.5, curveness: 0.2 },
-      symbol: ['none', 'arrow'],
-      symbolSize: [0, 8],
-    }))
+    .filter((edge) => nodeIdSet.has(edge.from_id) && nodeIdSet.has(edge.to_id))
+    .map((edge) => {
+      const targetStage = itemById.value[edge.to_id]?.stage
+      return {
+        source: edge.from_id,
+        target: edge.to_id,
+        lineStyle: { color: stageColor(targetStage), width: 1.4, curveness: 0.06, opacity: 0.65 },
+        symbol: ['none', 'arrow'],
+        symbolSize: [0, 8],
+      }
+    })
+
+  const graphics = stageIds.map((stageId, idx) => ({
+    type: 'text',
+    left: 55 + idx * 240,
+    top: 8,
+    style: {
+      text: stageLabel(stageId),
+      fill: '#94a3b8',
+      fontSize: 12,
+      fontWeight: 600,
+    },
+  }))
 
   return {
     tooltip: { trigger: 'item', backgroundColor: 'rgba(0,0,0,0.75)', textStyle: { color: '#fff', fontSize: 12 } },
+    graphic: graphics,
     series: [{
       type: 'graph',
-      layout: 'force',
+      layout: 'none',
       roam: true,
       draggable: true,
-      force: { repulsion: 200, gravity: 0.05, edgeLength: [80, 200] },
       data: nodes,
       links,
       edgeSymbol: ['none', 'arrow'],
       edgeSymbolSize: [0, 8],
       emphasis: {
         focus: 'adjacency',
-        lineStyle: { width: 3 },
+        lineStyle: { width: 2.5 },
       },
-      lineStyle: { opacity: 0.6 },
+      lineStyle: { opacity: 0.65 },
     }],
-    animationDuration: 800,
+    animationDuration: 650,
   }
 })
 
@@ -481,25 +767,15 @@ function goToAction(item) {
         focus: item.text || '',
       },
     })
-  } else if (item.action === 'study') {
-    // 去学习应该跳转到 QA 页面，让用户通过问答来学习知识点
-    router.push({
-      path: '/qa',
-      query: {
-        kb_id: selectedKbId.value || '',
-        focus: item.text || '',
-      },
-    })
-  } else {
-    // review 动作也跳转到 QA
-    router.push({
-      path: '/qa',
-      query: {
-        kb_id: selectedKbId.value || '',
-        focus: item.text || '',
-      },
-    })
+    return
   }
+  router.push({
+    path: '/qa',
+    query: {
+      kb_id: selectedKbId.value || '',
+      focus: item.text || '',
+    },
+  })
 }
 
 onMounted(async () => {
@@ -512,6 +788,9 @@ onMounted(async () => {
 })
 
 watch(selectedKbId, () => {
-  fetchRecommendations()
+  if (selectedKbId.value) {
+    fetchRecommendations()
+    fetchLearningPath()
+  }
 })
 </script>
