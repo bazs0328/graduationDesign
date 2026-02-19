@@ -98,18 +98,34 @@
           <div v-for="doc in docs" :key="doc.id" class="p-4 bg-background border border-border rounded-lg hover:border-primary/30 transition-colors group">
             <div class="flex justify-between items-start mb-2">
               <strong class="text-sm font-semibold truncate max-w-[200px]">{{ doc.filename }}</strong>
-              <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded" :class="statusClass(doc.status)">
-                {{ statusLabel(doc.status) }}
-              </span>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded" :class="statusClass(doc.status)">
+                  {{ statusLabel(doc.status) }}
+                </span>
+                <RefreshCw 
+                  v-if="doc.status === 'processing' && pollingIntervals.has(doc.id)" 
+                  class="w-3 h-3 text-blue-500 animate-spin" 
+                />
+              </div>
             </div>
             <div class="flex flex-wrap gap-2 mb-3">
               <span class="text-[10px] bg-accent px-2 py-0.5 rounded-full">{{ kbNameById(doc.kb_id) }}</span>
-              <span class="text-[10px] bg-secondary px-2 py-0.5 rounded-full">{{ doc.num_pages }} 页</span>
-              <span class="text-[10px] bg-secondary px-2 py-0.5 rounded-full">{{ doc.num_chunks }} 块</span>
+              <template v-if="doc.status === 'processing'">
+                <span class="text-[10px] bg-blue-500/20 text-blue-500 px-2 py-0.5 rounded-full animate-pulse">
+                  正在处理中...
+                </span>
+              </template>
+              <template v-else>
+                <span v-if="doc.num_pages > 0" class="text-[10px] bg-secondary px-2 py-0.5 rounded-full">{{ doc.num_pages }} 页</span>
+                <span v-if="doc.num_chunks > 0" class="text-[10px] bg-secondary px-2 py-0.5 rounded-full">{{ doc.num_chunks }} 块</span>
+              </template>
             </div>
             <div class="flex items-center justify-between text-[10px] text-muted-foreground">
               <span>{{ new Date(doc.created_at).toLocaleDateString() }}</span>
               <span v-if="doc.error_message" class="text-destructive truncate max-w-[150px]">{{ doc.error_message }}</span>
+              <span v-else-if="doc.status === 'processing'" class="text-blue-500">
+                自动更新中...
+              </span>
             </div>
           </div>
         </div>
@@ -119,7 +135,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { Upload, FileText, Database, X, RefreshCw } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
@@ -139,6 +155,7 @@ const busy = ref({
   kb: false,
   refresh: false
 })
+const pollingIntervals = ref(new Map()) // 存储每个文档的轮询定时器
 
 function onFileChange(event) {
   uploadFile.value = event.target.files[0]
@@ -167,6 +184,9 @@ async function refreshDocs() {
     const kbParam = selectedKbId.value ? `&kb_id=${encodeURIComponent(selectedKbId.value)}` : ''
     const result = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}${kbParam}`)
     docs.value = result
+    
+    // 刷新后检查是否有处理中的文档需要轮询
+    checkAndStartPolling()
   } catch {
     // error toast handled globally
   } finally {
@@ -184,15 +204,86 @@ async function uploadDoc() {
     if (selectedKbId.value) {
       form.append('kb_id', selectedKbId.value)
     }
-    await apiPost('/api/docs/upload', form, true)
-    showToast('文档上传成功', 'success')
+    const uploadedDoc = await apiPost('/api/docs/upload', form, true)
+    showToast('文档上传成功，正在处理中...', 'success')
     uploadFile.value = null
     await refreshDocs()
+    
+    // 如果文档状态是 processing，开始轮询
+    if (uploadedDoc.status === 'processing') {
+      startPolling(uploadedDoc.id)
+    }
   } catch {
     // error toast handled globally
   } finally {
     busy.value.upload = false
   }
+}
+
+function startPolling(docId) {
+  // 如果已经在轮询，先清除旧的定时器
+  if (pollingIntervals.value.has(docId)) {
+    clearInterval(pollingIntervals.value.get(docId))
+  }
+  
+  // 立即检查一次
+  checkDocStatus(docId)
+  
+  // 每 2 秒轮询一次
+  const interval = setInterval(() => {
+    checkDocStatus(docId)
+  }, 2000)
+  
+  pollingIntervals.value.set(docId, interval)
+}
+
+async function checkDocStatus(docId) {
+  try {
+    const kbParam = selectedKbId.value ? `&kb_id=${encodeURIComponent(selectedKbId.value)}` : ''
+    const result = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}${kbParam}`)
+    
+    // 更新文档列表
+    docs.value = result
+    
+    // 查找当前文档
+    const doc = result.find(d => d.id === docId)
+    if (!doc) {
+      // 文档不存在，停止轮询
+      stopPolling(docId)
+      return
+    }
+    
+    // 如果状态不再是 processing，停止轮询
+    if (doc.status !== 'processing') {
+      stopPolling(docId)
+      if (doc.status === 'ready') {
+        showToast('文档处理完成', 'success')
+      } else if (doc.status === 'error') {
+        showToast(`文档处理失败: ${doc.error_message || '未知错误'}`, 'error')
+      }
+    }
+  } catch (error) {
+    console.error('检查文档状态失败:', error)
+    // 出错时也停止轮询，避免无限重试
+    stopPolling(docId)
+  }
+}
+
+function stopPolling(docId) {
+  if (pollingIntervals.value.has(docId)) {
+    clearInterval(pollingIntervals.value.get(docId))
+    pollingIntervals.value.delete(docId)
+  }
+}
+
+// 检查是否有处理中的文档，如果有则开始轮询
+function checkAndStartPolling() {
+  const processingDocs = docs.value.filter(doc => doc.status === 'processing')
+  processingDocs.forEach(doc => {
+    if (!pollingIntervals.value.has(doc.id)) {
+      startPolling(doc.id)
+    }
+  })
 }
 
 async function createKb() {
@@ -246,6 +337,15 @@ onMounted(async () => {
 })
 
 watch(selectedKbId, async () => {
+  // 切换知识库时，停止所有轮询
+  pollingIntervals.value.forEach((interval) => clearInterval(interval))
+  pollingIntervals.value.clear()
   await refreshDocs()
+})
+
+// 组件卸载时清理所有轮询
+onUnmounted(() => {
+  pollingIntervals.value.forEach((interval) => clearInterval(interval))
+  pollingIntervals.value.clear()
 })
 </script>

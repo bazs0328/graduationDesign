@@ -225,9 +225,10 @@ def parse_reference_pdf(file: UploadFile = File(...)):
         try:
             result = extract_text(tmp_path, ".pdf")
         except Exception as exc:
+            detail = str(exc).strip() or "Failed to extract text from PDF."
             raise HTTPException(
                 status_code=500,
-                detail="Failed to extract text from PDF.",
+                detail=detail,
             ) from exc
 
         if not result.text or not result.text.strip():
