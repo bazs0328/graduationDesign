@@ -11,6 +11,12 @@ from sqlalchemy.orm import Session
 from app.core.llm import get_llm
 from app.models import Document, Keypoint, KeypointDependency
 from app.schemas import LearningPathEdge, LearningPathItem
+from app.services.mastery import (
+    MASTERY_MASTERED,
+    MASTERY_PREREQ_THRESHOLD,
+    mastery_action,
+    mastery_priority,
+)
 from app.utils.json_tools import safe_json_loads
 
 logger = logging.getLogger(__name__)
@@ -312,30 +318,14 @@ def generate_learning_path(
         mastery = kp.mastery_level or 0.0
         step += 1
 
-        # Determine unmet prerequisites
         unmet_prereqs = []
         for prereq_id in prereq_map.get(kp_id, []):
             prereq_kp = kp_map.get(prereq_id)
-            if prereq_kp and (prereq_kp.mastery_level or 0.0) < 0.6:
+            if prereq_kp and (prereq_kp.mastery_level or 0.0) < MASTERY_PREREQ_THRESHOLD:
                 unmet_prereqs.append(prereq_kp.text)
 
-        # Priority
-        if mastery >= 0.8:
-            priority = "completed"
-        elif mastery < 0.3:
-            priority = "high"
-        elif mastery < 0.7:
-            priority = "medium"
-        else:
-            priority = "low"
-
-        # Action
-        if mastery >= 0.8:
-            action = "review"
-        elif (kp.attempt_count or 0) == 0:
-            action = "study"
-        else:
-            action = "quiz"
+        priority = mastery_priority(mastery)
+        action = mastery_action(mastery, kp.attempt_count or 0)
 
         items.append(
             LearningPathItem(

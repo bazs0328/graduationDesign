@@ -1,5 +1,18 @@
 <template>
   <div class="h-full flex flex-col max-w-6xl mx-auto">
+    <!-- Learning Path Context Banner -->
+    <section
+      v-if="entryFocusContext"
+      class="bg-primary/5 border border-primary/20 rounded-xl px-4 py-3 mb-4 space-y-1"
+    >
+      <p class="text-[10px] font-bold uppercase tracking-widest text-primary">学习路径上下文</p>
+      <p class="text-sm text-muted-foreground">
+        当前学习目标：<span class="font-semibold text-foreground">{{ entryFocusContext }}</span>
+      </p>
+      <p class="text-xs text-muted-foreground mt-1">
+        你可以针对这个知识点提问，AI 会为你详细讲解。
+      </p>
+    </section>
     <div class="flex-1 flex gap-8 overflow-hidden min-h-0">
       <!-- Left: Chat Interface -->
       <section class="flex-1 flex flex-col bg-card border border-border rounded-xl shadow-sm overflow-hidden">
@@ -72,7 +85,7 @@
             <textarea
               v-model="qaInput"
               @keydown.enter.prevent="askQuestion"
-              placeholder="在此输入你的问题…"
+              :placeholder="entryFocusContext ? `关于「${entryFocusContext}」，你想了解什么？` : '在此输入你的问题…'"
               class="flex-1 bg-background border border-input rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary resize-none h-[52px]"
               :disabled="!selectedKbId || busy.qa"
             ></textarea>
@@ -177,6 +190,7 @@
 
 <script setup>
 import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import { MessageSquare, Send, Trash2, Database, FileText, Sparkles, User, Bot } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
@@ -184,6 +198,7 @@ import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 
 const { showToast } = useToast()
+const route = useRoute()
 
 const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
 const resolvedUserId = computed(() => userId.value || 'default')
@@ -231,6 +246,14 @@ const selectedDoc = computed(() => {
 })
 
 const currentLevelMeta = computed(() => getLevelMeta(qaAbilityLevel.value))
+const entryFocusContext = computed(() => normalizeQueryString(route.query.focus).trim())
+
+function normalizeQueryString(value) {
+  if (Array.isArray(value)) {
+    return value[0] || ''
+  }
+  return typeof value === 'string' ? value : ''
+}
 
 function normalizeAbilityLevel(level) {
   const normalized = (level || '').toString().trim().toLowerCase()
@@ -297,6 +320,10 @@ async function askQuestion() {
     } else {
       payload.kb_id = selectedKbId.value
     }
+    // 如果从学习路径跳转过来，传递目标知识点
+    if (entryFocusContext.value) {
+      payload.focus = entryFocusContext.value
+    }
 
     const res = await apiPost('/api/qa', payload)
     const responseLevel = normalizeAbilityLevel(res?.ability_level || qaAbilityLevel.value)
@@ -327,6 +354,10 @@ onMounted(async () => {
   busy.value.init = true
   try {
     await Promise.all([refreshKbs(), refreshAbilityLevel()])
+    const queryKbId = normalizeQueryString(route.query.kb_id)
+    if (queryKbId && kbs.value.some((kb) => kb.id === queryKbId)) {
+      selectedKbId.value = queryKbId
+    }
   } finally {
     busy.value.init = false
   }

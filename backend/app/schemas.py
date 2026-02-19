@@ -74,6 +74,7 @@ class QARequest(BaseModel):
     user_id: Optional[str] = None
     top_k: Optional[int] = Field(default=None, ge=1, le=20)
     fetch_k: Optional[int] = Field(default=None, ge=1, le=50)
+    focus: Optional[str] = None  # Target keypoint text from learning path
 
 
 class SourceSnippet(BaseModel):
@@ -145,6 +146,13 @@ class WrongQuestionGroup(BaseModel):
     question_indices: List[int]
 
 
+class MasteryUpdate(BaseModel):
+    keypoint_id: str
+    text: str
+    old_level: float
+    new_level: float
+
+
 class QuizSubmitResponse(BaseModel):
     score: float
     correct: int
@@ -155,6 +163,7 @@ class QuizSubmitResponse(BaseModel):
     next_quiz_recommendation: Optional[NextQuizRecommendation] = None
     profile_delta: Optional[ProfileDelta] = None
     wrong_questions_by_concept: List[WrongQuestionGroup] = []
+    mastery_updates: List[MasteryUpdate] = []
 
 
 class DifficultyPlan(BaseModel):
@@ -208,6 +217,7 @@ class KeypointsRequest(BaseModel):
     doc_id: str
     user_id: Optional[str] = None
     force: bool = False
+    study_keypoint_text: Optional[str] = None  # If provided, record study interaction for matching keypoint
 
 
 class KeypointItem(BaseModel):

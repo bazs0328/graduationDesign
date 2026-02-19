@@ -46,14 +46,30 @@ QUIZ_MIMIC_HUMAN_TEMPLATE = (
 )
 
 
+def _extract_keypoint_ids(docs) -> List[str]:
+    """Extract unique keypoint_ids from vector search result metadata."""
+    seen: set[str] = set()
+    ids: List[str] = []
+    for doc in docs:
+        meta = getattr(doc, "metadata", {}) or {}
+        kp_id = meta.get("keypoint_id")
+        if kp_id and kp_id not in seen:
+            seen.add(kp_id)
+            ids.append(kp_id)
+    return ids
+
+
 def _build_context(
     user_id: str,
     doc_id: Optional[str],
     kb_id: Optional[str],
     reference_questions: Optional[str],
     focus_concepts: Optional[List[str]] = None,
-) -> str:
-    """Build context from doc_id or kb_id (vectorstore), reference_questions, or placeholder."""
+) -> tuple[str, List[str]]:
+    """Build context and collect related keypoint_ids from vector search metadata.
+
+    Returns (context_text, keypoint_ids).
+    """
     query = "key concepts and definitions"
     if focus_concepts:
         cleaned = [str(item).strip() for item in focus_concepts if str(item).strip()]
@@ -66,7 +82,7 @@ def _build_context(
         )
         if not docs:
             raise ValueError("No relevant context found for quiz generation")
-        return "\n\n".join(doc.page_content for doc in docs)
+        return "\n\n".join(doc.page_content for doc in docs), _extract_keypoint_ids(docs)
     if kb_id:
         vectorstore = get_vectorstore(user_id)
         docs = vectorstore.similarity_search(
@@ -74,13 +90,13 @@ def _build_context(
         )
         if not docs:
             raise ValueError("No relevant context found for quiz generation")
-        return "\n\n".join(doc.page_content for doc in docs)
+        return "\n\n".join(doc.page_content for doc in docs), _extract_keypoint_ids(docs)
     if reference_questions:
         text = reference_questions.strip()
         if len(text) > REFERENCE_QUESTIONS_MAX_CHARS:
             text = text[:REFERENCE_QUESTIONS_MAX_CHARS] + "\n[... truncated]"
-        return text
-    return "General knowledge."
+        return text, []
+    return "General knowledge.", []
 
 
 def _build_extra_instructions(
@@ -121,7 +137,7 @@ def generate_quiz(
     style_prompt: Optional[str] = None,
     reference_questions: Optional[str] = None,
 ) -> List[dict]:
-    context = _build_context(
+    context, keypoint_ids = _build_context(
         user_id, doc_id, kb_id, reference_questions, focus_concepts
     )
     context_is_from_reference = not doc_id and not kb_id and bool(
@@ -153,5 +169,11 @@ def generate_quiz(
     data = safe_json_loads(result.content)
     if isinstance(data, dict):
         data = data.get("questions", [])
+
+    if keypoint_ids:
+        for q in data:
+            if isinstance(q, dict) and "keypoint_ids" not in q:
+                q["keypoint_ids"] = keypoint_ids
+
     json.dumps(data)  # validate serializable
     return data

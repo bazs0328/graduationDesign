@@ -152,80 +152,80 @@ def save_keypoints_to_db(
     return saved
 
 
+def _search_keypoints_per_concept(
+    vectorstore,
+    concepts: list[str],
+    filter_dict: dict,
+    max_distance: float = 1.0,
+    top_k_per_concept: int = 2,
+) -> list[str]:
+    """Search per concept individually and merge results (deduplicated)."""
+    seen: set[str] = set()
+    matched: list[str] = []
+    for concept in concepts:
+        text = str(concept).strip()
+        if not text:
+            continue
+        try:
+            results = vectorstore.similarity_search_with_score(
+                text, k=top_k_per_concept, filter=filter_dict,
+            )
+        except Exception:
+            continue
+        for doc, score in results:
+            meta = getattr(doc, "metadata", {}) or {}
+            kp_id = meta.get("keypoint_id")
+            if not kp_id or kp_id in seen:
+                continue
+            if score <= max_distance:
+                seen.add(kp_id)
+                matched.append(kp_id)
+    return matched
+
+
 def match_keypoints_by_concepts(
     user_id: str,
     doc_id: str,
     concepts: list[str],
-    max_distance: float = 0.7,
-    top_k: int = 3,
+    max_distance: float = 1.0,
+    top_k: int = 2,
 ) -> list[str]:
-    """Match concept text to keypoint ids using vector similarity search."""
+    """Match concepts to keypoint ids within a document (per-concept search)."""
     if not concepts:
         return []
     vectorstore = get_vectorstore(user_id)
-    query = " ".join([c for c in concepts if c])
-    if not query.strip():
-        return []
-    try:
-        results = vectorstore.similarity_search_with_score(
-            query, k=top_k, filter={"doc_id": doc_id, "type": "keypoint"}
-        )
-    except Exception:
-        return []
-
-    matched = []
-    for doc, score in results:
-        meta = getattr(doc, "metadata", {}) or {}
-        kp_id = meta.get("keypoint_id")
-        if not kp_id:
-            continue
-        if score <= max_distance:
-            matched.append(kp_id)
-    return matched
+    return _search_keypoints_per_concept(
+        vectorstore, concepts,
+        filter_dict={"doc_id": doc_id, "type": "keypoint"},
+        max_distance=max_distance,
+        top_k_per_concept=top_k,
+    )
 
 
 def match_keypoints_by_kb(
     user_id: str,
     kb_id: str,
     concepts: list[str],
-    max_distance: float = 0.7,
-    top_k: int = 5,
+    max_distance: float = 1.0,
+    top_k: int = 2,
 ) -> list[str]:
-    """Match concept text to keypoint ids within a knowledge base."""
+    """Match concepts to keypoint ids within a knowledge base (per-concept search)."""
     if not concepts:
         return []
     vectorstore = get_vectorstore(user_id)
-    query = " ".join([c for c in concepts if c])
-    if not query.strip():
-        return []
-    try:
-        results = vectorstore.similarity_search_with_score(
-            query, k=top_k, filter={"kb_id": kb_id, "type": "keypoint"}
-        )
-    except Exception:
-        return []
-
-    matched = []
-    for doc, score in results:
-        meta = getattr(doc, "metadata", {}) or {}
-        kp_id = meta.get("keypoint_id")
-        if not kp_id:
-            continue
-        if score <= max_distance:
-            matched.append(kp_id)
-    return matched
+    return _search_keypoints_per_concept(
+        vectorstore, concepts,
+        filter_dict={"kb_id": kb_id, "type": "keypoint"},
+        max_distance=max_distance,
+        top_k_per_concept=top_k,
+    )
 
 
 def update_keypoint_mastery(db: Session, keypoint_id: str, is_correct: bool) -> None:
-    """Update mastery stats for a keypoint based on quiz result."""
-    keypoint = db.query(Keypoint).filter(Keypoint.id == keypoint_id).first()
-    if not keypoint:
-        return
-    keypoint.attempt_count = (keypoint.attempt_count or 0) + 1
-    if is_correct:
-        keypoint.correct_count = (keypoint.correct_count or 0) + 1
-    if keypoint.attempt_count:
-        keypoint.mastery_level = keypoint.correct_count / keypoint.attempt_count
+    """Deprecated: use app.services.mastery.record_quiz_result instead."""
+    from app.services.mastery import record_quiz_result
+
+    record_quiz_result(db, keypoint_id, is_correct)
     db.commit()
 
 
