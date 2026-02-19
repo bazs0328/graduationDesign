@@ -233,7 +233,7 @@
     - API 错误统一拦截并弹出 error Toast，不再混入内容区
     - Toast 自动消失（3-5 秒），error 类型可手动关闭
 
-- [ ] **统一 Loading 状态组件**
+- [x] **统一 Loading 状态组件**
   - 现状：各页面 loading 风格不统一（spinner / 文字 / 动画 / 无），部分操作无 loading（如 `refreshKbs()`）
   - 方案：封装可复用 Loading 组件（全屏遮罩 / 内联 spinner / 骨架屏三种模式），替换各页面零散实现
   - 验收标准：
