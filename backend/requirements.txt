@@ -11,6 +11,9 @@ langchain-openai
 langchain-google-genai
 chromadb
 pdfplumber
+pytesseract
+pdf2image
+Pillow
 charset-normalizer
 rank-bm25
 dashscope

@@ -3,7 +3,7 @@
 This project implements a personalized learning assistant inspired by the DeepTutor workflow, adapted to FastAPI + Vue and a local RAG pipeline. It supports document upload, summarization, Q&A, quiz generation, and progress tracking.
 
 ## Features
-- Document upload and parsing (PDF/TXT/MD)
+- Document upload and parsing (PDF/TXT/MD, scanned PDF OCR fallback)
 - Knowledge summary & keypoint generation (chunk-map-reduce)
 - RAG-style Q&A with source snippets
 - Auto quiz generation (MCQ) + grading
@@ -42,6 +42,26 @@ Backend settings are in `backend/.env`:
 - `QWEN_API_KEY=...` (Qwen is OpenAI-compatible; see `.env.example` for base_url)
 - `DASHSCOPE_EMBEDDING_MODEL=...` (DashScope SDK embedding using `QWEN_API_KEY`, e.g. `qwen3-vl-embedding`)
 - DeepSeek embedding is optional; if not provided, embeddings fall back to OpenAI when `OPENAI_API_KEY` is set.
+- `OCR_ENABLED=true|false` (enable OCR fallback for scanned PDFs)
+- `OCR_LANGUAGE=chi_sim+eng` (Tesseract language packs)
+- `OCR_MIN_TEXT_LENGTH=10` (per-page min chars before OCR fallback)
+
+## OCR Dependencies (Local Development)
+
+Docker images already install OCR dependencies in `backend/Dockerfile`.
+
+If you run backend locally (without Docker), install:
+
+- Ubuntu/Debian:
+```bash
+sudo apt-get update
+sudo apt-get install -y tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng poppler-utils
+```
+- macOS (Homebrew):
+```bash
+brew install tesseract poppler
+brew install tesseract-lang
+```
 
 Frontend can point to a different API via:
 ```

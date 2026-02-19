@@ -29,6 +29,9 @@ class Settings(BaseSettings):
 
     chunk_size: int = 1000
     chunk_overlap: int = 150
+    ocr_enabled: bool = True
+    ocr_language: str = "chi_sim+eng"
+    ocr_min_text_length: int = 10
 
     qa_top_k: int = 4
     qa_fetch_k: int = 12
