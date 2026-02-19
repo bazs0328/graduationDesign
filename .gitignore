@@ -1,6 +1,7 @@
 .venv
 backend/.venv
 backend/data
+data/
 **/__pycache__
 .pytest_cache
 web/node_modules
