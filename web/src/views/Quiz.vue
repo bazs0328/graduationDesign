@@ -322,6 +322,14 @@ function normalizeQueryString(value) {
   return typeof value === 'string' ? value : ''
 }
 
+function normalizeDifficulty(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'easy' || normalized === 'medium' || normalized === 'hard') {
+    return normalized
+  }
+  return ''
+}
+
 async function refreshKbs() {
   try {
     kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(resolvedUserId.value)}`)
@@ -407,9 +415,19 @@ onMounted(async () => {
     selectedKbId.value = queryKbId
   }
 
+  const queryDifficulty = normalizeDifficulty(normalizeQueryString(route.query.difficulty))
+  if (queryDifficulty) {
+    autoAdapt.value = false
+    quizDifficulty.value = queryDifficulty
+  }
+
   const queryFocus = normalizeQueryString(route.query.focus).trim()
-  if (queryFocus && selectedKbId.value) {
-    await generateQuiz({ focusConcepts: [queryFocus] })
+  if ((queryFocus || queryDifficulty) && selectedKbId.value) {
+    const options = {}
+    if (queryFocus) {
+      options.focusConcepts = [queryFocus]
+    }
+    await generateQuiz(options)
   }
 })
 </script>

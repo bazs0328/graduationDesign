@@ -58,6 +58,9 @@
             <div class="flex items-center gap-3">
               <Sparkles class="w-6 h-6 text-primary" />
               <h2 class="text-2xl font-bold">智能推荐</h2>
+              <span v-if="recommendationsUpdatedLabel && !busy.init" class="text-xs text-muted-foreground">
+                更新于 {{ recommendationsUpdatedLabel }}
+              </span>
               <span v-if="busy.recommendations && !busy.init" class="text-sm text-muted-foreground flex items-center gap-2">
                 <RefreshCw class="w-4 h-4 animate-spin" />
                 <span>正在加载推荐...</span>
@@ -71,30 +74,83 @@
           <div v-if="busy.init" class="space-y-4">
             <SkeletonBlock type="card" :lines="6" />
           </div>
-          <div v-else-if="recommendations.length" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div v-for="item in recommendations" :key="item.doc_id" class="p-5 bg-background border border-border rounded-xl hover:border-primary/30 transition-all group space-y-4">
-              <div class="flex items-start justify-between">
-                <div class="flex items-center gap-2">
-                  <FileText class="w-5 h-5 text-primary" />
-                  <h4 class="font-bold truncate max-w-[150px]">{{ item.doc_name || '文档' }}</h4>
+          <template v-else>
+            <div v-if="nextRecommendation" class="rounded-xl border border-primary/25 bg-primary/5 p-4 space-y-3">
+              <p class="text-[10px] font-bold uppercase tracking-widest text-primary">下一步建议</p>
+              <div class="flex items-start justify-between gap-3">
+                <div class="space-y-1 min-w-0">
+                  <p class="text-sm font-semibold truncate">
+                    {{ nextRecommendation.doc_name || '文档' }} · {{ actionLabel(nextRecommendation.action?.type) }}
+                  </p>
+                  <p v-if="nextRecommendation.reason" class="text-xs text-muted-foreground">{{ nextRecommendation.reason }}</p>
                 </div>
+                <button
+                  class="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
+                  @click="runRecommendation(nextRecommendation, nextRecommendation.action)"
+                >
+                  {{ recommendationActionBtnLabel(nextRecommendation.action) }}
+                </button>
               </div>
-              <div class="flex flex-wrap gap-2">
-                <span v-for="action in item.actions" :key="action.type" class="px-2 py-1 bg-primary/10 text-primary text-[10px] font-bold rounded-full uppercase">
-                  {{ actionLabel(action.type) }}
-                </span>
-              </div>
-              <div class="space-y-2">
-                <div v-for="action in item.actions" :key="`${item.doc_id}-${action.type}`" class="flex gap-2 text-xs">
-                  <div class="mt-1 w-1 h-1 bg-primary rounded-full flex-shrink-0"></div>
-                  <p class="text-muted-foreground">{{ action.reason }}</p>
+            </div>
+            <div v-if="recommendations.length" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div v-for="item in recommendations" :key="item.doc_id" class="p-5 bg-background border border-border rounded-xl hover:border-primary/30 transition-all group space-y-4">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <FileText class="w-5 h-5 text-primary flex-shrink-0" />
+                    <h4 class="font-bold truncate max-w-[180px]">{{ item.doc_name || '文档' }}</h4>
+                  </div>
+                  <div class="flex flex-col items-end gap-2">
+                    <span class="text-[10px] px-2 py-0.5 rounded-full border font-semibold" :class="recommendationStatusClass(item.status)">
+                      {{ recommendationStatusLabel(item.status) }}
+                    </span>
+                    <button
+                      v-if="primaryRecommendationAction(item)"
+                      class="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-[11px] font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
+                      @click="runRecommendation(item, primaryRecommendationAction(item))"
+                    >
+                      {{ recommendationActionBtnLabel(primaryRecommendationAction(item)) }}
+                    </button>
+                  </div>
+                </div>
+                <p v-if="item.summary" class="text-xs text-muted-foreground">{{ item.summary }}</p>
+                <div class="grid grid-cols-2 gap-3 text-[11px]">
+                  <div class="rounded-md border border-border bg-accent/30 px-2 py-1.5">
+                    <p class="text-muted-foreground">完成度</p>
+                    <p class="font-semibold">{{ Math.round(item.completion_score || 0) }}%</p>
+                  </div>
+                  <div class="rounded-md border border-border bg-accent/30 px-2 py-1.5">
+                    <p class="text-muted-foreground">紧急度</p>
+                    <p class="font-semibold">{{ Math.round(item.urgency_score || 0) }}</p>
+                  </div>
+                </div>
+                <div class="h-1.5 rounded-full bg-accent overflow-hidden">
+                  <div class="h-full bg-primary/80 transition-all duration-500" :style="{ width: `${Math.round(item.completion_score || 0)}%` }"></div>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    v-for="action in item.actions"
+                    :key="`${item.doc_id}-${action.type}-tag`"
+                    class="px-2 py-1 bg-primary/10 text-primary text-[10px] font-bold rounded-full uppercase hover:bg-primary/20 transition-colors"
+                    @click="runRecommendation(item, action)"
+                  >
+                    {{ actionLabel(action.type) }}
+                  </button>
+                </div>
+                <div class="space-y-2">
+                  <div v-for="action in item.actions" :key="`${item.doc_id}-${action.type}-reason`" class="flex gap-2 text-xs">
+                    <div class="mt-1 w-1 h-1 bg-primary rounded-full flex-shrink-0"></div>
+                    <div class="space-y-1">
+                      <p class="text-muted-foreground">{{ action.reason }}</p>
+                      <p v-if="recommendationActionHint(action)" class="text-[11px] text-primary">{{ recommendationActionHint(action) }}</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-          <div v-else class="py-12 text-center text-muted-foreground bg-accent/20 rounded-xl">
-            <p>该知识库暂无推荐。</p>
-          </div>
+            <div v-else class="py-12 text-center text-muted-foreground bg-accent/20 rounded-xl">
+              <p>该知识库暂无推荐。</p>
+            </div>
+          </template>
         </section>
 
         <!-- Learning Path -->
@@ -303,7 +359,7 @@
 
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   FileText,
   PenTool,
@@ -347,12 +403,15 @@ const STAGE_COLOR_MAP = {
 }
 
 const router = useRouter()
+const route = useRoute()
 const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
 const resolvedUserId = computed(() => userId.value || 'default')
 const progress = ref(null)
 const profile = ref(null)
 const activity = ref([])
 const recommendations = ref([])
+const nextRecommendation = ref(null)
+const recommendationsUpdatedAt = ref('')
 const learningPath = ref([])
 const learningPathEdges = ref([])
 const learningPathStages = ref([])
@@ -490,6 +549,42 @@ const pathSummaryCards = computed(() => {
   ]
 })
 
+const recommendationsUpdatedLabel = computed(() => {
+  if (!recommendationsUpdatedAt.value) return ''
+  const dt = new Date(recommendationsUpdatedAt.value)
+  if (Number.isNaN(dt.getTime())) return ''
+  return dt.toLocaleString()
+})
+
+function normalizeRecommendationAction(action) {
+  if (!action || typeof action !== 'object') return null
+  const fallbackPriorityMap = {
+    summary: 100,
+    keypoints: 95,
+    review: 85,
+    quiz: 80,
+    qa: 65,
+    challenge: 55,
+  }
+  return {
+    ...action,
+    priority: Number(action.priority) || fallbackPriorityMap[action.type] || 50,
+  }
+}
+
+function normalizeRecommendationItems(items) {
+  if (!Array.isArray(items)) return []
+  return items.map((item) => ({
+    ...item,
+    completion_score: Number(item.completion_score) || 0,
+    urgency_score: Number(item.urgency_score) || 0,
+    actions: (item.actions || [])
+      .map((action) => normalizeRecommendationAction(action))
+      .filter(Boolean)
+      .sort((a, b) => (b.priority || 0) - (a.priority || 0)),
+  }))
+}
+
 async function fetchProgress() {
   try {
     progress.value = await apiGet(`/api/progress?user_id=${encodeURIComponent(resolvedUserId.value)}`)
@@ -518,10 +613,15 @@ async function fetchActivity() {
 async function fetchRecommendations() {
   if (!selectedKbId.value) return
   busy.value.recommendations = true
+  nextRecommendation.value = null
+  recommendationsUpdatedAt.value = ''
   try {
     const res = await apiGet(`/api/recommendations?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(selectedKbId.value)}&limit=6`)
-    recommendations.value = res.items || []
+    recommendations.value = normalizeRecommendationItems(res.items || [])
+    nextRecommendation.value = res.next_step || null
+    recommendationsUpdatedAt.value = res.generated_at || ''
   } catch {
+    recommendations.value = []
     // error toast handled globally
   } finally {
     busy.value.recommendations = false
@@ -562,8 +662,11 @@ async function rebuildPath() {
 async function refreshKbs() {
   try {
     kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(resolvedUserId.value)}`)
-    // Auto-select first KB if none selected and KBs exist
-    if (!selectedKbId.value && kbs.value.length > 0) {
+    const queryKbId = normalizeQueryString(route.query.kb_id)
+    const hasSelected = !!selectedKbId.value && kbs.value.some((kb) => kb.id === selectedKbId.value)
+    if (queryKbId && kbs.value.some((kb) => kb.id === queryKbId)) {
+      selectedKbId.value = queryKbId
+    } else if (!hasSelected && kbs.value.length > 0) {
       selectedKbId.value = kbs.value[0].id
     }
   } catch {
@@ -591,6 +694,137 @@ function actionLabel(type) {
     case 'review': return '复习'
     case 'challenge': return '挑战'
     default: return type
+  }
+}
+
+function normalizeQueryString(value) {
+  if (Array.isArray(value)) {
+    return value[0] || ''
+  }
+  return typeof value === 'string' ? value : ''
+}
+
+function normalizeDifficulty(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'easy' || normalized === 'medium' || normalized === 'hard') {
+    return normalized
+  }
+  return ''
+}
+
+function difficultyLabel(value) {
+  const normalized = normalizeDifficulty(value)
+  if (normalized === 'easy') return '简单'
+  if (normalized === 'medium') return '中等'
+  if (normalized === 'hard') return '困难'
+  return ''
+}
+
+function recommendationFocusConcept(action) {
+  const concepts = action?.params?.focus_concepts
+  if (!Array.isArray(concepts)) return ''
+  const first = concepts.find((item) => typeof item === 'string' && item.trim())
+  return first ? first.trim() : ''
+}
+
+function recommendationActionHint(action) {
+  if (!action) return ''
+  if (action.type === 'quiz') {
+    const label = difficultyLabel(action?.params?.difficulty)
+    if (label) {
+      return `推荐难度：${label}`
+    }
+  }
+  if (action.type === 'review') {
+    const concepts = action?.params?.focus_concepts
+    if (Array.isArray(concepts) && concepts.length) {
+      return `重点：${concepts.slice(0, 3).join('、')}`
+    }
+  }
+  if (action.type === 'challenge') {
+    const label = difficultyLabel(action?.params?.difficulty)
+    if (label) {
+      return `建议难度：${label}`
+    }
+  }
+  return ''
+}
+
+function primaryRecommendationAction(item) {
+  const actions = item?.actions || []
+  if (!actions.length) return null
+  return [...actions].sort((a, b) => (b.priority || 0) - (a.priority || 0))[0]
+}
+
+function recommendationActionBtnLabel(action) {
+  if (action?.cta) return action.cta
+  switch (action?.type) {
+    case 'summary': return '去生成摘要'
+    case 'keypoints': return '去提取要点'
+    case 'quiz': return '去测验'
+    case 'qa': return '去问答'
+    case 'review': return '去复习'
+    case 'challenge': return '去挑战'
+    default: return '去执行'
+  }
+}
+
+function recommendationStatusLabel(status) {
+  switch (status) {
+    case 'blocked': return '待准备'
+    case 'ready_for_practice': return '待练习'
+    case 'needs_practice': return '需巩固'
+    case 'ready_for_challenge': return '可挑战'
+    case 'on_track': return '进行中'
+    default: return '待处理'
+  }
+}
+
+function recommendationStatusClass(status) {
+  switch (status) {
+    case 'blocked': return 'text-red-700 bg-red-50 border-red-200'
+    case 'ready_for_practice': return 'text-amber-700 bg-amber-50 border-amber-200'
+    case 'needs_practice': return 'text-orange-700 bg-orange-50 border-orange-200'
+    case 'ready_for_challenge': return 'text-emerald-700 bg-emerald-50 border-emerald-200'
+    case 'on_track': return 'text-blue-700 bg-blue-50 border-blue-200'
+    default: return 'text-muted-foreground bg-accent border-border'
+  }
+}
+
+function runRecommendation(item, action) {
+  if (!action) return
+  const focusConcept = recommendationFocusConcept(action)
+  switch (action.type) {
+    case 'summary':
+    case 'keypoints': {
+      if (!item?.doc_id) return
+      router.push({
+        path: '/summary',
+        query: { doc_id: item.doc_id },
+      })
+      return
+    }
+    case 'quiz':
+    case 'challenge': {
+      const query = {}
+      if (selectedKbId.value) query.kb_id = selectedKbId.value
+      if (focusConcept) query.focus = focusConcept
+      const difficulty = normalizeDifficulty(action?.params?.difficulty)
+      if (difficulty) query.difficulty = difficulty
+      router.push({ path: '/quiz', query })
+      return
+    }
+    case 'qa':
+    case 'review': {
+      const query = {}
+      if (selectedKbId.value) query.kb_id = selectedKbId.value
+      if (item?.doc_id) query.doc_id = item.doc_id
+      if (focusConcept) query.focus = focusConcept
+      router.push({ path: '/qa', query })
+      return
+    }
+    default:
+      return
   }
 }
 
@@ -793,4 +1027,14 @@ watch(selectedKbId, () => {
     fetchLearningPath()
   }
 })
+
+watch(
+  () => normalizeQueryString(route.query.kb_id),
+  (queryKbId) => {
+    if (!queryKbId) return
+    if (kbs.value.some((kb) => kb.id === queryKbId)) {
+      selectedKbId.value = queryKbId
+    }
+  }
+)
 </script>

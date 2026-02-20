@@ -247,6 +247,7 @@ const selectedDoc = computed(() => {
 
 const currentLevelMeta = computed(() => getLevelMeta(qaAbilityLevel.value))
 const entryFocusContext = computed(() => normalizeQueryString(route.query.focus).trim())
+const entryDocContextId = computed(() => normalizeQueryString(route.query.doc_id))
 
 function normalizeQueryString(value) {
   if (Array.isArray(value)) {
@@ -288,6 +289,13 @@ async function refreshDocsInKb() {
     // error toast handled globally
   } finally {
     busy.value.docs = false
+  }
+}
+
+function applyDocContextSelection() {
+  if (!entryDocContextId.value) return
+  if (docsInKb.value.some((doc) => doc.id === entryDocContextId.value)) {
+    selectedDocId.value = entryDocContextId.value
   }
 }
 
@@ -358,14 +366,19 @@ onMounted(async () => {
     if (queryKbId && kbs.value.some((kb) => kb.id === queryKbId)) {
       selectedKbId.value = queryKbId
     }
+    if (selectedKbId.value) {
+      await refreshDocsInKb()
+      applyDocContextSelection()
+    }
   } finally {
     busy.value.init = false
   }
 })
 
-watch(selectedKbId, () => {
+watch(selectedKbId, async () => {
   selectedDocId.value = ''
-  refreshDocsInKb()
+  await refreshDocsInKb()
+  applyDocContextSelection()
 })
 
 watch(qaMessages, () => scrollToBottom(), { deep: true })

@@ -293,12 +293,26 @@ class RecommendationAction(BaseModel):
     type: str
     reason: Optional[str] = None
     params: Optional[dict] = None
+    priority: int = 0
+    cta: Optional[str] = None
 
 
 class RecommendationItem(BaseModel):
     doc_id: str
     doc_name: Optional[str] = None
     actions: List[RecommendationAction]
+    primary_action: Optional[RecommendationAction] = None
+    urgency_score: float = 0.0
+    completion_score: float = 0.0
+    status: str = "needs_attention"
+    summary: Optional[str] = None
+
+
+class RecommendationNextStep(BaseModel):
+    doc_id: str
+    doc_name: Optional[str] = None
+    action: RecommendationAction
+    reason: Optional[str] = None
 
 
 class LearningPathItem(BaseModel):
@@ -352,3 +366,5 @@ class RecommendationsResponse(BaseModel):
     learning_path_stages: List[LearningPathStage] = []
     learning_path_modules: List[LearningPathModule] = []
     learning_path_summary: Dict[str, Any] = {}
+    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    next_step: Optional[RecommendationNextStep] = None
