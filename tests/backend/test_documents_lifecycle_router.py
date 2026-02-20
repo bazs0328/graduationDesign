@@ -286,3 +286,83 @@ def test_delete_doc_cleans_records_and_files(client, db_session):
     )
     assert not os.path.exists(raw_path)
     assert not os.path.exists(text_path)
+
+
+def test_doc_task_center_and_retry_failed(client, db_session):
+    user_id = "doc_lifecycle_user_task"
+    kb_id = "doc_kb_task"
+    error_doc_id = "doc_task_error"
+    processing_doc_id = "doc_task_processing"
+    _seed_user_kbs_doc(
+        db_session,
+        user_id=user_id,
+        kb_id=kb_id,
+        doc_id="doc_task_ready",
+    )
+    error_doc = Document(
+        id=error_doc_id,
+        user_id=user_id,
+        kb_id=kb_id,
+        filename="error.txt",
+        file_type="txt",
+        text_path=os.path.join("tmp", f"{error_doc_id}.txt"),
+        num_chunks=0,
+        num_pages=0,
+        char_count=0,
+        file_hash=f"hash-{error_doc_id}",
+        status="error",
+        error_message="extract failed",
+        retry_count=2,
+    )
+    processing_doc = Document(
+        id=processing_doc_id,
+        user_id=user_id,
+        kb_id=kb_id,
+        filename="processing.txt",
+        file_type="txt",
+        text_path=os.path.join("tmp", f"{processing_doc_id}.txt"),
+        num_chunks=0,
+        num_pages=0,
+        char_count=0,
+        file_hash=f"hash-{processing_doc_id}",
+        status="processing",
+    )
+    db_session.add(error_doc)
+    db_session.add(processing_doc)
+    db_session.commit()
+
+    tasks_resp = client.get("/api/docs/tasks", params={"user_id": user_id, "kb_id": kb_id})
+    assert tasks_resp.status_code == 200
+    payload = tasks_resp.json()
+    assert payload["processing_count"] == 1
+    assert payload["error_count"] == 1
+    assert payload["processing"][0]["id"] == processing_doc_id
+    assert payload["error"][0]["id"] == error_doc_id
+    assert payload["error"][0]["retry_count"] == 2
+
+    ensure_kb_dirs(user_id, kb_id)
+    raw_dir = os.path.join(kb_base_dir(user_id, kb_id), "raw")
+    raw_path = os.path.join(raw_dir, f"{error_doc_id}_{error_doc.filename}")
+    with open(raw_path, "w", encoding="utf-8") as f:
+        f.write("raw")
+
+    with (
+        patch("app.routers.documents.delete_doc_vectors", return_value=1),
+        patch("app.routers.documents.remove_doc_chunks", return_value=1),
+        patch("app.routers.documents.process_document_task"),
+    ):
+        retry_resp = client.post(
+            "/api/docs/retry-failed",
+            json={"user_id": user_id, "doc_ids": [error_doc_id]},
+        )
+
+    assert retry_resp.status_code == 200
+    retry_payload = retry_resp.json()
+    assert retry_payload["queued"] == [error_doc_id]
+    assert retry_payload["skipped"] == []
+
+    db_session.expire_all()
+    refreshed = db_session.query(Document).filter(Document.id == error_doc_id).first()
+    assert refreshed is not None
+    assert refreshed.status == "processing"
+    assert refreshed.retry_count == 3

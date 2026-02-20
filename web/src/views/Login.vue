@@ -142,6 +142,11 @@ async function submit() {
     localStorage.setItem('gradtutor_username', res.username)
     localStorage.setItem('gradtutor_name', res.name || '')
     localStorage.setItem('gradtutor_user', res.user_id)
+    if (res.access_token) {
+      localStorage.setItem('gradtutor_access_token', res.access_token)
+    } else {
+      localStorage.removeItem('gradtutor_access_token')
+    }
     router.push('/')
   } catch (err) {
     if (err?.name === 'AbortError') {

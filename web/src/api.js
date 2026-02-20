@@ -11,6 +11,13 @@ export function enableGlobalErrorToast() {
 async function request(path, options = {}) {
   const fullUrl = `${API_BASE}${path}`
   const isAuth = path.includes('/api/auth')
+  const headers = new Headers(options.headers || undefined)
+  if (!isAuth) {
+    const token = localStorage.getItem('gradtutor_access_token')
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`)
+    }
+  }
   let abortId
   let signal = options.signal
   if (isAuth && !signal) {
@@ -19,7 +26,7 @@ async function request(path, options = {}) {
     abortId = setTimeout(() => controller.abort(), 15000)
   }
   try {
-    const res = await fetch(fullUrl, { ...options, signal })
+    const res = await fetch(fullUrl, { ...options, headers, signal })
     if (abortId) clearTimeout(abortId)
     if (!res.ok) {
       const text = await res.text()
@@ -78,8 +85,9 @@ export function getCurrentUser() {
   const userId = localStorage.getItem('gradtutor_user_id')
   const username = localStorage.getItem('gradtutor_username')
   const name = localStorage.getItem('gradtutor_name')
+  const token = localStorage.getItem('gradtutor_access_token')
   if (!userId) return null
-  return { user_id: userId, username: username || userId, name: name || username || userId }
+  return { user_id: userId, username: username || userId, name: name || username || userId, access_token: token }
 }
 
 export function logout() {
@@ -87,6 +95,7 @@ export function logout() {
   localStorage.removeItem('gradtutor_username')
   localStorage.removeItem('gradtutor_name')
   localStorage.removeItem('gradtutor_user')
+  localStorage.removeItem('gradtutor_access_token')
   window.location.href = '/login'
 }
 

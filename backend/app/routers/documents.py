@@ -2,6 +2,7 @@ import hashlib
 import glob
 import os
 import shutil
+from datetime import datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
@@ -31,7 +32,13 @@ from app.models import (
     QuizAttempt,
     SummaryRecord,
 )
-from app.schemas import DocumentOut, DocumentUpdateRequest
+from app.schemas import (
+    DocumentOut,
+    DocumentRetryRequest,
+    DocumentRetryResponse,
+    DocumentTaskCenterResponse,
+    DocumentUpdateRequest,
+)
 from app.services.lexical import move_doc_chunks, remove_doc_chunks, update_doc_chunks_metadata
 from app.services.ingest_tasks import process_document_task
 from app.utils.document_validator import DocumentValidator
@@ -43,13 +50,19 @@ router = APIRouter()
 def list_docs(
     user_id: str | None = None,
     kb_id: str | None = None,
+    status: str | None = None,
     db: Session = Depends(get_db),
 ):
+    resolved_user_id = ensure_user(db, user_id)
     query = db.query(Document)
-    if user_id:
-        query = query.filter(Document.user_id == user_id)
+    query = query.filter(Document.user_id == resolved_user_id)
     if kb_id:
         query = query.filter(Document.kb_id == kb_id)
+    if status:
+        normalized = status.strip().lower()
+        if normalized not in {"processing", "ready", "error"}:
+            raise HTTPException(status_code=400, detail="Invalid status filter")
+        query = query.filter(Document.status == normalized)
     return query.order_by(Document.created_at.desc()).all()
 
 
@@ -79,6 +92,47 @@ def _pick_raw_path(candidates: list[str], filename: str) -> str | None:
         if os.path.basename(path).endswith(target_suffix):
             return path
     return candidates[0]
+
+
+def _queue_doc_reprocess(
+    db: Session,
+    background_tasks: BackgroundTasks,
+    doc: Document,
+    resolved_user_id: str,
+) -> tuple[bool, str | None]:
+    if not doc.kb_id:
+        return False, "Document has no knowledge base"
+
+    raw_candidates = _find_raw_candidates(resolved_user_id, doc.kb_id, doc.id)
+    file_path = _pick_raw_path(raw_candidates, doc.filename)
+    if not file_path:
+        return False, "Original file not found, reprocess is unavailable"
+
+    delete_doc_vectors(resolved_user_id, doc.id)
+    remove_doc_chunks(resolved_user_id, doc.kb_id, doc.id)
+
+    doc.status = "processing"
+    doc.error_message = None
+    doc.retry_count = int(doc.retry_count or 0) + 1
+    doc.last_retry_at = datetime.utcnow()
+    doc.num_chunks = 0
+    doc.num_pages = 0
+    doc.char_count = 0
+    doc.processed_at = None
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+
+    background_tasks.add_task(
+        process_document_task,
+        doc.id,
+        resolved_user_id,
+        doc.kb_id,
+        file_path,
+        doc.filename,
+        doc.file_hash or "",
+    )
+    return True, None
 
 
 def _delete_doc_records(db: Session, doc: Document) -> None:
@@ -267,40 +321,66 @@ def reprocess_doc(
 ):
     resolved_user_id = ensure_user(db, user_id)
     doc = _get_doc_or_404(db, resolved_user_id, doc_id)
-    if not doc.kb_id:
-        raise HTTPException(status_code=400, detail="Document has no knowledge base")
-
-    raw_candidates = _find_raw_candidates(resolved_user_id, doc.kb_id, doc.id)
-    file_path = _pick_raw_path(raw_candidates, doc.filename)
-    if not file_path:
-        raise HTTPException(
-            status_code=404,
-            detail="Original file not found, reprocess is unavailable",
-        )
-
-    delete_doc_vectors(resolved_user_id, doc.id)
-    remove_doc_chunks(resolved_user_id, doc.kb_id, doc.id)
-
-    doc.status = "processing"
-    doc.error_message = None
-    doc.num_chunks = 0
-    doc.num_pages = 0
-    doc.char_count = 0
-    doc.processed_at = None
-    db.add(doc)
-    db.commit()
-    db.refresh(doc)
-
-    background_tasks.add_task(
-        process_document_task,
-        doc.id,
-        resolved_user_id,
-        doc.kb_id,
-        file_path,
-        doc.filename,
-        doc.file_hash or "",
-    )
+    ok, err = _queue_doc_reprocess(db, background_tasks, doc, resolved_user_id)
+    if not ok:
+        status_code = 404 if err and "not found" in err.lower() else 400
+        raise HTTPException(status_code=status_code, detail=err or "Failed to reprocess document")
     return doc
+
+
+@router.get("/docs/tasks", response_model=DocumentTaskCenterResponse)
+def get_doc_tasks(
+    user_id: str | None = None,
+    kb_id: str | None = None,
+    db: Session = Depends(get_db),
+):
+    resolved_user_id = ensure_user(db, user_id)
+    query = db.query(Document).filter(Document.user_id == resolved_user_id)
+    if kb_id:
+        query = query.filter(Document.kb_id == kb_id)
+    rows = (
+        query.filter(Document.status.in_(["processing", "error"]))
+        .order_by(Document.created_at.desc())
+        .all()
+    )
+    processing = [doc for doc in rows if doc.status == "processing"]
+    error = [doc for doc in rows if doc.status == "error"]
+    return DocumentTaskCenterResponse(
+        processing=processing,
+        error=error,
+        processing_count=len(processing),
+        error_count=len(error),
+    )
+
+
+@router.post("/docs/retry-failed", response_model=DocumentRetryResponse)
+def retry_failed_docs(
+    payload: DocumentRetryRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    resolved_user_id = ensure_user(db, payload.user_id)
+    query = db.query(Document).filter(
+        Document.user_id == resolved_user_id,
+        Document.status == "error",
+    )
+    if payload.doc_ids:
+        doc_ids = [doc_id.strip() for doc_id in payload.doc_ids if doc_id and doc_id.strip()]
+        if not doc_ids:
+            return DocumentRetryResponse(queued=[], skipped=[])
+        query = query.filter(Document.id.in_(doc_ids))
+
+    docs = query.all()
+    queued: list[str] = []
+    skipped: list[str] = []
+    for doc in docs:
+        ok, _ = _queue_doc_reprocess(db, background_tasks, doc, resolved_user_id)
+        if ok:
+            queued.append(doc.id)
+        else:
+            skipped.append(doc.id)
+
+    return DocumentRetryResponse(queued=queued, skipped=skipped)
 
 
 @router.post("/docs/upload", response_model=DocumentOut)

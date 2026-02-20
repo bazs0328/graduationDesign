@@ -37,6 +37,7 @@ function flushPromises() {
 
 async function mountAppWithRouter() {
   localStorage.setItem('gradtutor_user_id', 'test')
+  localStorage.setItem('gradtutor_access_token', 'test-token')
   const router = createRouter({
     history: createMemoryHistory(),
     routes

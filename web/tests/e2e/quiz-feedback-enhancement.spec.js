@@ -23,6 +23,23 @@ async function ensureBackendHealthy(request) {
   }
 }
 
+async function ensureAuthUser(request, username = 'e2e_quiz_feedback_user') {
+  const password = 'e2e-password-123'
+  const registerResp = await request.post(`${apiBase}/api/auth/register`, {
+    data: { username, password, name: username }
+  })
+  if (registerResp.ok()) {
+    return registerResp.json()
+  }
+  const loginResp = await request.post(`${apiBase}/api/auth/login`, {
+    data: { username, password }
+  })
+  if (!loginResp.ok()) {
+    throw new Error('Failed to create/login E2E user')
+  }
+  return loginResp.json()
+}
+
 async function waitForDocReady(page, filename) {
   const docsCard = page.getByRole('heading', { name: '我的文档' }).locator('..').locator('..').locator('..')
   const refreshButton = page.getByRole('button', { name: '刷新列表' })
@@ -88,25 +105,23 @@ test.describe('Quiz Feedback Enhancement', () => {
   })
 
   test('full flow: generate → submit → view feedback → targeted practice', async ({
-    page
+    page,
+    request
   }) => {
     test.skip(!runLLM, 'Set E2E_LLM=1 to run LLM-backed flows')
 
     const kbName = 'Default'
     const quizCount = 5
-    const testUserId = 'e2e_test_user'
+    const auth = await ensureAuthUser(request, 'e2e_quiz_feedback_user')
+    await page.addInitScript((user) => {
+      localStorage.setItem('gradtutor_user_id', user.user_id)
+      localStorage.setItem('gradtutor_username', user.username)
+      localStorage.setItem('gradtutor_name', user.name || '')
+      localStorage.setItem('gradtutor_user', user.user_id)
+      localStorage.setItem('gradtutor_access_token', user.access_token || '')
+    }, auth)
 
-    // Set user ID in localStorage before navigation to avoid login redirect
     await page.goto('/')
-    await page.evaluate((userId) => {
-      localStorage.setItem('gradtutor_user_id', userId)
-      localStorage.setItem('gradtutor_username', userId)
-      localStorage.setItem('gradtutor_name', userId)
-      localStorage.setItem('gradtutor_user', userId)
-    }, testUserId)
-    
-    // Reload page to apply localStorage changes
-    await page.reload()
     await expect(page.getByRole('heading', { name: 'GradTutor' })).toBeVisible()
     await page.waitForLoadState('load')
 

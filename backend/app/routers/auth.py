@@ -8,7 +8,9 @@ from app.db import get_db
 from app.models import User
 from app.schemas import AuthLoginRequest, AuthRegisterRequest, AuthResponse
 
+from app.core.auth import create_access_token, get_request_user_id
 from app.core.knowledge_bases import ensure_default_kb
+from app.core.config import settings
 
 BCRYPT_MAX_BYTES = 72
 
@@ -55,6 +57,7 @@ def register(payload: AuthRegisterRequest, db: Session = Depends(get_db)):
         user_id=user.id,
         username=user.username,
         name=user.name,
+        access_token=create_access_token(user.id),
     )
 
 
@@ -67,18 +70,31 @@ def login(payload: AuthLoginRequest, db: Session = Depends(get_db)):
         user_id=user.id,
         username=user.username,
         name=user.name,
+        access_token=create_access_token(user.id),
     )
 
 
 @router.get("/me", response_model=AuthResponse)
 def me(user_id: str | None = None, db: Session = Depends(get_db)):
-    if not user_id:
-        raise HTTPException(status_code=400, detail="缺少 user_id")
-    user = db.query(User).filter(User.id == user_id).first()
+    authenticated = get_request_user_id()
+    requested = (user_id or "").strip() or None
+    if authenticated and requested and requested != authenticated:
+        raise HTTPException(status_code=403, detail="user_id does not match authenticated user")
+    if authenticated:
+        resolved_user_id = authenticated
+    else:
+        if settings.auth_allow_legacy_user_id and requested:
+            resolved_user_id = requested
+        elif settings.auth_allow_legacy_user_id:
+            raise HTTPException(status_code=400, detail="缺少 user_id")
+        else:
+            raise HTTPException(status_code=401, detail="Authentication required")
+    user = db.query(User).filter(User.id == resolved_user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     return AuthResponse(
         user_id=user.id,
         username=user.username,
         name=user.name,
+        access_token=create_access_token(user.id),
     )

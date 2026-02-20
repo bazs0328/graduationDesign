@@ -19,6 +19,8 @@ class AuthResponse(BaseModel):
     user_id: str
     username: str
     name: Optional[str] = None
+    access_token: str
+    token_type: str = "bearer"
 
 
 class DocumentOut(BaseModel):
@@ -32,10 +34,30 @@ class DocumentOut(BaseModel):
     char_count: int
     status: Optional[str] = None
     error_message: Optional[str] = None
+    retry_count: int = 0
+    last_retry_at: Optional[datetime] = None
     processed_at: Optional[datetime] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentTaskCenterResponse(BaseModel):
+    processing: List[DocumentOut] = []
+    error: List[DocumentOut] = []
+    processing_count: int = 0
+    error_count: int = 0
+    auto_refresh_ms: int = 2000
+
+
+class DocumentRetryRequest(BaseModel):
+    user_id: Optional[str] = None
+    doc_ids: Optional[List[str]] = None
+
+
+class DocumentRetryResponse(BaseModel):
+    queued: List[str] = []
+    skipped: List[str] = []
 
 
 class DocumentUpdateRequest(BaseModel):

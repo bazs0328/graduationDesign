@@ -42,6 +42,7 @@ def process_document_task(
         except Exception as exc:  # noqa: BLE001
             doc.status = "error"
             doc.error_message = str(exc)[:800]
+            doc.processed_at = datetime.utcnow()
             db.commit()
     finally:
         db.close()

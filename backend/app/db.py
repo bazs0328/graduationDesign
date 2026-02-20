@@ -46,9 +46,14 @@ def ensure_schema():
             conn.execute(text("ALTER TABLE documents ADD COLUMN status VARCHAR"))
         if "error_message" not in cols:
             conn.execute(text("ALTER TABLE documents ADD COLUMN error_message TEXT"))
+        if "retry_count" not in cols:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN retry_count INTEGER DEFAULT 0"))
+        if "last_retry_at" not in cols:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN last_retry_at DATETIME"))
         if "processed_at" not in cols:
             conn.execute(text("ALTER TABLE documents ADD COLUMN processed_at DATETIME"))
         conn.execute(text("UPDATE documents SET status = 'ready' WHERE status IS NULL"))
+        conn.execute(text("UPDATE documents SET retry_count = 0 WHERE retry_count IS NULL"))
         conn.commit()
 
         result = conn.execute(text("PRAGMA table_info(qa_records)"))

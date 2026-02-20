@@ -51,7 +51,7 @@ const router = createRouter({
 })
 
 router.beforeEach((to, from, next) => {
-  const isLoggedIn = !!localStorage.getItem('gradtutor_user_id')
+  const isLoggedIn = !!localStorage.getItem('gradtutor_access_token')
   if (to.path !== '/login' && !isLoggedIn) {
     next('/login')
   } else if (to.path === '/login' && isLoggedIn) {

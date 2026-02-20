@@ -4,6 +4,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "GradTutor"
     data_dir: str = "data"
+    auth_secret_key: str = "gradtutor-dev-secret"
+    auth_token_ttl_hours: int = 72
+    auth_require_login: bool = True
+    auth_allow_legacy_user_id: bool = False
 
     llm_provider: str = "openai"  # openai, gemini, deepseek, qwen
     embedding_provider: str = "dashscope"  # openai, gemini, deepseek, qwen, dashscope

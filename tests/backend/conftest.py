@@ -18,6 +18,7 @@ os.environ.setdefault("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatibl
 os.environ.setdefault("QWEN_MODEL", "qwen-plus")
 os.environ.setdefault("QWEN_EMBEDDING_MODEL", "text-embedding-v4")
 os.environ.setdefault("DASHSCOPE_EMBEDDING_MODEL", "qwen3-vl-embedding")
+os.environ.setdefault("AUTH_ALLOW_LEGACY_USER_ID", "true")
 
 # Ensure backend is on path (conftest lives in tests/backend/)
 _project_root = Path(__file__).resolve().parent.parent.parent

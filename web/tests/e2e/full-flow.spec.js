@@ -30,6 +30,23 @@ async function ensureBackendHealthy(request) {
   }
 }
 
+async function ensureAuthUser(request, username = 'e2e_full_flow_user') {
+  const password = 'e2e-password-123'
+  const registerResp = await request.post(`${apiBase}/api/auth/register`, {
+    data: { username, password, name: username }
+  })
+  if (registerResp.ok()) {
+    return registerResp.json()
+  }
+  const loginResp = await request.post(`${apiBase}/api/auth/login`, {
+    data: { username, password }
+  })
+  if (!loginResp.ok()) {
+    throw new Error('Failed to create/login E2E user')
+  }
+  return loginResp.json()
+}
+
 async function selectDocInCard(card, filename) {
   const select = card.locator('select').first()
   await select.selectOption({ label: filename }, { timeout: 60000 })
@@ -60,7 +77,15 @@ test.describe('GradTutor E2E', () => {
     test.skip(!healthy, 'Backend is not reachable at E2E_API_BASE')
   })
 
-  test('basic UI loads', async ({ page }) => {
+  test('basic UI loads', async ({ page, request }) => {
+    const auth = await ensureAuthUser(request, 'e2e_basic_ui_user')
+    await page.addInitScript((user) => {
+      localStorage.setItem('gradtutor_user_id', user.user_id)
+      localStorage.setItem('gradtutor_username', user.username)
+      localStorage.setItem('gradtutor_name', user.name || '')
+      localStorage.setItem('gradtutor_user', user.user_id)
+      localStorage.setItem('gradtutor_access_token', user.access_token || '')
+    }, auth)
     await page.goto('/')
     await expect(page.getByRole('heading', { name: 'GradTutor' })).toBeVisible()
     const nav = page.getByRole('navigation')
@@ -73,17 +98,23 @@ test.describe('GradTutor E2E', () => {
   })
 
   test('full flow: upload → summary → keypoints → QA → quiz → progress', async ({
-    page
+    page,
+    request
   }) => {
     test.skip(!runLLM, 'Set E2E_LLM=1 to run LLM-backed flows')
 
     const kbName = 'Default'
+    const auth = await ensureAuthUser(request, 'e2e_full_flow_llm_user')
+    await page.addInitScript((user) => {
+      localStorage.setItem('gradtutor_user_id', user.user_id)
+      localStorage.setItem('gradtutor_username', user.username)
+      localStorage.setItem('gradtutor_name', user.name || '')
+      localStorage.setItem('gradtutor_user', user.user_id)
+      localStorage.setItem('gradtutor_access_token', user.access_token || '')
+    }, auth)
 
     await page.goto('/')
     await expect(page.getByRole('heading', { name: 'GradTutor' })).toBeVisible()
-    const userIdInput = page.getByRole('complementary').getByRole('textbox')
-    await userIdInput.fill('default')
-    await userIdInput.blur()
     await page.waitForLoadState('load')
 
     await Promise.all([

@@ -208,6 +208,71 @@
         </div>
       </section>
     </div>
+
+    <section class="bg-card border border-border rounded-2xl p-6 shadow-lg shadow-primary/5 space-y-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <RefreshCw class="w-5 h-5 text-primary" />
+          <h3 class="text-lg font-bold">解析任务中心</h3>
+        </div>
+        <div class="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>处理中 {{ taskCenter.processing_count }}</span>
+          <span>失败 {{ taskCenter.error_count }}</span>
+        </div>
+      </div>
+
+      <div v-if="taskCenter.processing_count === 0 && taskCenter.error_count === 0" class="text-sm text-muted-foreground">
+        当前没有解析中的任务或失败任务。
+      </div>
+
+      <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="space-y-2">
+          <div class="text-sm font-semibold">处理中</div>
+          <div v-if="taskCenter.processing.length === 0" class="text-xs text-muted-foreground">暂无</div>
+          <div
+            v-for="task in taskCenter.processing"
+            :key="`proc-${task.id}`"
+            class="text-xs p-3 bg-background border border-border rounded-lg flex items-center justify-between gap-3"
+          >
+            <div class="min-w-0">
+              <div class="truncate font-medium">{{ task.filename }}</div>
+              <div class="text-muted-foreground">自动刷新中</div>
+            </div>
+            <RefreshCw class="w-3 h-3 text-blue-500 animate-spin shrink-0" />
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <div class="text-sm font-semibold">失败</div>
+            <Button
+              size="sm"
+              variant="outline"
+              :disabled="taskCenter.error_count === 0"
+              :loading="busy.retryFailed"
+              @click="retryFailedTasks()"
+            >
+              一键重试
+            </Button>
+          </div>
+          <div v-if="taskCenter.error.length === 0" class="text-xs text-muted-foreground">暂无</div>
+          <div
+            v-for="task in taskCenter.error"
+            :key="`err-${task.id}`"
+            class="text-xs p-3 bg-background border border-destructive/30 rounded-lg flex items-center justify-between gap-3"
+          >
+            <div class="min-w-0">
+              <div class="truncate font-medium">{{ task.filename }}</div>
+              <div class="text-destructive truncate">{{ task.error_message || '解析失败' }}</div>
+              <div class="text-muted-foreground">重试次数 {{ task.retry_count || 0 }}</div>
+            </div>
+            <Button size="sm" variant="ghost" :loading="isDocBusy(task.id)" @click="retryFailedTasks([task.id])">
+              重试
+            </Button>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -231,15 +296,24 @@ const kbRenameInput = ref('')
 const uploadFile = ref(null)
 const dragActive = ref(false)
 const docBusyMap = ref({})
+const taskCenter = ref({
+  processing: [],
+  error: [],
+  processing_count: 0,
+  error_count: 0,
+  auto_refresh_ms: 2000
+})
 const busy = ref({
   upload: false,
   kb: false,
   kbManage: false,
   kbDelete: false,
+  retryFailed: false,
   refresh: false,
   init: false
 })
 const pollingIntervals = ref(new Map()) // 存储每个文档的轮询定时器
+let taskCenterInterval = null
 const selectedKb = computed(() => kbs.value.find((item) => item.id === selectedKbId.value) || null)
 
 function onFileChange(event) {
@@ -265,12 +339,43 @@ async function refreshKbs() {
   }
 }
 
+function stopTaskCenterAutoRefresh() {
+  if (taskCenterInterval) {
+    clearInterval(taskCenterInterval)
+    taskCenterInterval = null
+  }
+}
+
+function scheduleTaskCenterAutoRefresh() {
+  stopTaskCenterAutoRefresh()
+  if (!taskCenter.value.processing_count) return
+  const interval = Math.max(1000, taskCenter.value.auto_refresh_ms || 2000)
+  taskCenterInterval = setInterval(async () => {
+    await refreshTaskCenter()
+    if (!taskCenter.value.processing_count) {
+      await refreshDocs()
+      stopTaskCenterAutoRefresh()
+    }
+  }, interval)
+}
+
+async function refreshTaskCenter() {
+  try {
+    const kbParam = selectedKbId.value ? `&kb_id=${encodeURIComponent(selectedKbId.value)}` : ''
+    taskCenter.value = await apiGet(`/api/docs/tasks?user_id=${encodeURIComponent(resolvedUserId.value)}${kbParam}`)
+    scheduleTaskCenterAutoRefresh()
+  } catch {
+    stopTaskCenterAutoRefresh()
+  }
+}
+
 async function refreshDocs() {
   busy.value.refresh = true
   try {
     const kbParam = selectedKbId.value ? `&kb_id=${encodeURIComponent(selectedKbId.value)}` : ''
     const result = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}${kbParam}`)
     docs.value = result
+    await refreshTaskCenter()
     
     // 刷新后检查是否有处理中的文档需要轮询
     checkAndStartPolling()
@@ -343,6 +448,7 @@ async function checkDocStatus(docId) {
     // 如果状态不再是 processing，停止轮询
     if (doc.status !== 'processing') {
       stopPolling(docId)
+      await refreshTaskCenter()
       if (doc.status === 'ready') {
         showToast('文档处理完成', 'success')
       } else if (doc.status === 'error') {
@@ -521,6 +627,39 @@ async function reprocessDoc(doc) {
   }
 }
 
+async function retryFailedTasks(targetDocIds = null) {
+  const docIds = Array.isArray(targetDocIds) ? targetDocIds.filter(Boolean) : null
+  if (docIds && docIds.length === 1) {
+    setDocBusy(docIds[0], true)
+  } else {
+    busy.value.retryFailed = true
+  }
+  try {
+    const payload = {
+      user_id: resolvedUserId.value,
+      doc_ids: docIds && docIds.length ? docIds : undefined
+    }
+    const res = await apiPost('/api/docs/retry-failed', payload)
+    const queued = Array.isArray(res?.queued) ? res.queued : []
+    const skipped = Array.isArray(res?.skipped) ? res.skipped : []
+    if (queued.length > 0) {
+      showToast(`已重试 ${queued.length} 个失败任务`, 'success')
+      queued.forEach((docId) => startPolling(docId))
+    } else if (skipped.length > 0) {
+      showToast('未找到可重试的失败任务', 'error')
+    }
+    await refreshDocs()
+  } catch {
+    // error toast handled globally
+  } finally {
+    if (docIds && docIds.length === 1) {
+      setDocBusy(docIds[0], false)
+    } else {
+      busy.value.retryFailed = false
+    }
+  }
+}
+
 async function deleteDocItem(doc) {
   if (isDocBusy(doc.id)) return
   const confirmed = window.confirm(`确认删除文档「${doc.filename}」？该操作不可恢复。`)
@@ -575,6 +714,7 @@ watch(selectedKbId, async () => {
   // 切换知识库时，停止所有轮询
   pollingIntervals.value.forEach((interval) => clearInterval(interval))
   pollingIntervals.value.clear()
+  stopTaskCenterAutoRefresh()
   kbRenameInput.value = selectedKb.value ? selectedKb.value.name : ''
   await refreshDocs()
 })
@@ -583,5 +723,6 @@ watch(selectedKbId, async () => {
 onUnmounted(() => {
   pollingIntervals.value.forEach((interval) => clearInterval(interval))
   pollingIntervals.value.clear()
+  stopTaskCenterAutoRefresh()
 })
 </script>

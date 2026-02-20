@@ -63,6 +63,8 @@ class Document(Base):
     file_hash = Column(String, nullable=True, index=True)
     status = Column(String, default="processing")
     error_message = Column(Text, nullable=True)
+    retry_count = Column(Integer, default=0)
+    last_retry_at = Column(DateTime, nullable=True)
     processed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
