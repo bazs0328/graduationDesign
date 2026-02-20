@@ -22,7 +22,7 @@
             <MessageSquare class="w-6 h-6 text-primary" />
             <h2 class="text-xl font-bold">AI 辅导对话</h2>
           </div>
-          <button @click="qaMessages = []" class="p-2 hover:bg-accent rounded-lg transition-colors text-muted-foreground" title="清空对话">
+          <button @click="clearLocalMessages" class="p-2 hover:bg-accent rounded-lg transition-colors text-muted-foreground" title="仅清空本地显示">
             <Trash2 class="w-5 h-5" />
           </button>
         </div>
@@ -134,6 +134,65 @@
           </template>
         </div>
 
+        <div class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground">会话管理</h3>
+            <button
+              class="text-[10px] font-semibold px-2 py-1 rounded border border-border hover:bg-accent"
+              :disabled="busy.sessionAction || !selectedKbId"
+              @click="createSession"
+            >
+              新建会话
+            </button>
+          </div>
+          <div class="space-y-2">
+            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">历史会话</label>
+            <select
+              v-model="selectedSessionId"
+              class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
+            >
+              <option value="">未选择（将自动新建）</option>
+              <option v-for="session in sessions" :key="session.id" :value="session.id">
+                {{ sessionLabel(session) }}
+              </option>
+            </select>
+          </div>
+          <div v-if="selectedSessionId" class="space-y-2">
+            <input
+              v-model="sessionTitleInput"
+              type="text"
+              placeholder="会话名称"
+              class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
+            />
+            <div class="grid grid-cols-3 gap-2">
+              <button
+                class="text-xs py-2 rounded border border-border hover:bg-accent"
+                :disabled="busy.sessionAction"
+                @click="renameCurrentSession"
+              >
+                重命名
+              </button>
+              <button
+                class="text-xs py-2 rounded border border-border hover:bg-accent"
+                :disabled="busy.sessionAction"
+                @click="clearCurrentSessionMessages"
+              >
+                清空消息
+              </button>
+              <button
+                class="text-xs py-2 rounded border border-destructive/40 text-destructive hover:bg-destructive/10"
+                :disabled="busy.sessionAction"
+                @click="deleteCurrentSession"
+              >
+                删除会话
+              </button>
+            </div>
+          </div>
+          <p class="text-[10px] text-muted-foreground">
+            顶部垃圾桶仅清空本地显示，不会清空服务端会话消息。
+          </p>
+        </div>
+
         <div class="flex-1 bg-card border border-border rounded-xl p-6 shadow-sm flex flex-col min-h-0">
           <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-4">简要统计</h3>
           <div v-if="busy.init" class="mt-2">
@@ -192,7 +251,7 @@
 import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { MessageSquare, Send, Trash2, Database, FileText, Sparkles, User, Bot } from 'lucide-vue-next'
-import { apiGet, apiPost } from '../api'
+import { apiDelete, apiGet, apiPatch, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
@@ -204,15 +263,21 @@ const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
 const resolvedUserId = computed(() => userId.value || 'default')
 const kbs = ref([])
 const docsInKb = ref([])
+const sessions = ref([])
 const selectedKbId = ref('')
 const selectedDocId = ref('')
+const selectedSessionId = ref('')
+const sessionTitleInput = ref('')
 const qaInput = ref('')
 const qaMessages = ref([])
 const qaAbilityLevel = ref('intermediate')
+const syncingFromSession = ref(false)
 const busy = ref({
   qa: false,
   init: false,
-  docs: false
+  docs: false,
+  sessions: false,
+  sessionAction: false
 })
 const scrollContainer = ref(null)
 
@@ -243,6 +308,9 @@ const selectedKb = computed(() => {
 
 const selectedDoc = computed(() => {
   return docsInKb.value.find(d => d.id === selectedDocId.value) || null
+})
+const selectedSession = computed(() => {
+  return sessions.value.find((session) => session.id === selectedSessionId.value) || null
 })
 
 const currentLevelMeta = computed(() => getLevelMeta(qaAbilityLevel.value))
@@ -292,6 +360,143 @@ async function refreshDocsInKb() {
   }
 }
 
+async function refreshSessions() {
+  busy.value.sessions = true
+  try {
+    const result = await apiGet(`/api/chat/sessions?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    sessions.value = Array.isArray(result) ? result : []
+    if (selectedSessionId.value && !sessions.value.some((session) => session.id === selectedSessionId.value)) {
+      selectedSessionId.value = ''
+      sessionTitleInput.value = ''
+    }
+  } catch {
+    // error toast handled globally
+    sessions.value = []
+  } finally {
+    busy.value.sessions = false
+  }
+}
+
+function mapServerMessage(message) {
+  if (message.role === 'user') {
+    return { role: 'question', content: message.content }
+  }
+  return {
+    role: 'answer',
+    content: message.content,
+    sources: Array.isArray(message.sources) ? message.sources : []
+  }
+}
+
+async function loadSessionMessages(sessionId) {
+  if (!sessionId) {
+    qaMessages.value = []
+    return
+  }
+  try {
+    const rows = await apiGet(`/api/chat/sessions/${sessionId}/messages?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    qaMessages.value = Array.isArray(rows) ? rows.map(mapServerMessage) : []
+  } catch {
+    qaMessages.value = []
+  }
+}
+
+function sessionLabel(session) {
+  const title = session.title || '未命名会话'
+  const kbText = session.kb_id ? `KB:${session.kb_id}` : '无KB'
+  return `${title} (${kbText})`
+}
+
+async function createSession(options = {}) {
+  const { silent = false } = options
+  if (!selectedKbId.value) {
+    if (!silent) {
+      showToast('请先选择知识库', 'error')
+    }
+    return null
+  }
+  busy.value.sessionAction = true
+  try {
+    const payload = {
+      user_id: resolvedUserId.value,
+      kb_id: selectedKbId.value
+    }
+    if (selectedDocId.value) {
+      payload.doc_id = selectedDocId.value
+    }
+    const session = await apiPost('/api/chat/sessions', payload)
+    await refreshSessions()
+    selectedSessionId.value = session.id
+    sessionTitleInput.value = session.title || ''
+    qaMessages.value = []
+    if (!silent) {
+      showToast('已创建新会话', 'success')
+    }
+    return session.id
+  } catch {
+    return null
+  } finally {
+    busy.value.sessionAction = false
+  }
+}
+
+async function renameCurrentSession() {
+  if (!selectedSessionId.value) return
+  busy.value.sessionAction = true
+  try {
+    await apiPatch(`/api/chat/sessions/${selectedSessionId.value}`, {
+      user_id: resolvedUserId.value,
+      name: sessionTitleInput.value
+    })
+    await refreshSessions()
+    showToast('会话已重命名', 'success')
+  } catch {
+    // error toast handled globally
+  } finally {
+    busy.value.sessionAction = false
+  }
+}
+
+async function clearCurrentSessionMessages() {
+  if (!selectedSessionId.value) return
+  const confirmed = window.confirm('确认清空当前会话在服务端保存的所有消息？')
+  if (!confirmed) return
+  busy.value.sessionAction = true
+  try {
+    await apiDelete(`/api/chat/sessions/${selectedSessionId.value}/messages?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    qaMessages.value = []
+    showToast('会话消息已清空', 'success')
+  } catch {
+    // error toast handled globally
+  } finally {
+    busy.value.sessionAction = false
+  }
+}
+
+async function deleteCurrentSession() {
+  if (!selectedSessionId.value) return
+  const confirmed = window.confirm('确认删除当前会话？删除后不可恢复。')
+  if (!confirmed) return
+  busy.value.sessionAction = true
+  try {
+    const deletingSessionId = selectedSessionId.value
+    await apiDelete(`/api/chat/sessions/${deletingSessionId}?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    selectedSessionId.value = ''
+    sessionTitleInput.value = ''
+    qaMessages.value = []
+    await refreshSessions()
+    showToast('会话已删除', 'success')
+  } catch {
+    // error toast handled globally
+  } finally {
+    busy.value.sessionAction = false
+  }
+}
+
+function clearLocalMessages() {
+  qaMessages.value = []
+}
+
 function applyDocContextSelection() {
   if (!entryDocContextId.value) return
   if (docsInKb.value.some((doc) => doc.id === entryDocContextId.value)) {
@@ -319,11 +524,23 @@ async function askQuestion() {
   scrollToBottom()
   
   try {
+    let activeSessionId = selectedSessionId.value
+    if (!activeSessionId) {
+      activeSessionId = await createSession({ silent: true })
+    }
+
     const payload = {
       question,
       user_id: resolvedUserId.value
     }
-    if (selectedDocId.value) {
+    if (activeSessionId) {
+      payload.session_id = activeSessionId
+    }
+    if (selectedSession.value?.doc_id) {
+      payload.doc_id = selectedSession.value.doc_id
+    } else if (selectedSession.value?.kb_id) {
+      payload.kb_id = selectedSession.value.kb_id
+    } else if (selectedDocId.value) {
       payload.doc_id = selectedDocId.value
     } else {
       payload.kb_id = selectedKbId.value
@@ -334,6 +551,7 @@ async function askQuestion() {
     }
 
     const res = await apiPost('/api/qa', payload)
+    await refreshSessions()
     const responseLevel = normalizeAbilityLevel(res?.ability_level || qaAbilityLevel.value)
     qaAbilityLevel.value = responseLevel
     qaMessages.value.push({
@@ -361,7 +579,7 @@ function scrollToBottom() {
 onMounted(async () => {
   busy.value.init = true
   try {
-    await Promise.all([refreshKbs(), refreshAbilityLevel()])
+    await Promise.all([refreshKbs(), refreshAbilityLevel(), refreshSessions()])
     const queryKbId = normalizeQueryString(route.query.kb_id)
     if (queryKbId && kbs.value.some((kb) => kb.id === queryKbId)) {
       selectedKbId.value = queryKbId
@@ -376,9 +594,45 @@ onMounted(async () => {
 })
 
 watch(selectedKbId, async () => {
+  if (!syncingFromSession.value && selectedSessionId.value) {
+    selectedSessionId.value = ''
+    sessionTitleInput.value = ''
+    qaMessages.value = []
+  }
   selectedDocId.value = ''
   await refreshDocsInKb()
   applyDocContextSelection()
+})
+
+watch(selectedDocId, () => {
+  if (!syncingFromSession.value && selectedSessionId.value) {
+    selectedSessionId.value = ''
+    sessionTitleInput.value = ''
+    qaMessages.value = []
+  }
+})
+
+watch(selectedSessionId, async (sessionId) => {
+  if (!sessionId) {
+    sessionTitleInput.value = ''
+    qaMessages.value = []
+    return
+  }
+  const session = sessions.value.find((item) => item.id === sessionId)
+  if (!session) return
+
+  sessionTitleInput.value = session.title || ''
+  syncingFromSession.value = true
+  try {
+    if (session.kb_id && selectedKbId.value !== session.kb_id) {
+      selectedKbId.value = session.kb_id
+    }
+    await refreshDocsInKb()
+    selectedDocId.value = session.doc_id || ''
+  } finally {
+    syncingFromSession.value = false
+  }
+  await loadSessionMessages(sessionId)
 })
 
 watch(qaMessages, () => scrollToBottom(), { deep: true })

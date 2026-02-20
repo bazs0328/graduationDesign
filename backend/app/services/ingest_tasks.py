@@ -37,7 +37,8 @@ def process_document_task(
             doc.processed_at = datetime.utcnow()
             db.commit()
 
-            record_file_hash(user_id, kb_id, filename, file_hash)
+            if file_hash:
+                record_file_hash(user_id, kb_id, filename, file_hash)
         except Exception as exc:  # noqa: BLE001
             doc.status = "error"
             doc.error_message = str(exc)[:800]

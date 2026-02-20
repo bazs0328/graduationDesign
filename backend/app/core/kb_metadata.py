@@ -55,3 +55,61 @@ def record_file_hash(user_id: str, kb_id: str, filename: str, file_hash: str) ->
     metadata["file_hashes"][filename] = file_hash
     metadata["last_updated"] = datetime.utcnow().isoformat()
     save_kb_metadata(user_id, kb_id, metadata)
+
+
+def remove_file_hash(user_id: str, kb_id: str, filename: str) -> bool:
+    metadata = load_kb_metadata(user_id, kb_id)
+    hashes = metadata.setdefault("file_hashes", {})
+    if filename not in hashes:
+        return False
+    hashes.pop(filename, None)
+    metadata["last_updated"] = datetime.utcnow().isoformat()
+    save_kb_metadata(user_id, kb_id, metadata)
+    return True
+
+
+def rename_file_hash(
+    user_id: str,
+    kb_id: str,
+    old_filename: str,
+    new_filename: str,
+) -> bool:
+    metadata = load_kb_metadata(user_id, kb_id)
+    hashes = metadata.setdefault("file_hashes", {})
+    if old_filename not in hashes:
+        return False
+    hashes[new_filename] = hashes.pop(old_filename)
+    metadata["last_updated"] = datetime.utcnow().isoformat()
+    save_kb_metadata(user_id, kb_id, metadata)
+    return True
+
+
+def transfer_file_hash(
+    user_id: str,
+    from_kb_id: str,
+    to_kb_id: str,
+    old_filename: str,
+    new_filename: str | None = None,
+    file_hash: str | None = None,
+) -> bool:
+    moved = False
+    source_meta = load_kb_metadata(user_id, from_kb_id)
+    source_hashes = source_meta.setdefault("file_hashes", {})
+    hash_value = file_hash
+    if hash_value is None:
+        hash_value = source_hashes.pop(old_filename, None)
+    else:
+        source_hashes.pop(old_filename, None)
+
+    if hash_value:
+        target_name = (new_filename or old_filename).strip()
+        target_meta = load_kb_metadata(user_id, to_kb_id)
+        target_hashes = target_meta.setdefault("file_hashes", {})
+        target_hashes[target_name] = hash_value
+        target_meta["last_updated"] = datetime.utcnow().isoformat()
+        save_kb_metadata(user_id, to_kb_id, target_meta)
+        moved = True
+
+    source_meta["last_updated"] = datetime.utcnow().isoformat()
+    save_kb_metadata(user_id, from_kb_id, source_meta)
+    return moved

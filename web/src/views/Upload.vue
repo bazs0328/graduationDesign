@@ -34,6 +34,32 @@
                 创建
               </Button>
             </div>
+            <div v-if="!busy.init && selectedKbId" class="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2">
+              <input
+                type="text"
+                v-model="kbRenameInput"
+                placeholder="当前知识库新名称"
+                class="bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary"
+              />
+              <Button
+                variant="outline"
+                :disabled="!kbRenameInput || (selectedKb && kbRenameInput.trim() === selectedKb.name)"
+                :loading="busy.kbManage"
+                @click="renameCurrentKb"
+              >
+                重命名当前库
+              </Button>
+              <Button
+                variant="destructive"
+                :loading="busy.kbDelete"
+                @click="deleteCurrentKb"
+              >
+                删除当前库
+              </Button>
+            </div>
+            <p v-if="selectedKbId" class="text-xs text-muted-foreground">
+              删除非空知识库时会二次确认是否级联删除其下文档。
+            </p>
           </div>
 
           <div class="space-y-2">
@@ -141,6 +167,43 @@
                 自动更新中...
               </span>
             </div>
+            <div class="mt-3 pt-3 border-t border-border/70 flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                :disabled="isDocBusy(doc.id) || doc.status === 'processing'"
+                @click="renameDoc(doc)"
+              >
+                重命名
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                :disabled="isDocBusy(doc.id) || doc.status === 'processing'"
+                @click="moveDoc(doc)"
+              >
+                移动
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                :disabled="isDocBusy(doc.id) || doc.status === 'processing'"
+                @click="reprocessDoc(doc)"
+              >
+                重新解析
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                :disabled="isDocBusy(doc.id)"
+                @click="deleteDocItem(doc)"
+              >
+                删除
+              </Button>
+              <span v-if="isDocBusy(doc.id)" class="text-[10px] text-muted-foreground ml-auto">
+                处理中...
+              </span>
+            </div>
           </div>
         </div>
       </section>
@@ -151,7 +214,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { Upload, FileText, Database, X, RefreshCw } from 'lucide-vue-next'
-import { apiGet, apiPost } from '../api'
+import { apiDelete, apiGet, apiPatch, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
 import Button from '../components/ui/Button.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
@@ -164,15 +227,20 @@ const docs = ref([])
 const kbs = ref([])
 const selectedKbId = ref('')
 const kbNameInput = ref('')
+const kbRenameInput = ref('')
 const uploadFile = ref(null)
 const dragActive = ref(false)
+const docBusyMap = ref({})
 const busy = ref({
   upload: false,
   kb: false,
+  kbManage: false,
+  kbDelete: false,
   refresh: false,
   init: false
 })
 const pollingIntervals = ref(new Map()) // 存储每个文档的轮询定时器
+const selectedKb = computed(() => kbs.value.find((item) => item.id === selectedKbId.value) || null)
 
 function onFileChange(event) {
   uploadFile.value = event.target.files[0]
@@ -190,6 +258,8 @@ async function refreshKbs() {
     if (!found) {
       selectedKbId.value = kbs.value.length ? kbs.value[0].id : ''
     }
+    const active = kbs.value.find((kb) => kb.id === selectedKbId.value)
+    kbRenameInput.value = active ? active.name : ''
   } catch {
     // error toast handled globally
   }
@@ -303,6 +373,14 @@ function checkAndStartPolling() {
   })
 }
 
+function setDocBusy(docId, busyState) {
+  docBusyMap.value = { ...docBusyMap.value, [docId]: busyState }
+}
+
+function isDocBusy(docId) {
+  return !!docBusyMap.value[docId]
+}
+
 async function createKb() {
   if (!kbNameInput.value) return
   busy.value.kb = true
@@ -322,6 +400,141 @@ async function createKb() {
     // error toast handled globally
   } finally {
     busy.value.kb = false
+  }
+}
+
+async function renameCurrentKb() {
+  if (!selectedKbId.value) return
+  const targetName = kbRenameInput.value.trim()
+  if (!targetName) return
+  if (selectedKb.value && targetName === selectedKb.value.name) return
+  busy.value.kbManage = true
+  try {
+    await apiPatch(`/api/kb/${selectedKbId.value}`, {
+      user_id: resolvedUserId.value,
+      name: targetName
+    })
+    showToast('知识库重命名成功', 'success')
+    await refreshKbs()
+  } catch {
+    // error toast handled globally
+  } finally {
+    busy.value.kbManage = false
+  }
+}
+
+async function deleteCurrentKb() {
+  if (!selectedKbId.value) return
+  const docCount = docs.value.length
+  let cascade = false
+  if (docCount > 0) {
+    cascade = window.confirm(`当前知识库包含 ${docCount} 个文档，是否级联删除该知识库及其全部文档？`)
+    if (!cascade) return
+  } else {
+    const confirmed = window.confirm('确认删除当前空知识库？')
+    if (!confirmed) return
+  }
+  busy.value.kbDelete = true
+  try {
+    await apiDelete(`/api/kb/${selectedKbId.value}?user_id=${encodeURIComponent(resolvedUserId.value)}&cascade=${cascade}`)
+    showToast('知识库已删除', 'success')
+    await refreshKbs()
+    await refreshDocs()
+  } catch {
+    // error toast handled globally
+  } finally {
+    busy.value.kbDelete = false
+  }
+}
+
+function resolveTargetKb(inputText, currentKbId) {
+  const normalized = (inputText || '').trim().toLowerCase()
+  if (!normalized) return null
+  return (
+    kbs.value.find((kb) => kb.id.toLowerCase() === normalized && kb.id !== currentKbId)
+    || kbs.value.find((kb) => kb.name.toLowerCase() === normalized && kb.id !== currentKbId)
+    || null
+  )
+}
+
+async function renameDoc(doc) {
+  if (isDocBusy(doc.id) || doc.status === 'processing') return
+  const nextName = window.prompt('输入新的文档名称（扩展名保持不变）', doc.filename)
+  if (!nextName || !nextName.trim() || nextName.trim() === doc.filename) return
+  setDocBusy(doc.id, true)
+  try {
+    await apiPatch(`/api/docs/${doc.id}`, {
+      user_id: resolvedUserId.value,
+      filename: nextName.trim()
+    })
+    showToast('文档已重命名', 'success')
+    await refreshDocs()
+  } catch {
+    // error toast handled globally
+  } finally {
+    setDocBusy(doc.id, false)
+  }
+}
+
+async function moveDoc(doc) {
+  if (isDocBusy(doc.id) || doc.status === 'processing') return
+  const options = kbs.value
+    .filter((kb) => kb.id !== doc.kb_id)
+    .map((kb) => `${kb.name} (${kb.id})`)
+  if (options.length === 0) {
+    showToast('没有可移动的目标知识库', 'error')
+    return
+  }
+  const input = window.prompt(`输入目标知识库名称或ID：\n${options.join('\n')}`)
+  const target = resolveTargetKb(input, doc.kb_id)
+  if (!target) return
+
+  setDocBusy(doc.id, true)
+  try {
+    await apiPatch(`/api/docs/${doc.id}`, {
+      user_id: resolvedUserId.value,
+      kb_id: target.id
+    })
+    showToast(`文档已移动到「${target.name}」`, 'success')
+    await refreshDocs()
+  } catch {
+    // error toast handled globally
+  } finally {
+    setDocBusy(doc.id, false)
+  }
+}
+
+async function reprocessDoc(doc) {
+  if (isDocBusy(doc.id) || doc.status === 'processing') return
+  const confirmed = window.confirm('确认重新解析该文档？这会重建该文档索引。')
+  if (!confirmed) return
+  setDocBusy(doc.id, true)
+  try {
+    await apiPost(`/api/docs/${doc.id}/reprocess?user_id=${encodeURIComponent(resolvedUserId.value)}`, {})
+    showToast('已触发重新解析', 'success')
+    await refreshDocs()
+    startPolling(doc.id)
+  } catch {
+    // error toast handled globally
+  } finally {
+    setDocBusy(doc.id, false)
+  }
+}
+
+async function deleteDocItem(doc) {
+  if (isDocBusy(doc.id)) return
+  const confirmed = window.confirm(`确认删除文档「${doc.filename}」？该操作不可恢复。`)
+  if (!confirmed) return
+  setDocBusy(doc.id, true)
+  try {
+    await apiDelete(`/api/docs/${doc.id}?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    stopPolling(doc.id)
+    showToast('文档已删除', 'success')
+    await refreshDocs()
+  } catch {
+    // error toast handled globally
+  } finally {
+    setDocBusy(doc.id, false)
   }
 }
 
@@ -362,6 +575,7 @@ watch(selectedKbId, async () => {
   // 切换知识库时，停止所有轮询
   pollingIntervals.value.forEach((interval) => clearInterval(interval))
   pollingIntervals.value.clear()
+  kbRenameInput.value = selectedKb.value ? selectedKb.value.name : ''
   await refreshDocs()
 })
 

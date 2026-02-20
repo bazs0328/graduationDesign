@@ -9,7 +9,13 @@ from app.core.knowledge_bases import ensure_kb
 from app.core.users import ensure_user
 from app.db import get_db
 from app.models import ChatMessage, ChatSession, Document
-from app.schemas import ChatMessageOut, ChatSessionCreateRequest, ChatSessionOut, SourceSnippet
+from app.schemas import (
+    ChatMessageOut,
+    ChatSessionCreateRequest,
+    ChatSessionOut,
+    ChatSessionUpdateRequest,
+    SourceSnippet,
+)
 
 router = APIRouter()
 
@@ -41,6 +47,17 @@ def _parse_sources(sources_json: str | None) -> List[SourceSnippet] | None:
         return result if result else None
     except (json.JSONDecodeError, TypeError):
         return None
+
+
+def _get_session_or_404(db: Session, session_id: str, user_id: str) -> ChatSession:
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_id, ChatSession.user_id == user_id)
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
 
 
 @router.get("/chat/sessions", response_model=list[ChatSessionOut])
@@ -96,13 +113,7 @@ def create_session(payload: ChatSessionCreateRequest, db: Session = Depends(get_
 @router.get("/chat/sessions/{session_id}/messages", response_model=list[ChatMessageOut])
 def list_messages(session_id: str, user_id: str | None = None, db: Session = Depends(get_db)):
     resolved_user_id = ensure_user(db, user_id)
-    session = (
-        db.query(ChatSession)
-        .filter(ChatSession.id == session_id, ChatSession.user_id == resolved_user_id)
-        .first()
-    )
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    _get_session_or_404(db, session_id, resolved_user_id)
 
     messages = (
         db.query(ChatMessage)
@@ -121,3 +132,48 @@ def list_messages(session_id: str, user_id: str | None = None, db: Session = Dep
         )
         for m in messages
     ]
+
+
+@router.patch("/chat/sessions/{session_id}", response_model=ChatSessionOut)
+def update_session(
+    session_id: str,
+    payload: ChatSessionUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    resolved_user_id = ensure_user(db, payload.user_id)
+    session = _get_session_or_404(db, session_id, resolved_user_id)
+
+    if payload.name is not None:
+        title = payload.name.strip()
+        session.title = title or None
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+    return session
+
+
+@router.delete("/chat/sessions/{session_id}")
+def delete_session(session_id: str, user_id: str | None = None, db: Session = Depends(get_db)):
+    resolved_user_id = ensure_user(db, user_id)
+    session = _get_session_or_404(db, session_id, resolved_user_id)
+    db.query(ChatMessage).filter(ChatMessage.session_id == session.id).delete(
+        synchronize_session=False
+    )
+    db.delete(session)
+    db.commit()
+    return {"session_id": session_id, "deleted": True}
+
+
+@router.delete("/chat/sessions/{session_id}/messages")
+def clear_session_messages(
+    session_id: str,
+    user_id: str | None = None,
+    db: Session = Depends(get_db),
+):
+    resolved_user_id = ensure_user(db, user_id)
+    _get_session_or_404(db, session_id, resolved_user_id)
+    deleted = db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete(
+        synchronize_session=False
+    )
+    db.commit()
+    return {"session_id": session_id, "cleared": int(deleted)}

@@ -99,6 +99,18 @@ export async function apiPost(path, body, isForm = false) {
   return request(path, options)
 }
 
+export async function apiPatch(path, body) {
+  return request(path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+}
+
+export async function apiDelete(path) {
+  return request(path, { method: 'DELETE' })
+}
+
 export async function getProfile(userId) {
   const query = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
   return apiGet(`/api/profile${query}`)

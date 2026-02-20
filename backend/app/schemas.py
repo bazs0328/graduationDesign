@@ -38,10 +38,22 @@ class DocumentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class DocumentUpdateRequest(BaseModel):
+    user_id: Optional[str] = None
+    filename: Optional[str] = None
+    kb_id: Optional[str] = None
+
+
 class KnowledgeBaseCreateRequest(BaseModel):
     name: str
     description: Optional[str] = None
     user_id: Optional[str] = None
+
+
+class KnowledgeBaseUpdateRequest(BaseModel):
+    user_id: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
 
 
 class KnowledgeBaseOut(BaseModel):
@@ -267,6 +279,11 @@ class ChatSessionCreateRequest(BaseModel):
     name: Optional[str] = None
     kb_id: Optional[str] = None
     doc_id: Optional[str] = None
+
+
+class ChatSessionUpdateRequest(BaseModel):
+    user_id: Optional[str] = None
+    name: Optional[str] = None
 
 
 class ChatSessionOut(BaseModel):
