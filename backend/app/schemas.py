@@ -41,6 +41,10 @@ class DocumentOut(BaseModel):
     parser_provider: Optional[str] = None
     extract_method: Optional[str] = None
     quality_score: Optional[float] = None
+    rag_backend: Optional[str] = None
+    asset_count: int = 0
+    visual_coverage: float = 0.0
+    multimodal_status: Optional[str] = None
     processed_at: Optional[datetime] = None
     created_at: datetime
 
@@ -97,6 +101,10 @@ class DocumentDiagnosticsResponse(BaseModel):
     ocr_pages: List[int] = []
     page_scores: List[Dict[str, Any]] = []
     stage_timings_ms: Dict[str, float] = {}
+    rag_backend: Optional[str] = None
+    parser_engine: Optional[str] = None
+    fallback_chain: List[str] = []
+    asset_stats: Dict[str, Any] = {}
     diagnostics: Dict[str, Any] = {}
 
 
@@ -140,6 +148,20 @@ class KnowledgeBaseParseSettingsUpdateRequest(BaseModel):
     preferred_parser: Optional[str] = None
 
 
+class KnowledgeBaseRagSettingsResponse(BaseModel):
+    kb_id: str
+    rag_backend: str = "raganything_mineru"
+    query_mode: str = "hybrid"
+    parser_preference: str = "mineru"
+
+
+class KnowledgeBaseRagSettingsUpdateRequest(BaseModel):
+    user_id: Optional[str] = None
+    rag_backend: Optional[str] = None
+    query_mode: Optional[str] = None
+    parser_preference: Optional[str] = None
+
+
 class SummaryRequest(BaseModel):
     doc_id: str
     user_id: Optional[str] = None
@@ -170,6 +192,23 @@ class SourceSnippet(BaseModel):
     kb_id: Optional[str] = None
     page: Optional[int] = None
     chunk: Optional[int] = None
+    modality: Optional[str] = None
+    asset_id: Optional[str] = None
+    asset_url: Optional[str] = None
+    asset_caption: Optional[str] = None
+    score: Optional[float] = None
+
+
+class DocumentAssetOut(BaseModel):
+    id: str
+    doc_id: str
+    page: Optional[int] = None
+    asset_type: str
+    image_url: Optional[str] = None
+    caption: Optional[str] = None
+    ocr_text: Optional[str] = None
+    quality_score: Optional[float] = None
+    metadata: Dict[str, Any] = {}
 
 
 class QAResponse(BaseModel):

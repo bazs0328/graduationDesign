@@ -8,6 +8,7 @@ from uuid import uuid4
 import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import asc, desc
 
@@ -30,7 +31,9 @@ from app.db import get_db
 from app.models import (
     ChatMessage,
     ChatSession,
+    DocumentAsset,
     Document,
+    IngestRun,
     Keypoint,
     KeypointDependency,
     KeypointRecord,
@@ -46,6 +49,7 @@ from app.schemas import (
     DocumentRetryRequest,
     DocumentRetryResponse,
     DocumentTaskCenterResponse,
+    DocumentAssetOut,
     SourcePreviewResponse,
     DocumentUpdateRequest,
 )
@@ -94,6 +98,9 @@ def list_docs(
         "stage": Document.stage,
         "progress_percent": Document.progress_percent,
         "quality_score": Document.quality_score,
+        "rag_backend": Document.rag_backend,
+        "asset_count": Document.asset_count,
+        "visual_coverage": Document.visual_coverage,
         "num_pages": Document.num_pages,
         "num_chunks": Document.num_chunks,
     }
@@ -270,6 +277,10 @@ def _queue_doc_reprocess(
     doc.parser_provider = None
     doc.extract_method = None
     doc.quality_score = None
+    doc.rag_backend = None
+    doc.asset_count = 0
+    doc.visual_coverage = 0.0
+    doc.multimodal_status = None
     doc.diagnostics_json = None
     doc.timing_json = None
     doc.num_chunks = 0
@@ -324,6 +335,12 @@ def _delete_doc_records(db: Session, doc: Document) -> None:
         synchronize_session=False
     )
     db.query(Quiz).filter(Quiz.doc_id == doc.id).delete(synchronize_session=False)
+    db.query(DocumentAsset).filter(DocumentAsset.doc_id == doc.id).delete(
+        synchronize_session=False
+    )
+    db.query(IngestRun).filter(IngestRun.doc_id == doc.id).delete(
+        synchronize_session=False
+    )
     if doc.kb_id:
         db.query(KeypointDependency).filter(
             KeypointDependency.kb_id == doc.kb_id
@@ -336,6 +353,15 @@ def delete_doc(doc_id: str, user_id: str | None = None, db: Session = Depends(ge
     resolved_user_id = ensure_user(db, user_id)
     doc = _get_doc_or_404(db, resolved_user_id, doc_id)
 
+    asset_rows = (
+        db.query(DocumentAsset)
+        .filter(DocumentAsset.doc_id == doc.id, DocumentAsset.user_id == resolved_user_id)
+        .all()
+    )
+    for asset in asset_rows:
+        if asset.image_path and os.path.exists(asset.image_path):
+            os.remove(asset.image_path)
+
     raw_candidates = _find_raw_candidates(resolved_user_id, doc.kb_id, doc.id)
     for raw_path in raw_candidates:
         if os.path.exists(raw_path):
@@ -347,6 +373,13 @@ def delete_doc(doc_id: str, user_id: str | None = None, db: Session = Depends(ge
     delete_doc_vectors(resolved_user_id, doc.id)
     if doc.kb_id:
         remove_file_hash(resolved_user_id, doc.kb_id, doc.filename)
+        source_map_path = os.path.join(
+            kb_base_dir(resolved_user_id, doc.kb_id),
+            "source_map",
+            f"{doc.id}.jsonl",
+        )
+        if os.path.exists(source_map_path):
+            os.remove(source_map_path)
 
     _delete_doc_records(db, doc)
     db.commit()
@@ -455,6 +488,14 @@ def update_doc(
         {ChatSession.kb_id: new_kb_id},
         synchronize_session=False,
     )
+    db.query(DocumentAsset).filter(DocumentAsset.doc_id == doc.id).update(
+        {DocumentAsset.kb_id: new_kb_id},
+        synchronize_session=False,
+    )
+    db.query(IngestRun).filter(IngestRun.doc_id == doc.id).update(
+        {IngestRun.kb_id: new_kb_id},
+        synchronize_session=False,
+    )
     if old_kb_id:
         db.query(KeypointDependency).filter(
             KeypointDependency.kb_id == old_kb_id
@@ -553,8 +594,90 @@ def get_doc_diagnostics(
         ocr_pages=diagnostics.get("ocr_pages") or [],
         page_scores=diagnostics.get("page_scores") or [],
         stage_timings_ms=timings or {},
+        rag_backend=doc.rag_backend or diagnostics.get("rag_backend"),
+        parser_engine=diagnostics.get("parser_engine"),
+        fallback_chain=diagnostics.get("fallback_chain") or [],
+        asset_stats=diagnostics.get("asset_stats") or {},
         diagnostics=diagnostics,
     )
+
+
+@router.get("/docs/{doc_id}/assets", response_model=list[DocumentAssetOut])
+def list_doc_assets(
+    doc_id: str,
+    user_id: str | None = None,
+    page: int | None = None,
+    asset_type: str | None = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    resolved_user_id = ensure_user(db, user_id)
+    doc = _get_doc_or_404(db, resolved_user_id, doc_id)
+    query = db.query(DocumentAsset).filter(
+        DocumentAsset.doc_id == doc.id,
+        DocumentAsset.user_id == resolved_user_id,
+    )
+    if page is not None:
+        query = query.filter(DocumentAsset.page == int(page))
+    if asset_type:
+        query = query.filter(DocumentAsset.asset_type == asset_type.strip().lower())
+    rows = query.order_by(DocumentAsset.page.asc(), DocumentAsset.created_at.asc()).limit(
+        max(1, min(int(limit), 200))
+    )
+
+    data: list[DocumentAssetOut] = []
+    for row in rows:
+        image_url = None
+        if row.image_path and os.path.exists(row.image_path):
+            image_url = (
+                f"/api/docs/{doc.id}/assets/{row.id}/file"
+                f"?user_id={resolved_user_id}"
+            )
+        metadata = {}
+        if row.metadata_json:
+            try:
+                metadata = json.loads(row.metadata_json)
+            except Exception:
+                metadata = {}
+        data.append(
+            DocumentAssetOut(
+                id=row.id,
+                doc_id=row.doc_id,
+                page=row.page,
+                asset_type=row.asset_type,
+                image_url=image_url,
+                caption=row.caption_text,
+                ocr_text=row.ocr_text,
+                quality_score=row.quality_score,
+                metadata=metadata,
+            )
+        )
+    return data
+
+
+@router.get("/docs/{doc_id}/assets/{asset_id}/file")
+def get_doc_asset_file(
+    doc_id: str,
+    asset_id: str,
+    user_id: str | None = None,
+    db: Session = Depends(get_db),
+):
+    resolved_user_id = ensure_user(db, user_id)
+    _ = _get_doc_or_404(db, resolved_user_id, doc_id)
+    asset = (
+        db.query(DocumentAsset)
+        .filter(
+            DocumentAsset.id == asset_id,
+            DocumentAsset.doc_id == doc_id,
+            DocumentAsset.user_id == resolved_user_id,
+        )
+        .first()
+    )
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if not asset.image_path or not os.path.exists(asset.image_path):
+        raise HTTPException(status_code=404, detail="Asset file not found")
+    return FileResponse(path=asset.image_path)
 
 
 @router.get("/docs/tasks", response_model=DocumentTaskCenterResponse)

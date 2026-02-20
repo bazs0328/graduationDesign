@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     ingest_workers: int = 4
     ingest_vector_batch_size: int = 64
     doc_parser_enable_docling: bool = True
+    rag_default_backend: str = "raganything_mineru"
+    rag_query_mode: str = "hybrid"
+    rag_fallback_to_legacy: bool = True
+    rag_doc_parser_primary: str = "mineru"
+    rag_doc_parser_fallback: str = "docling"
+    raganything_enabled: bool = True
+    raganything_timeout_sec: int = 120
 
     qa_top_k: int = 4
     qa_fetch_k: int = 12

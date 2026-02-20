@@ -202,3 +202,31 @@ def test_get_and_patch_kb_parse_settings(client, db_session):
     updated = patch_resp.json()
     assert updated["parse_policy"] == "aggressive"
     assert updated["preferred_parser"] == "native"
+
+
+def test_get_and_patch_kb_rag_settings(client, db_session):
+    user_id = "kb_settings_user_2"
+    kb_id = "kb_settings_kb_2"
+    _seed_user_kb(db_session, user_id=user_id, kb_id=kb_id, kb_name="RAG Settings KB")
+
+    get_resp = client.get(f"/api/kb/{kb_id}/rag-settings", params={"user_id": user_id})
+    assert get_resp.status_code == 200
+    data = get_resp.json()
+    assert data["rag_backend"] == "raganything_mineru"
+    assert data["query_mode"] == "hybrid"
+    assert data["parser_preference"] == "mineru"
+
+    patch_resp = client.patch(
+        f"/api/kb/{kb_id}/rag-settings",
+        json={
+            "user_id": user_id,
+            "rag_backend": "legacy",
+            "query_mode": "local",
+            "parser_preference": "docling",
+        },
+    )
+    assert patch_resp.status_code == 200
+    updated = patch_resp.json()
+    assert updated["rag_backend"] == "legacy"
+    assert updated["query_mode"] == "local"
+    assert updated["parser_preference"] == "docling"

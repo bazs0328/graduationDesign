@@ -40,6 +40,11 @@ def _parse_sources(sources_json: str | None) -> List[SourceSnippet] | None:
                         kb_id=item.get("kb_id"),
                         page=item.get("page"),
                         chunk=item.get("chunk"),
+                        modality=item.get("modality"),
+                        asset_id=item.get("asset_id"),
+                        asset_url=item.get("asset_url"),
+                        asset_caption=item.get("asset_caption"),
+                        score=item.get("score"),
                     )
                 )
             except (TypeError, ValueError):

@@ -75,7 +75,7 @@
               >
                 <option value="auto">Parser: 自动</option>
                 <option value="native">Parser: Native</option>
-                <option value="docling">Parser: Docling(可选)</option>
+                <option value="docling">Parser: Docling</option>
               </select>
               <Button
                 variant="outline"
@@ -83,6 +83,40 @@
                 @click="saveKbSettings"
               >
                 保存策略
+              </Button>
+            </div>
+            <div v-if="selectedKbId" class="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto] gap-2">
+              <select
+                v-model="kbRagSettings.rag_backend"
+                class="bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="raganything_mineru">RAG: RAGAnything MinerU</option>
+                <option value="raganything_docling">RAG: RAGAnything Docling</option>
+                <option value="legacy">RAG: Legacy</option>
+              </select>
+              <select
+                v-model="kbRagSettings.query_mode"
+                class="bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="hybrid">查询: Hybrid</option>
+                <option value="local">查询: Local</option>
+                <option value="global">查询: Global</option>
+                <option value="naive">查询: Naive</option>
+              </select>
+              <select
+                v-model="kbRagSettings.parser_preference"
+                class="bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="mineru">解析引擎: MinerU</option>
+                <option value="docling">解析引擎: Docling</option>
+                <option value="auto">解析引擎: Auto</option>
+              </select>
+              <Button
+                variant="outline"
+                :loading="busy.kbRagSettings"
+                @click="saveKbRagSettings"
+              >
+                保存RAG
               </Button>
             </div>
           </div>
@@ -433,6 +467,11 @@ const kbSettings = ref({
   parse_policy: 'balanced',
   preferred_parser: 'auto'
 })
+const kbRagSettings = ref({
+  rag_backend: 'raganything_mineru',
+  query_mode: 'hybrid',
+  parser_preference: 'mineru'
+})
 const processMode = ref('auto')
 const docFilters = ref({
   keyword: '',
@@ -461,6 +500,7 @@ const busy = ref({
   kbManage: false,
   kbDelete: false,
   kbSettings: false,
+  kbRagSettings: false,
   retryFailed: false,
   refresh: false,
   init: false
@@ -522,6 +562,31 @@ async function refreshKbSettings() {
   }
 }
 
+async function refreshKbRagSettings() {
+  if (!selectedKbId.value) {
+    kbRagSettings.value = {
+      rag_backend: 'raganything_mineru',
+      query_mode: 'hybrid',
+      parser_preference: 'mineru'
+    }
+    return
+  }
+  try {
+    const res = await apiGet(`/api/kb/${selectedKbId.value}/rag-settings?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    kbRagSettings.value = {
+      rag_backend: res?.rag_backend || 'raganything_mineru',
+      query_mode: res?.query_mode || 'hybrid',
+      parser_preference: res?.parser_preference || 'mineru'
+    }
+  } catch {
+    kbRagSettings.value = {
+      rag_backend: 'raganything_mineru',
+      query_mode: 'hybrid',
+      parser_preference: 'mineru'
+    }
+  }
+}
+
 async function saveKbSettings() {
   if (!selectedKbId.value) return
   busy.value.kbSettings = true
@@ -540,6 +605,29 @@ async function saveKbSettings() {
     // error toast handled globally
   } finally {
     busy.value.kbSettings = false
+  }
+}
+
+async function saveKbRagSettings() {
+  if (!selectedKbId.value) return
+  busy.value.kbRagSettings = true
+  try {
+    const res = await apiPatch(`/api/kb/${selectedKbId.value}/rag-settings`, {
+      user_id: resolvedUserId.value,
+      rag_backend: kbRagSettings.value.rag_backend,
+      query_mode: kbRagSettings.value.query_mode,
+      parser_preference: kbRagSettings.value.parser_preference
+    })
+    kbRagSettings.value = {
+      rag_backend: res?.rag_backend || 'raganything_mineru',
+      query_mode: res?.query_mode || 'hybrid',
+      parser_preference: res?.parser_preference || 'mineru'
+    }
+    showToast('RAG 设置已保存', 'success')
+  } catch {
+    // error toast handled globally
+  } finally {
+    busy.value.kbRagSettings = false
   }
 }
 
@@ -987,6 +1075,7 @@ onMounted(async () => {
   try {
     await refreshKbs()
     await refreshKbSettings()
+    await refreshKbRagSettings()
     await refreshDocs()
   } finally {
     busy.value.init = false
@@ -1004,6 +1093,7 @@ watch(selectedKbId, async () => {
   }
   kbRenameInput.value = selectedKb.value ? selectedKb.value.name : ''
   await refreshKbSettings()
+  await refreshKbRagSettings()
   await refreshDocs()
 })
 

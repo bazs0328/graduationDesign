@@ -58,9 +58,31 @@ class ParserRouter:
         parser = self._choose_pdf_parser(request)
         if parser == "docling":
             try:
-                return self._docling.parse(request)
+                docling_result = self._docling.parse(request)
+                if self._should_fallback_docling(docling_result):
+                    fallback_reason = (
+                        ((docling_result.diagnostics or {}).get("quality_guard") or {}).get("reasons")
+                        or ["docling_quality_guard"]
+                    )
+                    native_result = self._native.parse(request)
+                    native_diagnostics = dict(native_result.diagnostics or {})
+                    native_diagnostics["fallback"] = {
+                        "from": "docling",
+                        "to": "native",
+                        "reason": fallback_reason,
+                        "docling_quality_score": docling_result.quality_score,
+                    }
+                    native_result.diagnostics = native_diagnostics
+                    return native_result
+                return docling_result
             except Exception:
                 # Fallback to native parser for reliability
                 return self._native.parse(request)
 
         return self._native.parse(request)
+
+    @staticmethod
+    def _should_fallback_docling(result: ParseResult) -> bool:
+        diagnostics = result.diagnostics or {}
+        quality_guard = diagnostics.get("quality_guard") or {}
+        return bool(quality_guard.get("fallback_recommended"))

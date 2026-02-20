@@ -9,6 +9,7 @@ from app.models import (
     ChatMessage,
     ChatSession,
     Document,
+    DocumentAsset,
     Keypoint,
     KeypointRecord,
     KnowledgeBase,
@@ -505,11 +506,14 @@ def test_get_doc_diagnostics_returns_structured_payload(client, db_session):
     doc.stage = "done"
     doc.progress_percent = 100
     doc.parser_provider = "native"
+    doc.rag_backend = "raganything_mineru"
     doc.extract_method = "hybrid"
     doc.quality_score = 66.5
     doc.diagnostics_json = (
         '{"strategy":"selective_ocr","complexity_class":"mixed","low_quality_pages":[2],'
-        '"ocr_pages":[2],"page_scores":[{"page":1,"quality_score":88.0}]}'
+        '"ocr_pages":[2],"page_scores":[{"page":1,"quality_score":88.0}],'
+        '"parser_engine":"mineru","fallback_chain":["mineru_unavailable","docling"],'
+        '"asset_stats":{"total":2,"by_type":{"image":2}}}'
     )
     doc.timing_json = '{"extract":12.5,"ocr":21.0,"total":40.2}'
     db_session.add(doc)
@@ -527,4 +531,94 @@ def test_get_doc_diagnostics_returns_structured_payload(client, db_session):
     assert data["strategy"] == "selective_ocr"
     assert data["low_quality_pages"] == [2]
     assert data["ocr_pages"] == [2]
+    assert data["rag_backend"] == "raganything_mineru"
+    assert data["parser_engine"] == "mineru"
+    assert data["fallback_chain"] == ["mineru_unavailable", "docling"]
+    assert data["asset_stats"]["total"] == 2
     assert data["stage_timings_ms"]["total"] == 40.2
+
+
+def test_list_doc_assets_returns_structured_rows(client, db_session):
+    user_id = "doc_asset_user_1"
+    kb_id = "doc_asset_kb_1"
+    doc_id = "doc_asset_doc_1"
+    doc = _seed_user_kbs_doc(
+        db_session,
+        user_id=user_id,
+        kb_id=kb_id,
+        doc_id=doc_id,
+    )
+
+    ensure_kb_dirs(user_id, kb_id)
+    image_path = os.path.join(kb_base_dir(user_id, kb_id), "images", "asset-1.png")
+    with open(image_path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n")
+
+    db_session.add(
+        DocumentAsset(
+            id="asset-1",
+            doc_id=doc.id,
+            user_id=user_id,
+            kb_id=kb_id,
+            page=3,
+            asset_type="image",
+            image_path=image_path,
+            caption_text="实验流程图",
+            ocr_text="流程图中的文字",
+            quality_score=91.2,
+            metadata_json='{"width":640,"height":480}',
+        )
+    )
+    db_session.commit()
+
+    resp = client.get(
+        f"/api/docs/{doc_id}/assets",
+        params={"user_id": user_id},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["id"] == "asset-1"
+    assert data[0]["asset_type"] == "image"
+    assert data[0]["page"] == 3
+    assert data[0]["caption"] == "实验流程图"
+    assert data[0]["metadata"]["width"] == 640
+    assert data[0]["image_url"] == f"/api/docs/{doc_id}/assets/asset-1/file?user_id={user_id}"
+
+
+def test_get_doc_asset_file_returns_binary_content(client, db_session):
+    user_id = "doc_asset_user_2"
+    kb_id = "doc_asset_kb_2"
+    doc_id = "doc_asset_doc_2"
+    doc = _seed_user_kbs_doc(
+        db_session,
+        user_id=user_id,
+        kb_id=kb_id,
+        doc_id=doc_id,
+    )
+
+    ensure_kb_dirs(user_id, kb_id)
+    image_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00"
+    image_path = os.path.join(kb_base_dir(user_id, kb_id), "images", "asset-2.png")
+    with open(image_path, "wb") as f:
+        f.write(image_bytes)
+
+    db_session.add(
+        DocumentAsset(
+            id="asset-2",
+            doc_id=doc.id,
+            user_id=user_id,
+            kb_id=kb_id,
+            asset_type="image",
+            image_path=image_path,
+            metadata_json="{}",
+        )
+    )
+    db_session.commit()
+
+    resp = client.get(
+        f"/api/docs/{doc_id}/assets/asset-2/file",
+        params={"user_id": user_id},
+    )
+    assert resp.status_code == 200
+    assert resp.content == image_bytes

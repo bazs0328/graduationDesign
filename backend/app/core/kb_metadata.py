@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 from typing import Any, Dict
 
+from app.core.config import settings
 from app.core.paths import ensure_kb_dirs, kb_base_dir
 
 
@@ -19,6 +20,9 @@ def load_kb_metadata(user_id: str, kb_id: str) -> Dict[str, Any]:
             "created_at": datetime.utcnow().isoformat(),
             "last_updated": None,
             "rag_provider": "chroma",
+            "rag_backend": settings.rag_default_backend,
+            "query_mode": settings.rag_query_mode,
+            "parser_preference": settings.rag_doc_parser_primary,
             "file_hashes": {},
             "parse_policy": "balanced",
             "preferred_parser": "auto",
@@ -31,6 +35,9 @@ def load_kb_metadata(user_id: str, kb_id: str) -> Dict[str, Any]:
             data.setdefault("parse_policy", "balanced")
             data.setdefault("preferred_parser", "auto")
             data.setdefault("file_hashes", {})
+            data.setdefault("rag_backend", settings.rag_default_backend)
+            data.setdefault("query_mode", settings.rag_query_mode)
+            data.setdefault("parser_preference", settings.rag_doc_parser_primary)
             return data
     except Exception:
         return {
@@ -38,6 +45,9 @@ def load_kb_metadata(user_id: str, kb_id: str) -> Dict[str, Any]:
             "created_at": datetime.utcnow().isoformat(),
             "last_updated": None,
             "rag_provider": "chroma",
+            "rag_backend": settings.rag_default_backend,
+            "query_mode": settings.rag_query_mode,
+            "parser_preference": settings.rag_doc_parser_primary,
             "file_hashes": {},
             "parse_policy": "balanced",
             "preferred_parser": "auto",
@@ -64,6 +74,15 @@ def get_kb_parse_settings(user_id: str, kb_id: str) -> Dict[str, str]:
     return {
         "parse_policy": metadata.get("parse_policy", "balanced"),
         "preferred_parser": metadata.get("preferred_parser", "auto"),
+    }
+
+
+def get_kb_rag_settings(user_id: str, kb_id: str) -> Dict[str, str]:
+    metadata = load_kb_metadata(user_id, kb_id)
+    return {
+        "rag_backend": metadata.get("rag_backend", settings.rag_default_backend),
+        "query_mode": metadata.get("query_mode", settings.rag_query_mode),
+        "parser_preference": metadata.get("parser_preference", settings.rag_doc_parser_primary),
     }
 
 
@@ -95,6 +114,46 @@ def update_kb_parse_settings(
     return {
         "parse_policy": metadata.get("parse_policy", "balanced"),
         "preferred_parser": metadata.get("preferred_parser", "auto"),
+    }
+
+
+def update_kb_rag_settings(
+    user_id: str,
+    kb_id: str,
+    *,
+    rag_backend: str | None = None,
+    query_mode: str | None = None,
+    parser_preference: str | None = None,
+) -> Dict[str, str]:
+    valid_backends = {"legacy", "raganything_mineru", "raganything_docling"}
+    valid_modes = {"hybrid", "local", "global", "naive"}
+    valid_parsers = {"mineru", "docling", "auto"}
+    metadata = load_kb_metadata(user_id, kb_id)
+
+    if rag_backend is not None:
+        normalized_backend = rag_backend.strip().lower()
+        if normalized_backend not in valid_backends:
+            raise ValueError("Invalid rag_backend")
+        metadata["rag_backend"] = normalized_backend
+
+    if query_mode is not None:
+        normalized_mode = query_mode.strip().lower()
+        if normalized_mode not in valid_modes:
+            raise ValueError("Invalid query_mode")
+        metadata["query_mode"] = normalized_mode
+
+    if parser_preference is not None:
+        normalized_parser = parser_preference.strip().lower()
+        if normalized_parser not in valid_parsers:
+            raise ValueError("Invalid parser_preference")
+        metadata["parser_preference"] = normalized_parser
+
+    metadata["last_updated"] = datetime.utcnow().isoformat()
+    save_kb_metadata(user_id, kb_id, metadata)
+    return {
+        "rag_backend": metadata.get("rag_backend", settings.rag_default_backend),
+        "query_mode": metadata.get("query_mode", settings.rag_query_mode),
+        "parser_preference": metadata.get("parser_preference", settings.rag_doc_parser_primary),
     }
 
 

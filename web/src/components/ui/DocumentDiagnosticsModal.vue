@@ -25,6 +25,14 @@
           <template v-else>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
               <div class="p-3 rounded-lg bg-background border border-border">
+                <p class="text-muted-foreground">RAG Backend</p>
+                <p class="font-semibold mt-1">{{ data.rag_backend || '-' }}</p>
+              </div>
+              <div class="p-3 rounded-lg bg-background border border-border">
+                <p class="text-muted-foreground">解析引擎</p>
+                <p class="font-semibold mt-1">{{ data.parser_engine || '-' }}</p>
+              </div>
+              <div class="p-3 rounded-lg bg-background border border-border">
                 <p class="text-muted-foreground">解析器</p>
                 <p class="font-semibold mt-1">{{ data.parser_provider || '-' }}</p>
               </div>
@@ -50,6 +58,19 @@
               <div class="p-3 rounded-lg bg-background border border-border">
                 <p class="font-semibold">OCR 页</p>
                 <p class="mt-1 text-muted-foreground">{{ listOrDash(data.ocr_pages) }}</p>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div class="p-3 rounded-lg bg-background border border-border">
+                <p class="font-semibold">回退链路</p>
+                <p class="mt-1 text-muted-foreground">{{ listOrDash(data.fallback_chain) }}</p>
+              </div>
+              <div class="p-3 rounded-lg bg-background border border-border">
+                <p class="font-semibold">资产统计</p>
+                <p class="mt-1 text-muted-foreground">
+                  {{ formatAssetStats(data.asset_stats) }}
+                </p>
               </div>
             </div>
 
@@ -106,5 +127,15 @@ function formatScore(value) {
   const num = Number(value)
   if (!Number.isFinite(num)) return '-'
   return num.toFixed(1)
+}
+
+function formatAssetStats(value) {
+  if (!value || typeof value !== 'object') return '-'
+  const total = Number(value.total || 0)
+  const byType = value.by_type && typeof value.by_type === 'object'
+    ? Object.entries(value.by_type).map(([k, v]) => `${k}:${v}`).join(', ')
+    : ''
+  if (!byType) return `total=${total}`
+  return `total=${total}; ${byType}`
 }
 </script>

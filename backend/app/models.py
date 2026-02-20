@@ -72,8 +72,47 @@ class Document(Base):
     quality_score = Column(Float, nullable=True)
     diagnostics_json = Column(Text, nullable=True)
     timing_json = Column(Text, nullable=True)
+    rag_backend = Column(String, nullable=True)
+    asset_count = Column(Integer, default=0)
+    visual_coverage = Column(Float, default=0.0)
+    multimodal_status = Column(String, nullable=True)
     processed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class DocumentAsset(Base):
+    __tablename__ = "document_assets"
+
+    id = Column(String, primary_key=True, index=True)
+    doc_id = Column(String, ForeignKey("documents.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=True, index=True)
+    page = Column(Integer, nullable=True, index=True)
+    asset_type = Column(String, nullable=False, index=True)
+    image_path = Column(String, nullable=True)
+    caption_text = Column(Text, nullable=True)
+    ocr_text = Column(Text, nullable=True)
+    quality_score = Column(Float, nullable=True)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class IngestRun(Base):
+    __tablename__ = "ingest_runs"
+
+    id = Column(String, primary_key=True, index=True)
+    doc_id = Column(String, ForeignKey("documents.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=True, index=True)
+    backend = Column(String, nullable=False, index=True)
+    parser_engine = Column(String, nullable=True)
+    status = Column(String, nullable=False, index=True)
+    mode = Column(String, nullable=True)
+    stage = Column(String, nullable=True)
+    timing_json = Column(Text, nullable=True)
+    diagnostics_json = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
 class SummaryRecord(Base):
