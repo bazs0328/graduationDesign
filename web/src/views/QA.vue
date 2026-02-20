@@ -53,7 +53,7 @@
                 </span>
               </div>
               <p v-if="msg.role === 'question'" class="text-sm leading-relaxed whitespace-pre-wrap">{{ msg.content }}</p>
-              <div v-else class="qa-markdown" v-html="renderMarkdown(msg.content)"></div>
+              <div v-else class="qa-markdown markdown-content" v-html="renderMarkdown(msg.content)"></div>
               
               <!-- Sources -->
               <div v-if="msg.sources && msg.sources.length" class="mt-4 pt-3 border-t border-accent-foreground/10 space-y-2">

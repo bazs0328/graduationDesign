@@ -219,14 +219,93 @@
   .qa-markdown h4 {
     @apply text-sm;
   }
+
+  .quiz-question-markdown {
+    @apply break-words text-lg font-bold leading-tight text-foreground;
+  }
+
+  .quiz-question-markdown p {
+    @apply my-0;
+  }
+
+  .quiz-option-markdown {
+    @apply text-sm font-medium leading-relaxed;
+  }
+
+  .quiz-option-markdown p {
+    margin: 0;
+    display: inline;
+  }
+
+  .quiz-explanation-markdown {
+    @apply break-words text-sm leading-7 text-muted-foreground;
+  }
+
+  .quiz-explanation-markdown p,
+  .quiz-explanation-markdown ul,
+  .quiz-explanation-markdown ol {
+    @apply my-1.5;
+  }
+
+  .quiz-feedback-markdown {
+    @apply break-words text-sm leading-7 text-amber-700;
+  }
+
+  .quiz-feedback-markdown p,
+  .quiz-feedback-markdown ul,
+  .quiz-feedback-markdown ol {
+    @apply my-1.5;
+  }
+
+  .quiz-concept-markdown {
+    @apply text-sm font-semibold leading-relaxed;
+  }
+
+  .quiz-concept-markdown p {
+    margin: 0;
+    display: inline;
+  }
+
+  .progress-markdown {
+    @apply break-words text-xs leading-6 text-muted-foreground;
+  }
+
+  .progress-markdown p,
+  .progress-markdown ul,
+  .progress-markdown ol,
+  .progress-markdown blockquote,
+  .progress-markdown pre,
+  .progress-markdown table {
+    @apply my-1.5;
+  }
+
+  .progress-item-markdown {
+    @apply break-words text-sm leading-tight text-foreground;
+  }
+
+  .progress-item-markdown p,
+  .progress-item-markdown ul,
+  .progress-item-markdown ol {
+    @apply my-0;
+  }
 }
 
 .summary-markdown > :first-child,
-.qa-markdown > :first-child {
+.qa-markdown > :first-child,
+.quiz-question-markdown > :first-child,
+.quiz-explanation-markdown > :first-child,
+.quiz-feedback-markdown > :first-child,
+.progress-markdown > :first-child,
+.progress-item-markdown > :first-child {
   margin-top: 0;
 }
 
 .summary-markdown > :last-child,
-.qa-markdown > :last-child {
+.qa-markdown > :last-child,
+.quiz-question-markdown > :last-child,
+.quiz-explanation-markdown > :last-child,
+.quiz-feedback-markdown > :last-child,
+.progress-markdown > :last-child,
+.progress-item-markdown > :last-child {
   margin-bottom: 0;
 }

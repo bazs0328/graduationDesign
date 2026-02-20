@@ -31,3 +31,12 @@ export function renderMarkdown(content) {
   }
 }
 
+export function renderMarkdownInline(content) {
+  const text = typeof content === 'string' ? content : String(content ?? '')
+  if (!text.trim()) return ''
+  try {
+    return md.renderInline(text)
+  } catch {
+    return md.utils.escapeHtml(text)
+  }
+}

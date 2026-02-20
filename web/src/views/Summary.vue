@@ -91,7 +91,7 @@
           </div>
           <div
             v-else-if="summary"
-            class="summary-markdown max-w-none"
+            class="summary-markdown markdown-content max-w-none"
             v-html="renderedSummary"
           ></div>
           <div v-else class="flex flex-col items-center justify-center py-20 text-muted-foreground space-y-4">

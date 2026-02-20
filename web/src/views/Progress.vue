@@ -82,7 +82,11 @@
                   <p class="text-sm font-semibold truncate">
                     {{ nextRecommendation.doc_name || '文档' }} · {{ actionLabel(nextRecommendation.action?.type) }}
                   </p>
-                  <p v-if="nextRecommendation.reason" class="text-xs text-muted-foreground">{{ nextRecommendation.reason }}</p>
+                  <div
+                    v-if="nextRecommendation.reason"
+                    class="progress-markdown markdown-content text-xs text-muted-foreground"
+                    v-html="renderMarkdown(nextRecommendation.reason)"
+                  ></div>
                 </div>
                 <button
                   class="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap"
@@ -112,7 +116,11 @@
                     </button>
                   </div>
                 </div>
-                <p v-if="item.summary" class="text-xs text-muted-foreground">{{ item.summary }}</p>
+                <div
+                  v-if="item.summary"
+                  class="progress-markdown markdown-content text-xs text-muted-foreground"
+                  v-html="renderMarkdown(item.summary)"
+                ></div>
                 <div class="grid grid-cols-2 gap-3 text-[11px]">
                   <div class="rounded-md border border-border bg-accent/30 px-2 py-1.5">
                     <p class="text-muted-foreground">完成度</p>
@@ -140,7 +148,10 @@
                   <div v-for="action in item.actions" :key="`${item.doc_id}-${action.type}-reason`" class="flex gap-2 text-xs">
                     <div class="mt-1 w-1 h-1 bg-primary rounded-full flex-shrink-0"></div>
                     <div class="space-y-1">
-                      <p class="text-muted-foreground">{{ action.reason }}</p>
+                      <div
+                        class="progress-markdown markdown-content text-muted-foreground"
+                        v-html="renderMarkdown(action.reason)"
+                      ></div>
                       <p v-if="recommendationActionHint(action)" class="text-[11px] text-primary">{{ recommendationActionHint(action) }}</p>
                     </div>
                   </div>
@@ -203,7 +214,10 @@
                         {{ formatMinutes(stage.estimated_time || 0) }}
                       </span>
                     </div>
-                    <p class="text-xs text-muted-foreground">{{ stage.description }}</p>
+                    <div
+                      class="progress-markdown markdown-content text-xs text-muted-foreground"
+                      v-html="renderMarkdown(stage.description)"
+                    ></div>
                     <div class="h-2 rounded-full bg-accent overflow-hidden">
                       <div class="h-full bg-primary transition-all duration-500" :style="{ width: `${stageProgress(stage)}%` }"></div>
                     </div>
@@ -225,7 +239,10 @@
                         {{ formatMinutes(module.estimated_time || 0) }}
                       </span>
                     </div>
-                    <p class="text-xs text-muted-foreground">{{ module.description }}</p>
+                    <div
+                      class="progress-markdown markdown-content text-xs text-muted-foreground"
+                      v-html="renderMarkdown(module.description)"
+                    ></div>
                     <div class="h-2 rounded-full bg-accent overflow-hidden">
                       <div class="h-full bg-emerald-500 transition-all duration-500" :style="{ width: `${moduleProgress(module)}%` }"></div>
                     </div>
@@ -287,7 +304,7 @@
                   </span>
                   <div class="flex-1 min-w-0 space-y-1">
                     <div class="flex items-center gap-2 flex-wrap">
-                      <p class="font-medium leading-tight">{{ item.text }}</p>
+                      <div class="progress-item-markdown markdown-content font-medium leading-tight" v-html="renderMarkdown(item.text)"></div>
                       <span v-if="item.milestone" class="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-semibold">里程碑</span>
                     </div>
                     <div class="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
@@ -344,7 +361,11 @@
             <div class="space-y-1">
               <p class="text-sm font-bold leading-none">{{ activityLabel(item) }}</p>
               <p v-if="item.doc_name" class="text-xs text-primary font-medium">{{ item.doc_name }}</p>
-              <p v-if="item.detail" class="text-xs text-muted-foreground">{{ item.detail }}</p>
+              <div
+                v-if="item.detail"
+                class="progress-markdown markdown-content text-xs text-muted-foreground"
+                v-html="renderMarkdown(item.detail)"
+              ></div>
               <div v-if="item.score !== null" class="mt-2 inline-flex items-center gap-2 px-2 py-1 bg-secondary rounded text-[10px] font-bold">
                 得分：{{ Math.round(item.score * 100) }}%（{{ item.total }} 题）
               </div>
@@ -383,6 +404,7 @@ import { apiGet, getProfile, buildLearningPath } from '../api'
 import { useToast } from '../composables/useToast'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import { MASTERY_MASTERED, masteryPercent } from '../utils/mastery'
+import { renderMarkdown } from '../utils/markdown'
 
 const { showToast } = useToast()
 

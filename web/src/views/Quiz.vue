@@ -123,7 +123,10 @@
           </div>
           <div v-if="quizResult.feedback" class="mt-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-left space-y-2">
             <p class="text-xs font-bold uppercase tracking-widest text-amber-600">学习建议</p>
-            <p class="text-sm text-amber-700">{{ quizResult.feedback.message }}</p>
+            <div
+              class="quiz-feedback-markdown markdown-content"
+              v-html="renderMarkdown(quizResult.feedback.message)"
+            ></div>
             <div v-if="quizResult.next_quiz_recommendation" class="text-xs text-amber-700">
               下次建议：{{ quizResult.next_quiz_recommendation.difficulty }} 难度
               <span v-if="quizResult.next_quiz_recommendation.focus_concepts?.length">
@@ -144,7 +147,7 @@
                 {{ idx + 1 }}
               </div>
               <div class="space-y-4 flex-1">
-                <h3 class="text-lg font-bold leading-tight">{{ q.question }}</h3>
+                <div class="quiz-question-markdown markdown-content" v-html="renderMarkdown(q.question)"></div>
                 
                 <div class="grid grid-cols-1 gap-2">
                   <label 
@@ -169,7 +172,10 @@
                     <div class="w-5 h-5 rounded-full border-2 border-primary flex items-center justify-center flex-shrink-0">
                       <div v-if="quizAnswers[idx] === optIdx" class="w-2.5 h-2.5 bg-primary rounded-full"></div>
                     </div>
-                    <span class="text-sm font-medium">{{ opt }}</span>
+                    <span
+                      class="quiz-option-markdown"
+                      v-html="renderMarkdownInline(opt)"
+                    ></span>
                     <CheckCircle2 v-if="quizResult && q.answer_index === optIdx" class="w-5 h-5 text-green-500 ml-auto" />
                     <XCircle v-if="quizResult && quizAnswers[idx] === optIdx && q.answer_index !== optIdx" class="w-5 h-5 text-destructive ml-auto" />
                   </label>
@@ -177,7 +183,10 @@
 
                 <div v-if="quizResult" class="mt-4 p-4 bg-accent/30 rounded-lg space-y-2">
                   <p class="text-xs font-bold uppercase tracking-widest text-primary">解析</p>
-                  <p class="text-sm leading-relaxed text-muted-foreground">{{ quizResult.explanations[idx] }}</p>
+                  <div
+                    class="quiz-explanation-markdown markdown-content"
+                    v-html="renderMarkdown(quizResult.explanations[idx])"
+                  ></div>
                 </div>
               </div>
             </div>
@@ -240,7 +249,10 @@
             </div>
             <div class="grid grid-cols-1 gap-3">
               <div v-for="group in wrongQuestionGroups" :key="group.concept" class="border border-border rounded-lg p-4 bg-accent/20">
-                <p class="text-sm font-semibold text-primary">{{ group.concept }}</p>
+                <div
+                  class="quiz-concept-markdown text-primary"
+                  v-html="renderMarkdownInline(group.concept)"
+                ></div>
                 <div class="mt-2 flex flex-wrap gap-2">
                   <button
                     v-for="index in group.question_indices"
@@ -280,6 +292,7 @@ import { useToast } from '../composables/useToast'
 import Button from '../components/ui/Button.vue'
 import LoadingOverlay from '../components/ui/LoadingOverlay.vue'
 import { masteryLabel, masteryPercent, masteryBadgeClass, masteryBorderClass } from '../utils/mastery'
+import { renderMarkdown, renderMarkdownInline } from '../utils/markdown'
 
 const { showToast } = useToast()
 const route = useRoute()
