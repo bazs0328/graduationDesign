@@ -1,5 +1,6 @@
 """Tests for document lifecycle endpoints."""
 
+from datetime import datetime, timedelta
 import os
 from unittest.mock import patch
 
@@ -366,3 +367,122 @@ def test_doc_task_center_and_retry_failed(client, db_session):
     assert refreshed is not None
     assert refreshed.status == "processing"
     assert refreshed.retry_count == 3
+
+
+def test_list_docs_supports_filter_search_and_sort(client, db_session):
+    user_id = "doc_list_user_1"
+    kb_id = "doc_list_kb_1"
+    base_doc_id = "doc_list_base"
+    base_doc = _seed_user_kbs_doc(
+        db_session,
+        user_id=user_id,
+        kb_id=kb_id,
+        doc_id=base_doc_id,
+    )
+    base_doc.filename = "linear-algebra-notes.pdf"
+    base_doc.file_type = "pdf"
+    base_doc.status = "ready"
+    base_doc.created_at = datetime.utcnow() - timedelta(days=2)
+    db_session.add(base_doc)
+    db_session.add(
+        Document(
+            id="doc_list_error",
+            user_id=user_id,
+            kb_id=kb_id,
+            filename="matrix-exam.pdf",
+            file_type="pdf",
+            text_path=os.path.join("tmp", "doc_list_error.txt"),
+            num_chunks=3,
+            num_pages=2,
+            char_count=300,
+            file_hash="hash-doc-list-error",
+            status="error",
+            created_at=datetime.utcnow() - timedelta(days=1),
+        )
+    )
+    db_session.add(
+        Document(
+            id="doc_list_md",
+            user_id=user_id,
+            kb_id=kb_id,
+            filename="calculus-guide.md",
+            file_type="md",
+            text_path=os.path.join("tmp", "doc_list_md.txt"),
+            num_chunks=2,
+            num_pages=1,
+            char_count=200,
+            file_hash="hash-doc-list-md",
+            status="ready",
+            created_at=datetime.utcnow(),
+        )
+    )
+    db_session.commit()
+
+    filtered = client.get(
+        "/api/docs",
+        params={
+            "user_id": user_id,
+            "kb_id": kb_id,
+            "file_type": "pdf",
+            "status": "ready",
+            "keyword": "linear",
+            "sort_by": "filename",
+            "sort_order": "asc",
+        },
+    )
+    assert filtered.status_code == 200
+    rows = filtered.json()
+    assert len(rows) == 1
+    assert rows[0]["id"] == base_doc_id
+
+    sorted_resp = client.get(
+        "/api/docs",
+        params={
+            "user_id": user_id,
+            "kb_id": kb_id,
+            "sort_by": "filename",
+            "sort_order": "asc",
+        },
+    )
+    assert sorted_resp.status_code == 200
+    names = [item["filename"] for item in sorted_resp.json()]
+    assert names == sorted(names)
+
+
+def test_preview_doc_source_returns_traceable_snippet(client, db_session):
+    user_id = "doc_preview_user_1"
+    kb_id = "doc_preview_kb_1"
+    doc_id = "doc_preview_doc_1"
+    doc = _seed_user_kbs_doc(
+        db_session,
+        user_id=user_id,
+        kb_id=kb_id,
+        doc_id=doc_id,
+    )
+    with open(doc.text_path, "w", encoding="utf-8") as f:
+        f.write("矩阵是一个按行列排列的数表。线性变换可以用矩阵表示。")
+
+    vector_entries = [
+        {
+            "id": "v1",
+            "content": "矩阵是一个按行列排列的数表。矩阵可表示线性变换。",
+            "metadata": {"page": 2, "chunk": 7, "source": doc.filename, "doc_id": doc_id},
+        }
+    ]
+    with patch("app.routers.documents.get_doc_vector_entries", return_value=vector_entries):
+        resp = client.get(
+            f"/api/docs/{doc_id}/preview",
+            params={
+                "user_id": user_id,
+                "page": 2,
+                "chunk": 7,
+                "q": "矩阵",
+            },
+        )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["doc_id"] == doc_id
+    assert payload["page"] == 2
+    assert payload["chunk"] == 7
+    assert payload["matched_by"] == "chunk"
+    assert "矩阵" in payload["snippet"]

@@ -127,6 +127,43 @@
           </span>
         </div>
 
+        <div class="mb-4 grid grid-cols-1 md:grid-cols-2 gap-2">
+          <input
+            v-model="docFilters.keyword"
+            type="text"
+            placeholder="按文件名搜索"
+            class="bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+          />
+          <div class="grid grid-cols-2 gap-2">
+            <select v-model="docFilters.fileType" class="bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary">
+              <option value="">全部类型</option>
+              <option value="pdf">PDF</option>
+              <option value="txt">TXT</option>
+              <option value="md">MD</option>
+            </select>
+            <select v-model="docFilters.status" class="bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary">
+              <option value="">全部状态</option>
+              <option value="ready">就绪</option>
+              <option value="processing">处理中</option>
+              <option value="error">错误</option>
+            </select>
+          </div>
+          <select v-model="docFilters.sortBy" class="bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary">
+            <option value="created_at">按上传时间</option>
+            <option value="filename">按文件名</option>
+            <option value="file_type">按类型</option>
+            <option value="status">按状态</option>
+            <option value="num_pages">按页数</option>
+            <option value="num_chunks">按切块数</option>
+          </select>
+          <button
+            class="text-sm border border-border rounded-lg px-3 py-2 hover:bg-accent transition-colors"
+            @click="toggleSortOrder"
+          >
+            {{ docFilters.sortOrder === 'desc' ? '降序 ↓' : '升序 ↑' }}
+          </button>
+        </div>
+
         <div class="flex-1 overflow-y-auto space-y-4 pr-2">
           <div v-if="busy.init" class="space-y-4">
             <SkeletonBlock type="list" :lines="5" />
@@ -293,6 +330,13 @@ const kbs = ref([])
 const selectedKbId = ref('')
 const kbNameInput = ref('')
 const kbRenameInput = ref('')
+const docFilters = ref({
+  keyword: '',
+  fileType: '',
+  status: '',
+  sortBy: 'created_at',
+  sortOrder: 'desc'
+})
 const uploadFile = ref(null)
 const dragActive = ref(false)
 const docBusyMap = ref({})
@@ -314,6 +358,7 @@ const busy = ref({
 })
 const pollingIntervals = ref(new Map()) // 存储每个文档的轮询定时器
 let taskCenterInterval = null
+let docsFilterDebounce = null
 const selectedKb = computed(() => kbs.value.find((item) => item.id === selectedKbId.value) || null)
 
 function onFileChange(event) {
@@ -369,11 +414,29 @@ async function refreshTaskCenter() {
   }
 }
 
+function buildDocsQueryParams() {
+  const params = new URLSearchParams()
+  params.set('user_id', resolvedUserId.value)
+  if (selectedKbId.value) params.set('kb_id', selectedKbId.value)
+  if (docFilters.value.keyword && docFilters.value.keyword.trim()) {
+    params.set('keyword', docFilters.value.keyword.trim())
+  }
+  if (docFilters.value.fileType) params.set('file_type', docFilters.value.fileType)
+  if (docFilters.value.status) params.set('status', docFilters.value.status)
+  if (docFilters.value.sortBy) params.set('sort_by', docFilters.value.sortBy)
+  if (docFilters.value.sortOrder) params.set('sort_order', docFilters.value.sortOrder)
+  return params.toString()
+}
+
+function toggleSortOrder() {
+  docFilters.value.sortOrder = docFilters.value.sortOrder === 'desc' ? 'asc' : 'desc'
+}
+
 async function refreshDocs() {
   busy.value.refresh = true
   try {
-    const kbParam = selectedKbId.value ? `&kb_id=${encodeURIComponent(selectedKbId.value)}` : ''
-    const result = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}${kbParam}`)
+    const query = buildDocsQueryParams()
+    const result = await apiGet(`/api/docs?${query}`)
     docs.value = result
     await refreshTaskCenter()
     
@@ -431,8 +494,8 @@ function startPolling(docId) {
 
 async function checkDocStatus(docId) {
   try {
-    const kbParam = selectedKbId.value ? `&kb_id=${encodeURIComponent(selectedKbId.value)}` : ''
-    const result = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}${kbParam}`)
+    const query = buildDocsQueryParams()
+    const result = await apiGet(`/api/docs?${query}`)
     
     // 更新文档列表
     docs.value = result
@@ -715,14 +778,40 @@ watch(selectedKbId, async () => {
   pollingIntervals.value.forEach((interval) => clearInterval(interval))
   pollingIntervals.value.clear()
   stopTaskCenterAutoRefresh()
+  if (docsFilterDebounce) {
+    clearTimeout(docsFilterDebounce)
+    docsFilterDebounce = null
+  }
   kbRenameInput.value = selectedKb.value ? selectedKb.value.name : ''
   await refreshDocs()
 })
+
+watch(
+  () => [
+    docFilters.value.keyword,
+    docFilters.value.fileType,
+    docFilters.value.status,
+    docFilters.value.sortBy,
+    docFilters.value.sortOrder,
+  ],
+  () => {
+    if (docsFilterDebounce) {
+      clearTimeout(docsFilterDebounce)
+    }
+    docsFilterDebounce = setTimeout(() => {
+      refreshDocs()
+    }, 300)
+  }
+)
 
 // 组件卸载时清理所有轮询
 onUnmounted(() => {
   pollingIntervals.value.forEach((interval) => clearInterval(interval))
   pollingIntervals.value.clear()
   stopTaskCenterAutoRefresh()
+  if (docsFilterDebounce) {
+    clearTimeout(docsFilterDebounce)
+    docsFilterDebounce = null
+  }
 })
 </script>

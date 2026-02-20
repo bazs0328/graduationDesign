@@ -58,11 +58,16 @@
               <div v-if="msg.sources && msg.sources.length" class="mt-4 pt-3 border-t border-accent-foreground/10 space-y-2">
                 <p class="text-[10px] font-bold uppercase opacity-50">参考来源：</p>
                 <div class="flex flex-wrap gap-2">
-                  <div v-for="(source, sIdx) in msg.sources" :key="sIdx" class="text-[10px] bg-background/50 px-2 py-1 rounded-md flex items-center gap-1.5 border border-accent-foreground/5">
+                  <button
+                    v-for="(source, sIdx) in msg.sources"
+                    :key="sIdx"
+                    class="text-[10px] bg-background/50 px-2 py-1 rounded-md flex items-center gap-1.5 border border-accent-foreground/5 hover:border-primary/40 hover:text-primary transition-colors"
+                    @click="openQaSource(source)"
+                  >
                     <FileText class="w-3 h-3 text-primary" />
                     <span class="font-medium truncate max-w-[120px]">{{ source.source }}</span>
                     <span v-if="source.page" class="opacity-50">p.{{ source.page }}</span>
-                  </div>
+                  </button>
                 </div>
               </div>
             </div>
@@ -203,6 +208,30 @@
               <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">当前知识库</p>
               <p class="text-sm font-semibold truncate">{{ selectedKb.name || selectedKb.id }}</p>
             </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
+                <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">总文档</p>
+                <p class="text-lg font-bold">{{ docsInKb.length }}</p>
+              </div>
+              <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
+                <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">相关会话</p>
+                <p class="text-lg font-bold">{{ selectedKbSessions.length }}</p>
+              </div>
+              <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
+                <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">就绪</p>
+                <p class="text-lg font-bold text-green-600">{{ docsReadyCount }}</p>
+              </div>
+              <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
+                <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">处理中/失败</p>
+                <p class="text-lg font-bold">
+                  <span class="text-blue-600">{{ docsProcessingCount }}</span>/<span class="text-destructive">{{ docsErrorCount }}</span>
+                </p>
+              </div>
+            </div>
+            <div class="p-3 bg-accent/20 rounded-lg border border-border">
+              <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">当前会话消息数</p>
+              <p class="text-sm font-semibold">{{ qaMessages.length }} 条</p>
+            </div>
             
             <!-- Doc Stats -->
             <div v-if="selectedDoc" class="space-y-4">
@@ -222,8 +251,10 @@
               </div>
             </div>
             <div v-else class="p-3 bg-accent/30 rounded-lg border border-border">
-              <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">文档数量</p>
-              <p class="text-sm font-semibold">{{ docsInKb.length }} 篇</p>
+              <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">用途说明</p>
+              <p class="text-sm text-muted-foreground leading-relaxed">
+                这里用于快速确认问答上下文：当前知识库状态、文档处理进度与会话规模。
+              </p>
             </div>
           </div>
           <div v-else class="flex-1 flex flex-col items-center justify-center text-muted-foreground text-xs text-center opacity-50">
@@ -244,6 +275,17 @@
         </div>
       </aside>
     </div>
+    <SourcePreviewModal
+      :open="sourcePreview.open"
+      :loading="sourcePreview.loading"
+      :title="sourcePreview.title"
+      :source-label="sourcePreview.sourceLabel"
+      :page="sourcePreview.page"
+      :chunk="sourcePreview.chunk"
+      :snippet="sourcePreview.snippet"
+      :error="sourcePreview.error"
+      @close="closeSourcePreview"
+    />
   </div>
 </template>
 
@@ -255,6 +297,7 @@ import { apiDelete, apiGet, apiPatch, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
+import SourcePreviewModal from '../components/ui/SourcePreviewModal.vue'
 
 const { showToast } = useToast()
 const route = useRoute()
@@ -272,6 +315,16 @@ const qaInput = ref('')
 const qaMessages = ref([])
 const qaAbilityLevel = ref('intermediate')
 const syncingFromSession = ref(false)
+const sourcePreview = ref({
+  open: false,
+  loading: false,
+  title: '',
+  sourceLabel: '',
+  page: null,
+  chunk: null,
+  snippet: '',
+  error: '',
+})
 const busy = ref({
   qa: false,
   init: false,
@@ -312,6 +365,18 @@ const selectedDoc = computed(() => {
 const selectedSession = computed(() => {
   return sessions.value.find((session) => session.id === selectedSessionId.value) || null
 })
+const selectedKbSessions = computed(() =>
+  sessions.value.filter((session) => session.kb_id === selectedKbId.value)
+)
+const docsReadyCount = computed(() =>
+  docsInKb.value.filter((doc) => doc.status === 'ready').length
+)
+const docsProcessingCount = computed(() =>
+  docsInKb.value.filter((doc) => doc.status === 'processing').length
+)
+const docsErrorCount = computed(() =>
+  docsInKb.value.filter((doc) => doc.status === 'error').length
+)
 
 const currentLevelMeta = computed(() => getLevelMeta(qaAbilityLevel.value))
 const entryFocusContext = computed(() => normalizeQueryString(route.query.focus).trim())
@@ -408,7 +473,7 @@ function sessionLabel(session) {
 }
 
 async function createSession(options = {}) {
-  const { silent = false } = options
+  const { silent = false, activate = true } = options
   if (!selectedKbId.value) {
     if (!silent) {
       showToast('请先选择知识库', 'error')
@@ -425,14 +490,17 @@ async function createSession(options = {}) {
       payload.doc_id = selectedDocId.value
     }
     const session = await apiPost('/api/chat/sessions', payload)
+    const sessionId = session?.id || null
     await refreshSessions()
-    selectedSessionId.value = session.id
-    sessionTitleInput.value = session.title || ''
-    qaMessages.value = []
+    if (activate && sessionId) {
+      selectedSessionId.value = sessionId
+      sessionTitleInput.value = session.title || ''
+      qaMessages.value = []
+    }
     if (!silent) {
       showToast('已创建新会话', 'success')
     }
-    return session.id
+    return sessionId
   } catch {
     return null
   } finally {
@@ -497,6 +565,50 @@ function clearLocalMessages() {
   qaMessages.value = []
 }
 
+function closeSourcePreview() {
+  sourcePreview.value.open = false
+}
+
+async function openQaSource(source) {
+  if (!source || typeof source !== 'object') return
+  const docId = source.doc_id || selectedDocId.value || selectedSession.value?.doc_id || ''
+  if (!docId) {
+    showToast('该来源缺少文档定位信息', 'error')
+    return
+  }
+  sourcePreview.value = {
+    open: true,
+    loading: true,
+    title: '问答来源预览',
+    sourceLabel: source.source || '',
+    page: Number.isFinite(Number(source.page)) ? Number(source.page) : null,
+    chunk: Number.isFinite(Number(source.chunk)) ? Number(source.chunk) : null,
+    snippet: '',
+    error: '',
+  }
+  try {
+    const params = new URLSearchParams()
+    params.set('user_id', resolvedUserId.value)
+    if (source.page) params.set('page', String(source.page))
+    if (source.chunk) params.set('chunk', String(source.chunk))
+    if (source.snippet) params.set('q', String(source.snippet).slice(0, 120))
+    const res = await apiGet(`/api/docs/${docId}/preview?${params.toString()}`)
+    sourcePreview.value = {
+      open: true,
+      loading: false,
+      title: `${res.filename || '文档'} 原文片段`,
+      sourceLabel: res.source || source.source || res.filename || '',
+      page: res.page ?? null,
+      chunk: res.chunk ?? null,
+      snippet: res.snippet || '',
+      error: '',
+    }
+  } catch (err) {
+    sourcePreview.value.loading = false
+    sourcePreview.value.error = err?.message || '无法加载来源片段'
+  }
+}
+
 function applyDocContextSelection() {
   if (!entryDocContextId.value) return
   if (docsInKb.value.some((doc) => doc.id === entryDocContextId.value)) {
@@ -526,7 +638,7 @@ async function askQuestion() {
   try {
     let activeSessionId = selectedSessionId.value
     if (!activeSessionId) {
-      activeSessionId = await createSession({ silent: true })
+      activeSessionId = await createSession({ silent: true, activate: false })
     }
 
     const payload = {
@@ -552,6 +664,9 @@ async function askQuestion() {
 
     const res = await apiPost('/api/qa', payload)
     await refreshSessions()
+    if (!selectedSessionId.value && activeSessionId) {
+      selectedSessionId.value = activeSessionId
+    }
     const responseLevel = normalizeAbilityLevel(res?.ability_level || qaAbilityLevel.value)
     qaAbilityLevel.value = responseLevel
     qaMessages.value.push({
@@ -583,6 +698,8 @@ onMounted(async () => {
     const queryKbId = normalizeQueryString(route.query.kb_id)
     if (queryKbId && kbs.value.some((kb) => kb.id === queryKbId)) {
       selectedKbId.value = queryKbId
+    } else if (!selectedKbId.value && kbs.value.length > 0) {
+      selectedKbId.value = kbs.value[0].id
     }
     if (selectedKbId.value) {
       await refreshDocsInKb()

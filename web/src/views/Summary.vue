@@ -178,6 +178,12 @@
                   <span class="text-[10px] bg-accent px-2 py-0.5 rounded-full text-accent-foreground">
                     {{ [point.source, point.page ? `p.${point.page}` : '', point.chunk ? `c.${point.chunk}` : ''].filter(Boolean).join(' ') }}
                   </span>
+                  <button
+                    class="text-[10px] font-semibold text-primary hover:underline"
+                    @click="openKeypointSource(point)"
+                  >
+                    查看原文
+                  </button>
                 </div>
 
                 <!-- View Details Link -->
@@ -199,6 +205,17 @@
         </section>
       </div>
     </div>
+    <SourcePreviewModal
+      :open="sourcePreview.open"
+      :loading="sourcePreview.loading"
+      :title="sourcePreview.title"
+      :source-label="sourcePreview.sourceLabel"
+      :page="sourcePreview.page"
+      :chunk="sourcePreview.chunk"
+      :snippet="sourcePreview.snippet"
+      :error="sourcePreview.error"
+      @close="closeSourcePreview"
+    />
   </div>
 </template>
 
@@ -211,6 +228,7 @@ import { useToast } from '../composables/useToast'
 import Button from '../components/ui/Button.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
+import SourcePreviewModal from '../components/ui/SourcePreviewModal.vue'
 import {
   masteryLabel as _masteryLabel,
   masteryPercent as _masteryPercent,
@@ -234,6 +252,16 @@ const keypoints = ref([])
 const keypointsCached = ref(false)
 const keypointsError = ref('')
 const forceRefresh = ref(false)
+const sourcePreview = ref({
+  open: false,
+  loading: false,
+  title: '',
+  sourceLabel: '',
+  page: null,
+  chunk: null,
+  snippet: '',
+  error: '',
+})
 const busy = ref({
   summary: false,
   keypoints: false,
@@ -295,6 +323,45 @@ function masteryBorderClass(point) {
 function isWeakMastery(point) {
   const lv = getMasteryLevel(point)
   return lv !== null && _isWeakMastery(lv)
+}
+
+function closeSourcePreview() {
+  sourcePreview.value.open = false
+}
+
+async function openKeypointSource(point) {
+  if (!selectedDocId.value || !point || typeof point === 'string') return
+  sourcePreview.value = {
+    open: true,
+    loading: true,
+    title: '知识点来源预览',
+    sourceLabel: point.source || '',
+    page: Number.isFinite(Number(point.page)) ? Number(point.page) : null,
+    chunk: Number.isFinite(Number(point.chunk)) ? Number(point.chunk) : null,
+    snippet: '',
+    error: '',
+  }
+  try {
+    const params = new URLSearchParams()
+    params.set('user_id', resolvedUserId.value)
+    if (point.page) params.set('page', String(point.page))
+    if (point.chunk) params.set('chunk', String(point.chunk))
+    if (point.text) params.set('q', String(point.text))
+    const res = await apiGet(`/api/docs/${selectedDocId.value}/preview?${params.toString()}`)
+    sourcePreview.value = {
+      open: true,
+      loading: false,
+      title: `${res.filename || '文档'} 原文片段`,
+      sourceLabel: res.source || point.source || res.filename || '',
+      page: res.page ?? null,
+      chunk: res.chunk ?? null,
+      snippet: res.snippet || '',
+      error: '',
+    }
+  } catch (err) {
+    sourcePreview.value.loading = false
+    sourcePreview.value.error = err?.message || '无法加载来源片段'
+  }
 }
 
 function goToProgress(point) {

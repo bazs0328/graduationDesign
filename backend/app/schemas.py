@@ -60,6 +60,16 @@ class DocumentRetryResponse(BaseModel):
     skipped: List[str] = []
 
 
+class SourcePreviewResponse(BaseModel):
+    doc_id: str
+    filename: str
+    page: Optional[int] = None
+    chunk: Optional[int] = None
+    source: Optional[str] = None
+    snippet: str
+    matched_by: str
+
+
 class DocumentUpdateRequest(BaseModel):
     user_id: Optional[str] = None
     filename: Optional[str] = None

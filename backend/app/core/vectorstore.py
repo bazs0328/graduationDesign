@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 from langchain_community.vectorstores import Chroma
 
@@ -73,3 +74,54 @@ def update_doc_vector_metadata(
     collection.update(ids=ids, metadatas=updated_metadatas)
     vectorstore.persist()
     return len(ids)
+
+
+def get_doc_vector_entries(user_id: str, doc_id: str) -> list[dict[str, Any]]:
+    vectorstore = get_vectorstore(user_id)
+    try:
+        payload = vectorstore.get(
+            where={"doc_id": doc_id},
+            include=["documents", "metadatas"],
+        )
+    except Exception:
+        return []
+
+    if not isinstance(payload, dict):
+        return []
+
+    documents = payload.get("documents") or []
+    metadatas = payload.get("metadatas") or []
+    ids = payload.get("ids") or []
+    if not documents or len(documents) != len(metadatas):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for idx, content in enumerate(documents):
+        metadata = metadatas[idx] if idx < len(metadatas) else None
+        row_id = ids[idx] if idx < len(ids) else None
+        if not isinstance(content, str):
+            continue
+        rows.append(
+            {
+                "id": row_id if isinstance(row_id, str) else None,
+                "content": content,
+                "metadata": dict(metadata or {}),
+            }
+        )
+
+    def _chunk_sort_key(item: dict[str, Any]) -> tuple[int, int]:
+        metadata = item.get("metadata") or {}
+        chunk_val = metadata.get("chunk")
+        page_val = metadata.get("page")
+        try:
+            page_num = int(page_val)
+        except (TypeError, ValueError):
+            page_num = 0
+        try:
+            chunk_num = int(chunk_val)
+        except (TypeError, ValueError):
+            chunk_num = 0
+        return page_num, chunk_num
+
+    rows.sort(key=_chunk_sort_key)
+    return rows

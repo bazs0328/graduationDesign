@@ -4,9 +4,11 @@ import os
 import shutil
 from datetime import datetime
 from uuid import uuid4
+import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
+from sqlalchemy import asc, desc
 
 from app.core.knowledge_bases import ensure_kb
 from app.core.kb_metadata import (
@@ -18,7 +20,11 @@ from app.core.kb_metadata import (
 )
 from app.core.paths import ensure_kb_dirs, ensure_user_dirs, kb_base_dir, user_base_dir
 from app.core.users import ensure_user
-from app.core.vectorstore import delete_doc_vectors, update_doc_vector_metadata
+from app.core.vectorstore import (
+    delete_doc_vectors,
+    get_doc_vector_entries,
+    update_doc_vector_metadata,
+)
 from app.db import get_db
 from app.models import (
     ChatMessage,
@@ -37,6 +43,7 @@ from app.schemas import (
     DocumentRetryRequest,
     DocumentRetryResponse,
     DocumentTaskCenterResponse,
+    SourcePreviewResponse,
     DocumentUpdateRequest,
 )
 from app.services.lexical import move_doc_chunks, remove_doc_chunks, update_doc_chunks_metadata
@@ -51,6 +58,10 @@ def list_docs(
     user_id: str | None = None,
     kb_id: str | None = None,
     status: str | None = None,
+    file_type: str | None = None,
+    keyword: str | None = None,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
     db: Session = Depends(get_db),
 ):
     resolved_user_id = ensure_user(db, user_id)
@@ -63,7 +74,27 @@ def list_docs(
         if normalized not in {"processing", "ready", "error"}:
             raise HTTPException(status_code=400, detail="Invalid status filter")
         query = query.filter(Document.status == normalized)
-    return query.order_by(Document.created_at.desc()).all()
+    if file_type:
+        normalized_file_type = file_type.strip().lower().lstrip(".")
+        if normalized_file_type:
+            query = query.filter(Document.file_type == normalized_file_type)
+    if keyword:
+        normalized_keyword = keyword.strip()
+        if normalized_keyword:
+            query = query.filter(Document.filename.ilike(f"%{normalized_keyword}%"))
+
+    sort_columns = {
+        "created_at": Document.created_at,
+        "filename": Document.filename,
+        "file_type": Document.file_type,
+        "status": Document.status,
+        "num_pages": Document.num_pages,
+        "num_chunks": Document.num_chunks,
+    }
+    column = sort_columns.get(sort_by, Document.created_at)
+    order_desc = (sort_order or "desc").strip().lower() != "asc"
+    order_clause = desc(column) if order_desc else asc(column)
+    return query.order_by(order_clause, Document.created_at.desc()).all()
 
 
 def _get_doc_or_404(db: Session, user_id: str, doc_id: str) -> Document:
@@ -92,6 +123,110 @@ def _pick_raw_path(candidates: list[str], filename: str) -> str | None:
         if os.path.basename(path).endswith(target_suffix):
             return path
     return candidates[0]
+
+
+def _normalize_int(value) -> int | None:
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _contains_query(text: str, query: str) -> bool:
+    if not query:
+        return True
+    text_l = text.lower()
+    query_l = query.lower()
+    if query_l in text_l:
+        return True
+    tokens = [t for t in re.split(r"\s+", query_l) if len(t) >= 2]
+    if not tokens:
+        return False
+    return sum(1 for token in tokens if token in text_l) >= max(1, len(tokens) // 2)
+
+
+def _extract_snippet_window(text: str, query: str | None, window_chars: int = 220) -> str:
+    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return ""
+    if not query or not query.strip():
+        return normalized[: window_chars * 2]
+    query_l = query.lower().strip()
+    text_l = normalized.lower()
+    idx = text_l.find(query_l)
+    if idx < 0:
+        return normalized[: window_chars * 2]
+    start = max(0, idx - window_chars)
+    end = min(len(normalized), idx + len(query_l) + window_chars)
+    return normalized[start:end]
+
+
+def _build_source_preview(
+    doc: Document,
+    vector_entries: list[dict],
+    *,
+    page: int | None = None,
+    chunk: int | None = None,
+    query: str | None = None,
+) -> tuple[str, int | None, int | None, str, str | None]:
+    query_text = (query or "").strip()
+    target_page = _normalize_int(page)
+    target_chunk = _normalize_int(chunk)
+
+    selected_entry: dict | None = None
+    matched_by = "fallback"
+
+    if target_chunk is not None:
+        for entry in vector_entries:
+            meta = entry.get("metadata") or {}
+            if _normalize_int(meta.get("chunk")) == target_chunk:
+                if not query_text or _contains_query(entry.get("content", ""), query_text):
+                    selected_entry = entry
+                    matched_by = "chunk"
+                    break
+
+    if selected_entry is None and target_page is not None:
+        page_entries = [
+            entry
+            for entry in vector_entries
+            if _normalize_int((entry.get("metadata") or {}).get("page")) == target_page
+        ]
+        if query_text:
+            selected_entry = next(
+                (entry for entry in page_entries if _contains_query(entry.get("content", ""), query_text)),
+                None,
+            )
+        if selected_entry is None and page_entries:
+            selected_entry = page_entries[0]
+        if selected_entry is not None:
+            matched_by = "page"
+
+    if selected_entry is None and query_text:
+        selected_entry = next(
+            (entry for entry in vector_entries if _contains_query(entry.get("content", ""), query_text)),
+            None,
+        )
+        if selected_entry is not None:
+            matched_by = "query"
+
+    if selected_entry is not None:
+        metadata = selected_entry.get("metadata") or {}
+        source_page = _normalize_int(metadata.get("page"))
+        source_chunk = _normalize_int(metadata.get("chunk"))
+        snippet = _extract_snippet_window(selected_entry.get("content", ""), query_text or None)
+        source_name = metadata.get("source") if isinstance(metadata.get("source"), str) else doc.filename
+        return snippet, source_page, source_chunk, matched_by, source_name
+
+    if doc.text_path and os.path.exists(doc.text_path):
+        with open(doc.text_path, "r", encoding="utf-8", errors="ignore") as f:
+            full_text = f.read()
+        snippet = _extract_snippet_window(full_text, query_text or None, window_chars=260)
+        if snippet:
+            return snippet, target_page, target_chunk, "text_path", doc.filename
+
+    raise HTTPException(status_code=404, detail="No source preview available")
 
 
 def _queue_doc_reprocess(
@@ -326,6 +461,36 @@ def reprocess_doc(
         status_code = 404 if err and "not found" in err.lower() else 400
         raise HTTPException(status_code=status_code, detail=err or "Failed to reprocess document")
     return doc
+
+
+@router.get("/docs/{doc_id}/preview", response_model=SourcePreviewResponse)
+def preview_doc_source(
+    doc_id: str,
+    user_id: str | None = None,
+    page: int | None = None,
+    chunk: int | None = None,
+    q: str | None = None,
+    db: Session = Depends(get_db),
+):
+    resolved_user_id = ensure_user(db, user_id)
+    doc = _get_doc_or_404(db, resolved_user_id, doc_id)
+    vector_entries = get_doc_vector_entries(resolved_user_id, doc_id)
+    snippet, source_page, source_chunk, matched_by, source_name = _build_source_preview(
+        doc,
+        vector_entries,
+        page=page,
+        chunk=chunk,
+        query=q,
+    )
+    return SourcePreviewResponse(
+        doc_id=doc.id,
+        filename=doc.filename,
+        page=source_page,
+        chunk=source_chunk,
+        source=source_name,
+        snippet=snippet,
+        matched_by=matched_by,
+    )
 
 
 @router.get("/docs/tasks", response_model=DocumentTaskCenterResponse)
