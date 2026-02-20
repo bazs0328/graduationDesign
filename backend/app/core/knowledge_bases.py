@@ -46,15 +46,7 @@ def ensure_default_kb(db: Session, user_id: str) -> KnowledgeBase:
 
 def ensure_kb(db: Session, user_id: str, kb_id: str | None) -> KnowledgeBase:
     if not kb_id:
-        kb = (
-            db.query(KnowledgeBase)
-            .filter(KnowledgeBase.user_id == user_id)
-            .order_by(KnowledgeBase.created_at.desc())
-            .first()
-        )
-        if not kb:
-            raise ValueError("No knowledge base found. Please create one first.")
-        return kb
+        return ensure_default_kb(db, user_id)
 
     kb = (
         db.query(KnowledgeBase)

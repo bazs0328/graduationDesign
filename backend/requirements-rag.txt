@@ -1,2 +1,0 @@
-raganything>=0.1.0
-lightrag-hku

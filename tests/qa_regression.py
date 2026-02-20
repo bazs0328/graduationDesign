@@ -19,11 +19,10 @@ sys.path.insert(0, BACKEND_ROOT)
 
 from app.core.kb_metadata import init_kb_metadata  # noqa: E402
 from app.core.config import settings  # noqa: E402
-from app.core.auth import reset_request_user_id, set_request_user_id  # noqa: E402
 from app.core.paths import ensure_kb_dirs, kb_base_dir, user_base_dir  # noqa: E402
 from app.core.users import ensure_user  # noqa: E402
-from app.db import Base, SessionLocal, engine, ensure_schema  # noqa: E402
-from app.models import Document, KnowledgeBase, User  # noqa: E402
+from app.db import SessionLocal  # noqa: E402
+from app.models import Document, KnowledgeBase  # noqa: E402
 from app.services.ingest import ingest_document  # noqa: E402
 from app.services.lexical import append_lexical_chunks, bm25_search  # noqa: E402
 from app.services.qa import retrieve_documents  # noqa: E402
@@ -129,24 +128,8 @@ def main():
     if args.mode in ("hybrid", "dense"):
         settings.rag_mode = args.mode
 
-    Base.metadata.create_all(bind=engine)
-    ensure_schema()
-
-    token_ctx = set_request_user_id(args.user_id)
     db = SessionLocal()
     try:
-        existing_user = db.query(User).filter(User.id == args.user_id).first()
-        if not existing_user:
-            db.add(
-                User(
-                    id=args.user_id,
-                    username=args.user_id,
-                    password_hash="",
-                    name=None,
-                )
-            )
-            db.commit()
-
         ensure_user(db, args.user_id)
         kb = (
             db.query(KnowledgeBase)
@@ -280,7 +263,6 @@ def main():
             sys.exit(2)
     finally:
         db.close()
-        reset_request_user_id(token_ctx)
 
 
 if __name__ == "__main__":

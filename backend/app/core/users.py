@@ -33,4 +33,8 @@ def ensure_user(db: Session, user_id: str | None) -> str:
         )
         db.add(user)
         db.commit()
+    # Ensure a default knowledge base exists for the user
+    from app.core.knowledge_bases import ensure_default_kb
+
+    ensure_default_kb(db, resolved)
     return resolved

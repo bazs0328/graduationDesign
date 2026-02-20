@@ -11,8 +11,6 @@ from app.core.auth import (
 from app.core.config import settings
 from app.core.paths import ensure_data_dirs
 from app.db import Base, engine, ensure_schema
-from app.services.ingest_queue import shutdown_ingest_queue
-from app.services.rag.health import log_rag_boot_health
 from app.routers import (
     activity,
     auth,
@@ -88,14 +86,6 @@ def create_app() -> FastAPI:
     app.include_router(recommendations.router, prefix="/api")
     app.include_router(learning_path.router, prefix="/api")
     app.include_router(progress.router, prefix="/api")
-
-    @app.on_event("startup")
-    def _startup_probe():
-        log_rag_boot_health()
-
-    @app.on_event("shutdown")
-    def _shutdown_queue():
-        shutdown_ingest_queue()
 
     return app
 

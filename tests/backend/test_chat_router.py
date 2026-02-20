@@ -1,7 +1,7 @@
 """Tests for chat router."""
 from uuid import uuid4
 
-from app.models import ChatMessage, ChatSession, User
+from app.models import ChatMessage, ChatSession
 
 
 def _create_temp_session(db_session, seeded_session, *, title=None):
@@ -32,29 +32,6 @@ def test_create_session_returns_id(client, seeded_session):
     data = resp.json()
     assert "id" in data
     assert data.get("doc_id") == seeded_session["doc_id"]
-
-
-def test_create_session_without_kb_returns_404(client, db_session):
-    user_id = f"chat_no_kb_user_{uuid4()}"
-    db_session.add(
-        User(
-            id=user_id,
-            username=user_id,
-            password_hash="test_hash",
-            name="No KB User",
-        )
-    )
-    db_session.commit()
-
-    resp = client.post(
-        "/api/chat/sessions",
-        json={
-            "user_id": user_id,
-            "name": "No KB",
-        },
-    )
-    assert resp.status_code == 404
-    assert "No knowledge base found" in resp.json().get("detail", "")
 
 
 def test_list_messages_empty_for_new_session(client, seeded_session):

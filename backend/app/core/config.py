@@ -37,22 +37,6 @@ class Settings(BaseSettings):
     ocr_enabled: bool = True
     ocr_language: str = "chi_sim+eng"
     ocr_min_text_length: int = 10
-    ocr_low_quality_score: int = 45
-    ocr_full_scan_empty_ratio: float = 0.60
-    ocr_full_scan_low_quality_ratio: float = 0.50
-    ocr_page_workers: int = 4
-    ocr_batch_size: int = 8
-
-    ingest_workers: int = 4
-    ingest_vector_batch_size: int = 64
-    doc_parser_enable_docling: bool = True
-    rag_default_backend: str = "raganything_mineru"
-    rag_query_mode: str = "hybrid"
-    rag_fallback_to_legacy: bool = True
-    rag_doc_parser_primary: str = "mineru"
-    rag_doc_parser_fallback: str = "docling"
-    raganything_enabled: bool = True
-    raganything_timeout_sec: int = 120
 
     qa_top_k: int = 4
     qa_fetch_k: int = 12

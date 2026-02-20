@@ -120,39 +120,6 @@ export async function apiDelete(path) {
   return request(path, { method: 'DELETE' })
 }
 
-export async function getKbSettings(kbId, userId) {
-  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
-  return apiGet(`/api/kb/${encodeURIComponent(kbId)}/settings${query}`)
-}
-
-export async function patchKbSettings(kbId, payload) {
-  return apiPatch(`/api/kb/${encodeURIComponent(kbId)}/settings`, payload)
-}
-
-export async function getKbRagSettings(kbId, userId) {
-  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
-  return apiGet(`/api/kb/${encodeURIComponent(kbId)}/rag-settings${query}`)
-}
-
-export async function patchKbRagSettings(kbId, payload) {
-  return apiPatch(`/api/kb/${encodeURIComponent(kbId)}/rag-settings`, payload)
-}
-
-export async function getDocumentDiagnostics(docId, userId) {
-  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
-  return apiGet(`/api/docs/${encodeURIComponent(docId)}/diagnostics${query}`)
-}
-
-export async function getDocumentAssets(docId, userId, params = {}) {
-  const query = new URLSearchParams()
-  if (userId) query.set('user_id', userId)
-  if (params.page != null) query.set('page', String(params.page))
-  if (params.asset_type) query.set('asset_type', params.asset_type)
-  if (params.limit != null) query.set('limit', String(params.limit))
-  const suffix = query.toString() ? `?${query.toString()}` : ''
-  return apiGet(`/api/docs/${encodeURIComponent(docId)}/assets${suffix}`)
-}
-
 export async function getProfile(userId) {
   const query = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
   return apiGet(`/api/profile${query}`)

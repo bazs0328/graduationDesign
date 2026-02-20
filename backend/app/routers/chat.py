@@ -40,11 +40,6 @@ def _parse_sources(sources_json: str | None) -> List[SourceSnippet] | None:
                         kb_id=item.get("kb_id"),
                         page=item.get("page"),
                         chunk=item.get("chunk"),
-                        modality=item.get("modality"),
-                        asset_id=item.get("asset_id"),
-                        asset_url=item.get("asset_url"),
-                        asset_caption=item.get("asset_caption"),
-                        score=item.get("score"),
                     )
                 )
             except (TypeError, ValueError):
@@ -99,10 +94,7 @@ def create_session(payload: ChatSessionCreateRequest, db: Session = Depends(get_
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         kb_id = kb.id
     else:
-        try:
-            kb_id = ensure_kb(db, resolved_user_id, None).id
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        kb_id = ensure_kb(db, resolved_user_id, None).id
 
     title = (payload.name or "").strip() or None
     session = ChatSession(

@@ -3,7 +3,6 @@ backend/.venv
 backend/data
 data/
 **/__pycache__
-backend/app/utils/__pycache__
 .pytest_cache
 web/node_modules
 web/dist

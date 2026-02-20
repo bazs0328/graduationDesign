@@ -2,8 +2,6 @@ services:
   backend:
     build:
       context: ./backend
-      args:
-        INSTALL_RAGANYTHING: "true"
     ports:
       - "8000:8000"
     env_file:

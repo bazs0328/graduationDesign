@@ -136,11 +136,6 @@ def ask_question(payload: QARequest, db: Session = Depends(get_db)):
                 "kb_id": s.get("kb_id"),
                 "page": s.get("page"),
                 "chunk": s.get("chunk"),
-                "modality": s.get("modality"),
-                "asset_id": s.get("asset_id"),
-                "asset_url": s.get("asset_url"),
-                "asset_caption": s.get("asset_caption"),
-                "score": s.get("score"),
             }
             for s in sources
         ]
