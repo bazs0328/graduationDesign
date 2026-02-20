@@ -288,6 +288,20 @@
   .progress-item-markdown ol {
     @apply my-0;
   }
+
+  .weak-concept-markdown {
+    @apply break-words text-sm font-medium leading-6 text-foreground;
+  }
+
+  .weak-concept-markdown p,
+  .weak-concept-markdown ul,
+  .weak-concept-markdown ol {
+    @apply my-0;
+  }
+
+  .weak-concept-markdown .katex-display {
+    @apply my-1 overflow-x-auto overflow-y-hidden;
+  }
 }
 
 .summary-markdown > :first-child,
@@ -296,7 +310,8 @@
 .quiz-explanation-markdown > :first-child,
 .quiz-feedback-markdown > :first-child,
 .progress-markdown > :first-child,
-.progress-item-markdown > :first-child {
+.progress-item-markdown > :first-child,
+.weak-concept-markdown > :first-child {
   margin-top: 0;
 }
 
@@ -306,6 +321,7 @@
 .quiz-explanation-markdown > :last-child,
 .quiz-feedback-markdown > :last-child,
 .progress-markdown > :last-child,
-.progress-item-markdown > :last-child {
+.progress-item-markdown > :last-child,
+.weak-concept-markdown > :last-child {
   margin-bottom: 0;
 }

@@ -11,6 +11,7 @@ import {
   RadarComponent
 } from 'echarts/components'
 import VChart from 'vue-echarts'
+import { renderMarkdown } from '../utils/markdown'
 
 use([
   CanvasRenderer,
@@ -283,7 +284,10 @@ function goToQA(concept) {
           :key="concept"
           class="flex items-center justify-between gap-2 rounded-lg border border-border bg-accent/20 px-3 py-2"
         >
-          <span class="text-sm font-medium truncate">{{ concept }}</span>
+          <div
+            class="weak-concept-markdown markdown-content min-w-0 flex-1"
+            v-html="renderMarkdown(concept)"
+          ></div>
           <div class="flex items-center gap-2 flex-shrink-0">
             <button
               type="button"
