@@ -65,6 +65,13 @@ class Document(Base):
     error_message = Column(Text, nullable=True)
     retry_count = Column(Integer, default=0)
     last_retry_at = Column(DateTime, nullable=True)
+    stage = Column(String, default="queued")
+    progress_percent = Column(Integer, default=0)
+    parser_provider = Column(String, nullable=True)
+    extract_method = Column(String, nullable=True)
+    quality_score = Column(Float, nullable=True)
+    diagnostics_json = Column(Text, nullable=True)
+    timing_json = Column(Text, nullable=True)
     processed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

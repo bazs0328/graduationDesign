@@ -50,10 +50,40 @@ def ensure_schema():
             conn.execute(text("ALTER TABLE documents ADD COLUMN retry_count INTEGER DEFAULT 0"))
         if "last_retry_at" not in cols:
             conn.execute(text("ALTER TABLE documents ADD COLUMN last_retry_at DATETIME"))
+        if "stage" not in cols:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN stage VARCHAR"))
+        if "progress_percent" not in cols:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN progress_percent INTEGER DEFAULT 0"))
+        if "parser_provider" not in cols:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN parser_provider VARCHAR"))
+        if "extract_method" not in cols:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN extract_method VARCHAR"))
+        if "quality_score" not in cols:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN quality_score FLOAT"))
+        if "diagnostics_json" not in cols:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN diagnostics_json TEXT"))
+        if "timing_json" not in cols:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN timing_json TEXT"))
         if "processed_at" not in cols:
             conn.execute(text("ALTER TABLE documents ADD COLUMN processed_at DATETIME"))
         conn.execute(text("UPDATE documents SET status = 'ready' WHERE status IS NULL"))
         conn.execute(text("UPDATE documents SET retry_count = 0 WHERE retry_count IS NULL"))
+        conn.execute(text("UPDATE documents SET progress_percent = 0 WHERE progress_percent IS NULL"))
+        conn.execute(
+            text(
+                "UPDATE documents SET stage = CASE "
+                "WHEN status = 'ready' THEN 'done' "
+                "WHEN status = 'error' THEN 'error' "
+                "ELSE 'extract' END "
+                "WHERE stage IS NULL OR stage = ''"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE documents SET progress_percent = 100 "
+                "WHERE status = 'ready' AND (progress_percent IS NULL OR progress_percent < 100)"
+            )
+        )
         conn.commit()
 
         result = conn.execute(text("PRAGMA table_info(qa_records)"))

@@ -5,9 +5,10 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.core.knowledge_bases import ensure_default_kb
 from app.core.kb_metadata import init_kb_metadata
+from app.core.kb_metadata import get_kb_parse_settings
 from app.core.kb_metadata import remove_file_hash
+from app.core.kb_metadata import update_kb_parse_settings
 from app.core.paths import ensure_kb_dirs, kb_base_dir, user_base_dir
 from app.core.vectorstore import delete_doc_vectors
 from app.core.users import ensure_user
@@ -28,6 +29,8 @@ from app.models import (
 from app.schemas import (
     KnowledgeBaseCreateRequest,
     KnowledgeBaseOut,
+    KnowledgeBaseParseSettingsResponse,
+    KnowledgeBaseParseSettingsUpdateRequest,
     KnowledgeBaseUpdateRequest,
 )
 from app.services.lexical import remove_doc_chunks
@@ -38,7 +41,6 @@ router = APIRouter()
 @router.get("/kb", response_model=list[KnowledgeBaseOut])
 def list_kbs(user_id: str | None = None, db: Session = Depends(get_db)):
     resolved_user_id = ensure_user(db, user_id)
-    ensure_default_kb(db, resolved_user_id)
     return (
         db.query(KnowledgeBase)
         .filter(KnowledgeBase.user_id == resolved_user_id)
@@ -76,6 +78,56 @@ def create_kb(payload: KnowledgeBaseCreateRequest, db: Session = Depends(get_db)
     ensure_kb_dirs(resolved_user_id, kb.id)
     init_kb_metadata(resolved_user_id, kb.id)
     return kb
+
+
+@router.get("/kb/{kb_id}/settings", response_model=KnowledgeBaseParseSettingsResponse)
+def get_kb_settings(kb_id: str, user_id: str | None = None, db: Session = Depends(get_db)):
+    resolved_user_id = ensure_user(db, user_id)
+    kb = (
+        db.query(KnowledgeBase)
+        .filter(KnowledgeBase.id == kb_id, KnowledgeBase.user_id == resolved_user_id)
+        .first()
+    )
+    if not kb:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+
+    settings_obj = get_kb_parse_settings(resolved_user_id, kb_id)
+    return KnowledgeBaseParseSettingsResponse(
+        kb_id=kb_id,
+        parse_policy=settings_obj.get("parse_policy", "balanced"),
+        preferred_parser=settings_obj.get("preferred_parser", "auto"),
+    )
+
+
+@router.patch("/kb/{kb_id}/settings", response_model=KnowledgeBaseParseSettingsResponse)
+def patch_kb_settings(
+    kb_id: str,
+    payload: KnowledgeBaseParseSettingsUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    resolved_user_id = ensure_user(db, payload.user_id)
+    kb = (
+        db.query(KnowledgeBase)
+        .filter(KnowledgeBase.id == kb_id, KnowledgeBase.user_id == resolved_user_id)
+        .first()
+    )
+    if not kb:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    try:
+        updated = update_kb_parse_settings(
+            resolved_user_id,
+            kb_id,
+            parse_policy=payload.parse_policy,
+            preferred_parser=payload.preferred_parser,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return KnowledgeBaseParseSettingsResponse(
+        kb_id=kb_id,
+        parse_policy=updated.get("parse_policy", "balanced"),
+        preferred_parser=updated.get("preferred_parser", "auto"),
+    )
 
 
 @router.patch("/kb/{kb_id}", response_model=KnowledgeBaseOut)

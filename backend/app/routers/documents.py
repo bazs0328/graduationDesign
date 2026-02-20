@@ -1,5 +1,6 @@
 import hashlib
 import glob
+import json
 import os
 import shutil
 from datetime import datetime
@@ -39,15 +40,17 @@ from app.models import (
     SummaryRecord,
 )
 from app.schemas import (
+    DocumentDiagnosticsResponse,
     DocumentOut,
+    DocumentReprocessRequest,
     DocumentRetryRequest,
     DocumentRetryResponse,
     DocumentTaskCenterResponse,
     SourcePreviewResponse,
     DocumentUpdateRequest,
 )
+from app.services.ingest_queue import enqueue_document_task, get_queue_stats
 from app.services.lexical import move_doc_chunks, remove_doc_chunks, update_doc_chunks_metadata
-from app.services.ingest_tasks import process_document_task
 from app.utils.document_validator import DocumentValidator
 
 router = APIRouter()
@@ -88,6 +91,9 @@ def list_docs(
         "filename": Document.filename,
         "file_type": Document.file_type,
         "status": Document.status,
+        "stage": Document.stage,
+        "progress_percent": Document.progress_percent,
+        "quality_score": Document.quality_score,
         "num_pages": Document.num_pages,
         "num_chunks": Document.num_chunks,
     }
@@ -132,6 +138,14 @@ def _normalize_int(value) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_mode(mode: str | None) -> str:
+    normalized = (mode or "auto").strip().lower()
+    valid_modes = {"auto", "force_ocr", "text_layer", "parser_auto"}
+    if normalized not in valid_modes:
+        raise HTTPException(status_code=400, detail="Invalid mode")
+    return normalized
 
 
 def _contains_query(text: str, query: str) -> bool:
@@ -234,6 +248,7 @@ def _queue_doc_reprocess(
     background_tasks: BackgroundTasks,
     doc: Document,
     resolved_user_id: str,
+    mode: str = "auto",
 ) -> tuple[bool, str | None]:
     if not doc.kb_id:
         return False, "Document has no knowledge base"
@@ -250,6 +265,13 @@ def _queue_doc_reprocess(
     doc.error_message = None
     doc.retry_count = int(doc.retry_count or 0) + 1
     doc.last_retry_at = datetime.utcnow()
+    doc.stage = "queued"
+    doc.progress_percent = 0
+    doc.parser_provider = None
+    doc.extract_method = None
+    doc.quality_score = None
+    doc.diagnostics_json = None
+    doc.timing_json = None
     doc.num_chunks = 0
     doc.num_pages = 0
     doc.char_count = 0
@@ -259,13 +281,14 @@ def _queue_doc_reprocess(
     db.refresh(doc)
 
     background_tasks.add_task(
-        process_document_task,
+        enqueue_document_task,
         doc.id,
         resolved_user_id,
         doc.kb_id,
         file_path,
         doc.filename,
         doc.file_hash or "",
+        _normalize_mode(mode),
     )
     return True, None
 
@@ -451,12 +474,15 @@ def update_doc(
 def reprocess_doc(
     doc_id: str,
     background_tasks: BackgroundTasks,
+    payload: DocumentReprocessRequest | None = None,
     user_id: str | None = None,
     db: Session = Depends(get_db),
 ):
-    resolved_user_id = ensure_user(db, user_id)
+    payload = payload or DocumentReprocessRequest()
+    resolved_user_id = ensure_user(db, payload.user_id or user_id)
+    mode = _normalize_mode(payload.mode)
     doc = _get_doc_or_404(db, resolved_user_id, doc_id)
-    ok, err = _queue_doc_reprocess(db, background_tasks, doc, resolved_user_id)
+    ok, err = _queue_doc_reprocess(db, background_tasks, doc, resolved_user_id, mode=mode)
     if not ok:
         status_code = 404 if err and "not found" in err.lower() else 400
         raise HTTPException(status_code=status_code, detail=err or "Failed to reprocess document")
@@ -493,6 +519,44 @@ def preview_doc_source(
     )
 
 
+@router.get("/docs/{doc_id}/diagnostics", response_model=DocumentDiagnosticsResponse)
+def get_doc_diagnostics(
+    doc_id: str,
+    user_id: str | None = None,
+    db: Session = Depends(get_db),
+):
+    resolved_user_id = ensure_user(db, user_id)
+    doc = _get_doc_or_404(db, resolved_user_id, doc_id)
+
+    diagnostics: dict = {}
+    timings: dict[str, float] = {}
+    if doc.diagnostics_json:
+        try:
+            diagnostics = json.loads(doc.diagnostics_json)
+        except Exception:
+            diagnostics = {}
+    if doc.timing_json:
+        try:
+            timings = json.loads(doc.timing_json)
+        except Exception:
+            timings = {}
+
+    return DocumentDiagnosticsResponse(
+        doc_id=doc.id,
+        filename=doc.filename,
+        parser_provider=doc.parser_provider,
+        extract_method=doc.extract_method,
+        quality_score=doc.quality_score,
+        strategy=diagnostics.get("strategy"),
+        complexity_class=diagnostics.get("complexity_class"),
+        low_quality_pages=diagnostics.get("low_quality_pages") or [],
+        ocr_pages=diagnostics.get("ocr_pages") or [],
+        page_scores=diagnostics.get("page_scores") or [],
+        stage_timings_ms=timings or {},
+        diagnostics=diagnostics,
+    )
+
+
 @router.get("/docs/tasks", response_model=DocumentTaskCenterResponse)
 def get_doc_tasks(
     user_id: str | None = None,
@@ -510,11 +574,25 @@ def get_doc_tasks(
     )
     processing = [doc for doc in rows if doc.status == "processing"]
     error = [doc for doc in rows if doc.status == "error"]
+    stage_counts: dict[str, int] = {}
+    for item in processing:
+        stage = (item.stage or "processing").strip() or "processing"
+        stage_counts[stage] = stage_counts.get(stage, 0) + 1
+    avg_progress = (
+        sum(max(0, min(int(doc.progress_percent or 0), 100)) for doc in processing) / len(processing)
+        if processing
+        else 0.0
+    )
+    queue_stats = get_queue_stats()
     return DocumentTaskCenterResponse(
         processing=processing,
         error=error,
         processing_count=len(processing),
         error_count=len(error),
+        stage_counts=stage_counts,
+        avg_progress_percent=round(avg_progress, 2),
+        running_workers=queue_stats.get("running_workers", 0),
+        queued_jobs=queue_stats.get("queued_jobs", 0),
     )
 
 
@@ -525,6 +603,7 @@ def retry_failed_docs(
     db: Session = Depends(get_db),
 ):
     resolved_user_id = ensure_user(db, payload.user_id)
+    mode = _normalize_mode(payload.mode)
     query = db.query(Document).filter(
         Document.user_id == resolved_user_id,
         Document.status == "error",
@@ -539,7 +618,7 @@ def retry_failed_docs(
     queued: list[str] = []
     skipped: list[str] = []
     for doc in docs:
-        ok, _ = _queue_doc_reprocess(db, background_tasks, doc, resolved_user_id)
+        ok, _ = _queue_doc_reprocess(db, background_tasks, doc, resolved_user_id, mode=mode)
         if ok:
             queued.append(doc.id)
         else:
@@ -655,18 +734,21 @@ def upload_doc(
         file_size=total_size,
         file_hash=file_hash,
         status="processing",
+        stage="queued",
+        progress_percent=0,
     )
     db.add(doc)
     db.commit()
     db.refresh(doc)
 
     background_tasks.add_task(
-        process_document_task,
+        enqueue_document_task,
         doc_id,
         resolved_user_id,
         kb.id,
         file_path,
         safe_name,
         file_hash,
+        "auto",
     )
     return doc

@@ -11,6 +11,7 @@ langchain-openai
 langchain-google-genai
 chromadb
 pdfplumber
+docling
 pytesseract
 pdf2image
 Pillow

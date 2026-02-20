@@ -60,6 +60,31 @@
             <p v-if="selectedKbId" class="text-xs text-muted-foreground">
               删除非空知识库时会二次确认是否级联删除其下文档。
             </p>
+            <div v-if="selectedKbId" class="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2 pt-1">
+              <select
+                v-model="kbSettings.parse_policy"
+                class="bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="stable">解析策略: 稳定</option>
+                <option value="balanced">解析策略: 平衡</option>
+                <option value="aggressive">解析策略: 激进</option>
+              </select>
+              <select
+                v-model="kbSettings.preferred_parser"
+                class="bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="auto">Parser: 自动</option>
+                <option value="native">Parser: Native</option>
+                <option value="docling">Parser: Docling(可选)</option>
+              </select>
+              <Button
+                variant="outline"
+                :loading="busy.kbSettings"
+                @click="saveKbSettings"
+              >
+                保存策略
+              </Button>
+            </div>
           </div>
 
           <div class="space-y-2">
@@ -153,6 +178,9 @@
             <option value="filename">按文件名</option>
             <option value="file_type">按类型</option>
             <option value="status">按状态</option>
+            <option value="stage">按阶段</option>
+            <option value="progress_percent">按进度</option>
+            <option value="quality_score">按质量分</option>
             <option value="num_pages">按页数</option>
             <option value="num_chunks">按切块数</option>
           </select>
@@ -187,9 +215,18 @@
             </div>
             <div class="flex flex-wrap gap-2 mb-3">
               <span class="text-[10px] bg-accent px-2 py-0.5 rounded-full">{{ kbNameById(doc.kb_id) }}</span>
+              <span v-if="doc.parser_provider" class="text-[10px] bg-secondary px-2 py-0.5 rounded-full">{{ doc.parser_provider }}</span>
+              <span v-if="doc.extract_method" class="text-[10px] bg-secondary px-2 py-0.5 rounded-full">{{ doc.extract_method }}</span>
+              <span
+                v-if="Number.isFinite(Number(doc.quality_score))"
+                class="text-[10px] px-2 py-0.5 rounded-full"
+                :class="Number(doc.quality_score) < 45 ? 'bg-destructive/20 text-destructive' : 'bg-green-500/20 text-green-600'"
+              >
+                质量 {{ Number(doc.quality_score).toFixed(1) }}
+              </span>
               <template v-if="doc.status === 'processing'">
                 <span class="text-[10px] bg-blue-500/20 text-blue-500 px-2 py-0.5 rounded-full animate-pulse">
-                  正在处理中...
+                  {{ stageLabel(doc.stage) }}
                 </span>
               </template>
               <template v-else>
@@ -197,11 +234,22 @@
                 <span v-if="doc.num_chunks > 0" class="text-[10px] bg-secondary px-2 py-0.5 rounded-full">{{ doc.num_chunks }} 块</span>
               </template>
             </div>
+            <div v-if="doc.status === 'processing'" class="mb-3">
+              <div class="h-1.5 bg-muted rounded-full overflow-hidden">
+                <div
+                  class="h-full bg-primary transition-all duration-300"
+                  :style="{ width: `${clampProgress(doc.progress_percent)}%` }"
+                ></div>
+              </div>
+              <p class="mt-1 text-[10px] text-muted-foreground">
+                {{ stageLabel(doc.stage) }} · {{ clampProgress(doc.progress_percent) }}%
+              </p>
+            </div>
             <div class="flex items-center justify-between text-[10px] text-muted-foreground">
               <span>{{ new Date(doc.created_at).toLocaleDateString() }}</span>
               <span v-if="doc.error_message" class="text-destructive truncate max-w-[150px]">{{ doc.error_message }}</span>
               <span v-else-if="doc.status === 'processing'" class="text-blue-500">
-                自动更新中...
+                {{ stageLabel(doc.stage) }} · 自动更新中...
               </span>
             </div>
             <div class="mt-3 pt-3 border-t border-border/70 flex flex-wrap items-center gap-2">
@@ -231,6 +279,15 @@
               </Button>
               <Button
                 size="sm"
+                variant="ghost"
+                :disabled="isDocBusy(doc.id)"
+                data-testid="doc-diagnostics-btn"
+                @click="openDiagnostics(doc)"
+              >
+                诊断
+              </Button>
+              <Button
+                size="sm"
                 variant="destructive"
                 :disabled="isDocBusy(doc.id)"
                 @click="deleteDocItem(doc)"
@@ -252,10 +309,25 @@
           <RefreshCw class="w-5 h-5 text-primary" />
           <h3 class="text-lg font-bold">解析任务中心</h3>
         </div>
-        <div class="flex items-center gap-2 text-xs text-muted-foreground">
+        <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>处理中 {{ taskCenter.processing_count }}</span>
           <span>失败 {{ taskCenter.error_count }}</span>
+          <span>运行中 {{ taskCenter.running_workers }}</span>
+          <span>排队 {{ taskCenter.queued_jobs }}</span>
+          <span>平均进度 {{ Number(taskCenter.avg_progress_percent || 0).toFixed(1) }}%</span>
         </div>
+      </div>
+      <div
+        v-if="Object.keys(taskCenter.stage_counts || {}).length"
+        class="flex flex-wrap items-center gap-2 text-xs"
+      >
+        <span
+          v-for="(count, stage) in taskCenter.stage_counts"
+          :key="stage"
+          class="px-2 py-1 rounded-full bg-secondary text-secondary-foreground"
+        >
+          {{ stageLabel(stage) }}: {{ count }}
+        </span>
       </div>
 
       <div v-if="taskCenter.processing_count === 0 && taskCenter.error_count === 0" class="text-sm text-muted-foreground">
@@ -269,28 +341,46 @@
           <div
             v-for="task in taskCenter.processing"
             :key="`proc-${task.id}`"
-            class="text-xs p-3 bg-background border border-border rounded-lg flex items-center justify-between gap-3"
+            class="text-xs p-3 bg-background border border-border rounded-lg space-y-2"
           >
-            <div class="min-w-0">
-              <div class="truncate font-medium">{{ task.filename }}</div>
-              <div class="text-muted-foreground">自动刷新中</div>
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="truncate font-medium">{{ task.filename }}</div>
+                <div class="text-muted-foreground">{{ stageLabel(task.stage) }} · {{ clampProgress(task.progress_percent) }}%</div>
+              </div>
+              <RefreshCw class="w-3 h-3 text-blue-500 animate-spin shrink-0" />
             </div>
-            <RefreshCw class="w-3 h-3 text-blue-500 animate-spin shrink-0" />
+            <div class="h-1.5 bg-muted rounded-full overflow-hidden">
+              <div class="h-full bg-primary transition-all duration-300" :style="{ width: `${clampProgress(task.progress_percent)}%` }"></div>
+            </div>
           </div>
         </div>
 
         <div class="space-y-2">
           <div class="flex items-center justify-between">
             <div class="text-sm font-semibold">失败</div>
-            <Button
-              size="sm"
-              variant="outline"
-              :disabled="taskCenter.error_count === 0"
-              :loading="busy.retryFailed"
-              @click="retryFailedTasks()"
-            >
-              一键重试
-            </Button>
+            <div class="flex items-center gap-2">
+              <select
+                v-model="processMode"
+                data-testid="process-mode-select"
+                class="bg-background border border-input rounded-lg px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="auto">Auto</option>
+                <option value="force_ocr">强制 OCR</option>
+                <option value="text_layer">文本层</option>
+                <option value="parser_auto">ParserAuto</option>
+              </select>
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid="retry-failed-btn"
+                :disabled="taskCenter.error_count === 0"
+                :loading="busy.retryFailed"
+                @click="retryFailedTasks()"
+              >
+                一键重试
+              </Button>
+            </div>
           </div>
           <div v-if="taskCenter.error.length === 0" class="text-xs text-muted-foreground">暂无</div>
           <div
@@ -304,22 +394,31 @@
               <div class="text-muted-foreground">重试次数 {{ task.retry_count || 0 }}</div>
             </div>
             <Button size="sm" variant="ghost" :loading="isDocBusy(task.id)" @click="retryFailedTasks([task.id])">
-              重试
+              按当前模式重试
             </Button>
           </div>
         </div>
       </div>
     </section>
+    <DocumentDiagnosticsModal
+      :open="diagnosticsModal.open"
+      :loading="diagnosticsModal.loading"
+      :filename="diagnosticsModal.filename"
+      :data="diagnosticsModal.data"
+      :error="diagnosticsModal.error"
+      @close="closeDiagnostics"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
-import { Upload, FileText, Database, X, RefreshCw } from 'lucide-vue-next'
+import { Upload as UploadIcon, FileText, Database, X, RefreshCw } from 'lucide-vue-next'
 import { apiDelete, apiGet, apiPatch, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
 import Button from '../components/ui/Button.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
+import DocumentDiagnosticsModal from '../components/ui/DocumentDiagnosticsModal.vue'
 
 const { showToast } = useToast()
 
@@ -330,6 +429,11 @@ const kbs = ref([])
 const selectedKbId = ref('')
 const kbNameInput = ref('')
 const kbRenameInput = ref('')
+const kbSettings = ref({
+  parse_policy: 'balanced',
+  preferred_parser: 'auto'
+})
+const processMode = ref('auto')
 const docFilters = ref({
   keyword: '',
   fileType: '',
@@ -345,6 +449,10 @@ const taskCenter = ref({
   error: [],
   processing_count: 0,
   error_count: 0,
+  stage_counts: {},
+  avg_progress_percent: 0,
+  running_workers: 0,
+  queued_jobs: 0,
   auto_refresh_ms: 2000
 })
 const busy = ref({
@@ -352,9 +460,17 @@ const busy = ref({
   kb: false,
   kbManage: false,
   kbDelete: false,
+  kbSettings: false,
   retryFailed: false,
   refresh: false,
   init: false
+})
+const diagnosticsModal = ref({
+  open: false,
+  loading: false,
+  filename: '',
+  error: '',
+  data: {}
 })
 const pollingIntervals = ref(new Map()) // 存储每个文档的轮询定时器
 let taskCenterInterval = null
@@ -384,6 +500,49 @@ async function refreshKbs() {
   }
 }
 
+async function refreshKbSettings() {
+  if (!selectedKbId.value) {
+    kbSettings.value = {
+      parse_policy: 'balanced',
+      preferred_parser: 'auto'
+    }
+    return
+  }
+  try {
+    const res = await apiGet(`/api/kb/${selectedKbId.value}/settings?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    kbSettings.value = {
+      parse_policy: res?.parse_policy || 'balanced',
+      preferred_parser: res?.preferred_parser || 'auto'
+    }
+  } catch {
+    kbSettings.value = {
+      parse_policy: 'balanced',
+      preferred_parser: 'auto'
+    }
+  }
+}
+
+async function saveKbSettings() {
+  if (!selectedKbId.value) return
+  busy.value.kbSettings = true
+  try {
+    const res = await apiPatch(`/api/kb/${selectedKbId.value}/settings`, {
+      user_id: resolvedUserId.value,
+      parse_policy: kbSettings.value.parse_policy,
+      preferred_parser: kbSettings.value.preferred_parser
+    })
+    kbSettings.value = {
+      parse_policy: res?.parse_policy || 'balanced',
+      preferred_parser: res?.preferred_parser || 'auto'
+    }
+    showToast('解析策略已保存', 'success')
+  } catch {
+    // error toast handled globally
+  } finally {
+    busy.value.kbSettings = false
+  }
+}
+
 function stopTaskCenterAutoRefresh() {
   if (taskCenterInterval) {
     clearInterval(taskCenterInterval)
@@ -393,11 +552,11 @@ function stopTaskCenterAutoRefresh() {
 
 function scheduleTaskCenterAutoRefresh() {
   stopTaskCenterAutoRefresh()
-  if (!taskCenter.value.processing_count) return
+  if (!taskCenter.value.processing_count && !taskCenter.value.queued_jobs) return
   const interval = Math.max(1000, taskCenter.value.auto_refresh_ms || 2000)
   taskCenterInterval = setInterval(async () => {
     await refreshTaskCenter()
-    if (!taskCenter.value.processing_count) {
+    if (!taskCenter.value.processing_count && !taskCenter.value.queued_jobs) {
       await refreshDocs()
       stopTaskCenterAutoRefresh()
     }
@@ -675,11 +834,14 @@ async function moveDoc(doc) {
 
 async function reprocessDoc(doc) {
   if (isDocBusy(doc.id) || doc.status === 'processing') return
-  const confirmed = window.confirm('确认重新解析该文档？这会重建该文档索引。')
+  const confirmed = window.confirm(`确认重新解析该文档？模式: ${processMode.value}`)
   if (!confirmed) return
   setDocBusy(doc.id, true)
   try {
-    await apiPost(`/api/docs/${doc.id}/reprocess?user_id=${encodeURIComponent(resolvedUserId.value)}`, {})
+    await apiPost(`/api/docs/${doc.id}/reprocess`, {
+      user_id: resolvedUserId.value,
+      mode: processMode.value
+    })
     showToast('已触发重新解析', 'success')
     await refreshDocs()
     startPolling(doc.id)
@@ -700,7 +862,8 @@ async function retryFailedTasks(targetDocIds = null) {
   try {
     const payload = {
       user_id: resolvedUserId.value,
-      doc_ids: docIds && docIds.length ? docIds : undefined
+      doc_ids: docIds && docIds.length ? docIds : undefined,
+      mode: processMode.value
     }
     const res = await apiPost('/api/docs/retry-failed', payload)
     const queued = Array.isArray(res?.queued) ? res.queued : []
@@ -740,9 +903,65 @@ async function deleteDocItem(doc) {
   }
 }
 
+async function openDiagnostics(doc) {
+  diagnosticsModal.value = {
+    open: true,
+    loading: true,
+    filename: doc.filename,
+    error: '',
+    data: {}
+  }
+  try {
+    const res = await apiGet(`/api/docs/${doc.id}/diagnostics?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    diagnosticsModal.value = {
+      ...diagnosticsModal.value,
+      loading: false,
+      data: res || {}
+    }
+  } catch {
+    diagnosticsModal.value = {
+      ...diagnosticsModal.value,
+      loading: false,
+      error: '加载诊断失败'
+    }
+  }
+}
+
+function closeDiagnostics() {
+  diagnosticsModal.value = {
+    open: false,
+    loading: false,
+    filename: '',
+    error: '',
+    data: {}
+  }
+}
+
 function kbNameById(kbId) {
   const kb = kbs.value.find((item) => item.id === kbId)
   return kb ? kb.name : '未知知识库'
+}
+
+function clampProgress(value) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return 0
+  return Math.max(0, Math.min(Math.round(num), 100))
+}
+
+function stageLabel(stage) {
+  const normalized = String(stage || '').trim().toLowerCase()
+  switch (normalized) {
+    case 'queued': return '排队中'
+    case 'preflight': return '预检'
+    case 'extract': return '提取'
+    case 'ocr': return 'OCR'
+    case 'chunk': return '切块'
+    case 'index_dense': return '向量索引'
+    case 'index_lexical': return '词法索引'
+    case 'done': return '完成'
+    case 'error': return '失败'
+    default: return normalized ? normalized : '处理中'
+  }
 }
 
 function statusLabel(status) {
@@ -767,6 +986,7 @@ onMounted(async () => {
   busy.value.init = true
   try {
     await refreshKbs()
+    await refreshKbSettings()
     await refreshDocs()
   } finally {
     busy.value.init = false
@@ -783,6 +1003,7 @@ watch(selectedKbId, async () => {
     docsFilterDebounce = null
   }
   kbRenameInput.value = selectedKb.value ? selectedKb.value.name : ''
+  await refreshKbSettings()
   await refreshDocs()
 })
 

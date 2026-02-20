@@ -9,7 +9,6 @@ from app.models import User
 from app.schemas import AuthLoginRequest, AuthRegisterRequest, AuthResponse
 
 from app.core.auth import create_access_token, get_request_user_id
-from app.core.knowledge_bases import ensure_default_kb
 from app.core.config import settings
 
 BCRYPT_MAX_BYTES = 72
@@ -52,7 +51,6 @@ def register(payload: AuthRegisterRequest, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
-    ensure_default_kb(db, user_id)
     return AuthResponse(
         user_id=user.id,
         username=user.username,

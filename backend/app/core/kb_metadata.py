@@ -20,10 +20,18 @@ def load_kb_metadata(user_id: str, kb_id: str) -> Dict[str, Any]:
             "last_updated": None,
             "rag_provider": "chroma",
             "file_hashes": {},
+            "parse_policy": "balanced",
+            "preferred_parser": "auto",
         }
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError("Invalid metadata format")
+            data.setdefault("parse_policy", "balanced")
+            data.setdefault("preferred_parser", "auto")
+            data.setdefault("file_hashes", {})
+            return data
     except Exception:
         return {
             "kb_id": kb_id,
@@ -31,6 +39,8 @@ def load_kb_metadata(user_id: str, kb_id: str) -> Dict[str, Any]:
             "last_updated": None,
             "rag_provider": "chroma",
             "file_hashes": {},
+            "parse_policy": "balanced",
+            "preferred_parser": "auto",
         }
 
 
@@ -47,6 +57,45 @@ def init_kb_metadata(user_id: str, kb_id: str) -> None:
         return
     metadata = load_kb_metadata(user_id, kb_id)
     save_kb_metadata(user_id, kb_id, metadata)
+
+
+def get_kb_parse_settings(user_id: str, kb_id: str) -> Dict[str, str]:
+    metadata = load_kb_metadata(user_id, kb_id)
+    return {
+        "parse_policy": metadata.get("parse_policy", "balanced"),
+        "preferred_parser": metadata.get("preferred_parser", "auto"),
+    }
+
+
+def update_kb_parse_settings(
+    user_id: str,
+    kb_id: str,
+    *,
+    parse_policy: str | None = None,
+    preferred_parser: str | None = None,
+) -> Dict[str, str]:
+    valid_policies = {"stable", "balanced", "aggressive"}
+    valid_parsers = {"auto", "native", "docling"}
+    metadata = load_kb_metadata(user_id, kb_id)
+
+    if parse_policy is not None:
+        normalized_policy = parse_policy.strip().lower()
+        if normalized_policy not in valid_policies:
+            raise ValueError("Invalid parse_policy")
+        metadata["parse_policy"] = normalized_policy
+
+    if preferred_parser is not None:
+        normalized_parser = preferred_parser.strip().lower()
+        if normalized_parser not in valid_parsers:
+            raise ValueError("Invalid preferred_parser")
+        metadata["preferred_parser"] = normalized_parser
+
+    metadata["last_updated"] = datetime.utcnow().isoformat()
+    save_kb_metadata(user_id, kb_id, metadata)
+    return {
+        "parse_policy": metadata.get("parse_policy", "balanced"),
+        "preferred_parser": metadata.get("preferred_parser", "auto"),
+    }
 
 
 def record_file_hash(user_id: str, kb_id: str, filename: str, file_hash: str) -> None:

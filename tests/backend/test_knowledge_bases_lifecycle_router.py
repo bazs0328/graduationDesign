@@ -32,6 +32,28 @@ def _seed_user_kb(db_session, *, user_id: str, kb_id: str, kb_name: str):
     return kb
 
 
+def _seed_user_only(db_session, *, user_id: str):
+    os.makedirs("tmp", exist_ok=True)
+    db_session.add(
+        User(
+            id=user_id,
+            username=user_id,
+            password_hash="test_hash",
+            name="Test User",
+        )
+    )
+    db_session.commit()
+
+
+def test_list_kbs_does_not_auto_create_default(client, db_session):
+    user_id = "kb_lifecycle_user_no_default"
+    _seed_user_only(db_session, user_id=user_id)
+
+    resp = client.get("/api/kb", params={"user_id": user_id})
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
 def test_patch_kb_rename(client, db_session):
     user_id = "kb_lifecycle_user_1"
     kb_id = "kb_lifecycle_1"
@@ -159,3 +181,24 @@ def test_delete_kb_with_cascade_removes_bound_data(client, db_session):
     assert db_session.query(ChatSession).filter(ChatSession.kb_id == kb_id).first() is None
     assert not os.path.exists(raw_path)
     assert not os.path.exists(doc.text_path)
+
+
+def test_get_and_patch_kb_parse_settings(client, db_session):
+    user_id = "kb_settings_user_1"
+    kb_id = "kb_settings_kb_1"
+    _seed_user_kb(db_session, user_id=user_id, kb_id=kb_id, kb_name="Settings KB")
+
+    get_resp = client.get(f"/api/kb/{kb_id}/settings", params={"user_id": user_id})
+    assert get_resp.status_code == 200
+    data = get_resp.json()
+    assert data["parse_policy"] == "balanced"
+    assert data["preferred_parser"] == "auto"
+
+    patch_resp = client.patch(
+        f"/api/kb/{kb_id}/settings",
+        json={"user_id": user_id, "parse_policy": "aggressive", "preferred_parser": "native"},
+    )
+    assert patch_resp.status_code == 200
+    updated = patch_resp.json()
+    assert updated["parse_policy"] == "aggressive"
+    assert updated["preferred_parser"] == "native"

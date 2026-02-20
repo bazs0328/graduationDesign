@@ -120,6 +120,20 @@ export async function apiDelete(path) {
   return request(path, { method: 'DELETE' })
 }
 
+export async function getKbSettings(kbId, userId) {
+  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
+  return apiGet(`/api/kb/${encodeURIComponent(kbId)}/settings${query}`)
+}
+
+export async function patchKbSettings(kbId, payload) {
+  return apiPatch(`/api/kb/${encodeURIComponent(kbId)}/settings`, payload)
+}
+
+export async function getDocumentDiagnostics(docId, userId) {
+  const query = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
+  return apiGet(`/api/docs/${encodeURIComponent(docId)}/diagnostics${query}`)
+}
+
 export async function getProfile(userId) {
   const query = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
   return apiGet(`/api/profile${query}`)

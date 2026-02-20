@@ -36,6 +36,11 @@ class DocumentOut(BaseModel):
     error_message: Optional[str] = None
     retry_count: int = 0
     last_retry_at: Optional[datetime] = None
+    stage: Optional[str] = None
+    progress_percent: int = 0
+    parser_provider: Optional[str] = None
+    extract_method: Optional[str] = None
+    quality_score: Optional[float] = None
     processed_at: Optional[datetime] = None
     created_at: datetime
 
@@ -47,17 +52,27 @@ class DocumentTaskCenterResponse(BaseModel):
     error: List[DocumentOut] = []
     processing_count: int = 0
     error_count: int = 0
+    stage_counts: Dict[str, int] = {}
+    avg_progress_percent: float = 0.0
+    running_workers: int = 0
+    queued_jobs: int = 0
     auto_refresh_ms: int = 2000
 
 
 class DocumentRetryRequest(BaseModel):
     user_id: Optional[str] = None
     doc_ids: Optional[List[str]] = None
+    mode: str = "auto"
 
 
 class DocumentRetryResponse(BaseModel):
     queued: List[str] = []
     skipped: List[str] = []
+
+
+class DocumentReprocessRequest(BaseModel):
+    user_id: Optional[str] = None
+    mode: str = "auto"
 
 
 class SourcePreviewResponse(BaseModel):
@@ -68,6 +83,21 @@ class SourcePreviewResponse(BaseModel):
     source: Optional[str] = None
     snippet: str
     matched_by: str
+
+
+class DocumentDiagnosticsResponse(BaseModel):
+    doc_id: str
+    filename: str
+    parser_provider: Optional[str] = None
+    extract_method: Optional[str] = None
+    quality_score: Optional[float] = None
+    strategy: Optional[str] = None
+    complexity_class: Optional[str] = None
+    low_quality_pages: List[int] = []
+    ocr_pages: List[int] = []
+    page_scores: List[Dict[str, Any]] = []
+    stage_timings_ms: Dict[str, float] = {}
+    diagnostics: Dict[str, Any] = {}
 
 
 class DocumentUpdateRequest(BaseModel):
@@ -96,6 +126,18 @@ class KnowledgeBaseOut(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class KnowledgeBaseParseSettingsResponse(BaseModel):
+    kb_id: str
+    parse_policy: str = "balanced"
+    preferred_parser: str = "auto"
+
+
+class KnowledgeBaseParseSettingsUpdateRequest(BaseModel):
+    user_id: Optional[str] = None
+    parse_policy: Optional[str] = None
+    preferred_parser: Optional[str] = None
 
 
 class SummaryRequest(BaseModel):

@@ -94,7 +94,10 @@ def create_session(payload: ChatSessionCreateRequest, db: Session = Depends(get_
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         kb_id = kb.id
     else:
-        kb_id = ensure_kb(db, resolved_user_id, None).id
+        try:
+            kb_id = ensure_kb(db, resolved_user_id, None).id
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     title = (payload.name or "").strip() or None
     session = ChatSession(

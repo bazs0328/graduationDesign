@@ -157,11 +157,11 @@ def test_reprocess_doc_changes_status_and_triggers_task(client, db_session):
     with (
         patch("app.routers.documents.delete_doc_vectors", return_value=1),
         patch("app.routers.documents.remove_doc_chunks", return_value=1),
-        patch("app.routers.documents.process_document_task") as task_mock,
+        patch("app.routers.documents.enqueue_document_task") as task_mock,
     ):
         resp = client.post(
             f"/api/docs/{doc_id}/reprocess",
-            params={"user_id": user_id},
+            json={"user_id": user_id, "mode": "auto"},
         )
 
     assert resp.status_code == 200
@@ -173,6 +173,10 @@ def test_reprocess_doc_changes_status_and_triggers_task(client, db_session):
     assert called[1] == user_id
     assert called[2] == kb_id
     assert called[3] == raw_path
+    if len(called) >= 8:
+        assert called[7] == "auto"
+    else:
+        assert task_mock.call_args.kwargs.get("mode", "auto") == "auto"
 
 
 def test_delete_doc_cleans_records_and_files(client, db_session):
@@ -350,11 +354,11 @@ def test_doc_task_center_and_retry_failed(client, db_session):
     with (
         patch("app.routers.documents.delete_doc_vectors", return_value=1),
         patch("app.routers.documents.remove_doc_chunks", return_value=1),
-        patch("app.routers.documents.process_document_task"),
+        patch("app.routers.documents.enqueue_document_task"),
     ):
         retry_resp = client.post(
             "/api/docs/retry-failed",
-            json={"user_id": user_id, "doc_ids": [error_doc_id]},
+            json={"user_id": user_id, "doc_ids": [error_doc_id], "mode": "force_ocr"},
         )
 
     assert retry_resp.status_code == 200
@@ -486,3 +490,41 @@ def test_preview_doc_source_returns_traceable_snippet(client, db_session):
     assert payload["chunk"] == 7
     assert payload["matched_by"] == "chunk"
     assert "矩阵" in payload["snippet"]
+
+
+def test_get_doc_diagnostics_returns_structured_payload(client, db_session):
+    user_id = "doc_diag_user_1"
+    kb_id = "doc_diag_kb_1"
+    doc_id = "doc_diag_doc_1"
+    doc = _seed_user_kbs_doc(
+        db_session,
+        user_id=user_id,
+        kb_id=kb_id,
+        doc_id=doc_id,
+    )
+    doc.stage = "done"
+    doc.progress_percent = 100
+    doc.parser_provider = "native"
+    doc.extract_method = "hybrid"
+    doc.quality_score = 66.5
+    doc.diagnostics_json = (
+        '{"strategy":"selective_ocr","complexity_class":"mixed","low_quality_pages":[2],'
+        '"ocr_pages":[2],"page_scores":[{"page":1,"quality_score":88.0}]}'
+    )
+    doc.timing_json = '{"extract":12.5,"ocr":21.0,"total":40.2}'
+    db_session.add(doc)
+    db_session.commit()
+
+    resp = client.get(
+        f"/api/docs/{doc_id}/diagnostics",
+        params={"user_id": user_id},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["doc_id"] == doc_id
+    assert data["parser_provider"] == "native"
+    assert data["extract_method"] == "hybrid"
+    assert data["strategy"] == "selective_ocr"
+    assert data["low_quality_pages"] == [2]
+    assert data["ocr_pages"] == [2]
+    assert data["stage_timings_ms"]["total"] == 40.2
