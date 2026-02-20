@@ -11,7 +11,7 @@ from app.core.vectorstore import get_vectorstore
 from app.db import get_db
 from app.models import ChatMessage, ChatSession, Document, QARecord
 from app.schemas import QARequest, QAResponse, SourceSnippet
-from app.services.learner_profile import get_or_create_profile, get_weak_concepts
+from app.services.learner_profile import get_or_create_profile, get_weak_concepts_by_mastery
 from app.services.mastery import record_study_interaction
 from app.services.qa import answer_question
 
@@ -91,7 +91,7 @@ def ask_question(payload: QARequest, db: Session = Depends(get_db)):
             history = "\n".join(f"{row.role}: {row.content}" for row in history_rows)
 
     profile = get_or_create_profile(db, resolved_user_id)
-    weak_concepts = get_weak_concepts(profile)
+    weak_concepts = get_weak_concepts_by_mastery(db, resolved_user_id)
 
     answer, sources = answer_question(
         resolved_user_id,

@@ -23,9 +23,17 @@ from app.schemas import (
     RecommendationNextStep,
     RecommendationsResponse,
 )
-from app.services.learner_profile import get_or_create_profile, get_weak_concepts
+from app.services.learner_profile import (
+    get_or_create_profile,
+    get_weak_concepts_by_mastery,
+)
 from app.services.learning_path import generate_learning_path
-from app.services.mastery import MASTERY_MASTERED
+from app.services.mastery import (
+    MASTERY_STABLE,
+    is_weak_mastery,
+    mastery_completion_rate,
+    mastery_ratio,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +125,7 @@ def _build_doc_status(
     attempt_count: int,
     avg_score: float,
     weak_count: int,
-    mastery_avg: float,
+    stable_mastery_rate: float,
 ) -> str:
     if not has_summary or not has_keypoints:
         return "blocked"
@@ -125,7 +133,7 @@ def _build_doc_status(
         return "ready_for_practice"
     if avg_score < 0.65 or weak_count > 0:
         return "needs_practice"
-    if attempt_count >= 2 and avg_score >= 0.82 and mastery_avg >= 0.7:
+    if attempt_count >= 2 and avg_score >= 0.82 and stable_mastery_rate >= 0.7:
         return "ready_for_challenge"
     return "on_track"
 
@@ -145,7 +153,7 @@ def get_recommendations(
 
     limit = max(1, min(limit, 20))
     profile = get_or_create_profile(db, resolved_user_id)
-    profile_weak_concepts = get_weak_concepts(profile)
+    profile_weak_concepts = get_weak_concepts_by_mastery(db, resolved_user_id)
     practice_difficulty = PRACTICE_DIFFICULTY_BY_ABILITY.get(
         profile.ability_level, "medium"
     )
@@ -288,13 +296,12 @@ def get_recommendations(
 
         keypoint_infos = keypoints_by_doc.get(doc_id, [])
         mastery_values = [item["mastery_level"] for item in keypoint_infos]
-        mastery_avg = (
-            sum(mastery_values) / len(mastery_values) if mastery_values else 0.0
-        )
+        mastery_completion = mastery_completion_rate(mastery_values)
+        stable_mastery_rate = mastery_ratio(mastery_values, threshold=MASTERY_STABLE)
         weak_keypoints = [
             item
             for item in sorted(keypoint_infos, key=lambda x: x["mastery_level"])
-            if item["mastery_level"] < 0.6 and item["text"]
+            if is_weak_mastery(item["mastery_level"]) and item["text"]
         ]
 
         focus_concepts = _unique_nonempty(
@@ -310,26 +317,24 @@ def get_recommendations(
             attempt_count=attempt_count,
             avg_score=avg_score,
             weak_count=len(weak_keypoints),
-            mastery_avg=mastery_avg,
+            stable_mastery_rate=stable_mastery_rate,
         )
 
         summary_component = 1.0 if has_summary else 0.0
         keypoint_component = 1.0 if has_keypoints else 0.0
         quiz_component = _clamp(attempt_count / 2.0, 0.0, 1.0)
         qa_component = _clamp(qa_count / 2.0, 0.0, 1.0)
-        mastery_component = (
-            _clamp(mastery_avg / max(MASTERY_MASTERED, 0.01), 0.0, 1.0)
-            if has_keypoints
-            else 0.0
-        )
+        # Keep recommendation completion aligned with learning-path completion:
+        # both use "mastered keypoint ratio" as the mastery completion signal.
+        mastery_component = mastery_completion if has_keypoints else 0.0
         completion_score = _round_score(
             100
             * (
-                0.25 * summary_component
-                + 0.30 * keypoint_component
-                + 0.20 * quiz_component
-                + 0.10 * qa_component
-                + 0.15 * mastery_component
+                0.14 * summary_component
+                + 0.14 * keypoint_component
+                + 0.08 * quiz_component
+                + 0.04 * qa_component
+                + 0.60 * mastery_component
             )
         )
 
@@ -422,7 +427,7 @@ def get_recommendations(
             has_keypoints
             and attempt_count >= 2
             and avg_score >= 0.82
-            and (not mastery_values or mastery_avg >= 0.7)
+            and (not mastery_values or stable_mastery_rate >= 0.7)
         ):
             challenge_params = {"difficulty": challenge_difficulty}
             if learning_focus_by_doc.get(doc_id):

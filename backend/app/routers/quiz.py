@@ -27,6 +27,7 @@ from app.schemas import (
 from app.services.learner_profile import (
     extract_weak_concepts,
     generate_difficulty_plan,
+    get_weak_concepts_by_mastery,
     get_or_create_profile,
     update_profile_after_quiz,
 )
@@ -299,8 +300,16 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
         )
         for kp_id in kp_ids:
             delta = record_quiz_result(db, kp_id, is_correct)
-            if delta and kp_id not in mastery_deltas:
-                mastery_deltas[kp_id] = delta
+            if not delta:
+                continue
+            old_lv, new_lv = delta
+            previous = mastery_deltas.get(kp_id)
+            if previous:
+                # Keep the initial old level, but always refresh to the latest new level
+                # so quiz summary stays consistent with persisted mastery.
+                mastery_deltas[kp_id] = (previous[0], new_lv)
+            else:
+                mastery_deltas[kp_id] = (old_lv, new_lv)
 
     mastery_updates: list[MasteryUpdate] = []
     if mastery_deltas:
@@ -326,6 +335,7 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
     _, profile_delta = update_profile_after_quiz(
         db, resolved_user_id, score, weak_concepts
     )
+    weak_concepts_by_mastery = get_weak_concepts_by_mastery(db, resolved_user_id)
     wrong_questions_by_concept = _group_wrong_questions_by_concept(questions, results)
 
     feedback = None
@@ -337,7 +347,7 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
         )
         next_quiz_recommendation = NextQuizRecommendation(
             difficulty="easy",
-            focus_concepts=weak_concepts,
+            focus_concepts=weak_concepts_by_mastery,
         )
 
     attempt = QuizAttempt(

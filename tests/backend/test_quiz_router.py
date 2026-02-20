@@ -1,9 +1,11 @@
 """Tests for quiz router (generate + submit, mimic style/reference, parse-reference PDF)."""
 import io
+import json
 from unittest.mock import patch
 
 import pytest
 
+from app.models import Keypoint, Quiz
 from app.services.text_extraction import ExtractionResult
 
 
@@ -177,6 +179,146 @@ def test_quiz_submit_after_generate(client, seeded_session):
         group["concept"] == "概念A" and 1 in group["question_indices"]
         for group in sub["wrong_questions_by_concept"]
     )
+
+
+def test_quiz_submit_mastery_updates_track_final_level(client, db_session, seeded_session):
+    """If one keypoint appears in multiple questions, mastery_updates should report final level."""
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    keypoint_id = "kp-quiz-delta-1"
+    quiz_id = "quiz-delta-1"
+
+    db_session.add(
+        Keypoint(
+            id=keypoint_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            text="链式法则",
+            mastery_level=0.2,
+            attempt_count=0,
+            correct_count=0,
+        )
+    )
+    db_session.add(
+        Quiz(
+            id=quiz_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            difficulty="medium",
+            question_type="mcq",
+            questions_json=json.dumps(
+                [
+                    {
+                        "question": "q1",
+                        "options": ["A", "B", "C", "D"],
+                        "answer_index": 0,
+                        "explanation": "e1",
+                        "concepts": ["链式法则"],
+                    },
+                    {
+                        "question": "q2",
+                        "options": ["A", "B", "C", "D"],
+                        "answer_index": 1,
+                        "explanation": "e2",
+                        "concepts": ["链式法则"],
+                    },
+                ]
+            ),
+        )
+    )
+    db_session.commit()
+
+    with patch(
+        "app.routers.quiz._resolve_keypoints_for_question",
+        return_value=[keypoint_id],
+    ):
+        submit = client.post(
+            "/api/quiz/submit",
+            json={
+                "quiz_id": quiz_id,
+                "user_id": user_id,
+                "answers": [0, 0],  # first correct, second wrong
+            },
+        )
+
+    assert submit.status_code == 200
+    data = submit.json()
+    assert len(data["mastery_updates"]) == 1
+    update = data["mastery_updates"][0]
+    assert update["keypoint_id"] == keypoint_id
+    assert update["old_level"] == pytest.approx(0.2)
+    # EMA with alpha=0.3: 0.2 -> 0.44 (correct) -> 0.308 (wrong)
+    assert update["new_level"] == pytest.approx(0.308, abs=1e-6)
+
+
+def test_quiz_submit_next_recommendation_focus_uses_mastery_concepts(
+    client, db_session, seeded_session
+):
+    """next_quiz_recommendation.focus_concepts should follow mastery-level weak concepts."""
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    keypoint_id = "kp-quiz-focus-1"
+    quiz_id = "quiz-focus-1"
+
+    db_session.add(
+        Keypoint(
+            id=keypoint_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            text="矩阵求导",
+            mastery_level=0.2,
+            attempt_count=1,
+            correct_count=0,
+        )
+    )
+    db_session.add(
+        Quiz(
+            id=quiz_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            difficulty="medium",
+            question_type="mcq",
+            questions_json=json.dumps(
+                [
+                    {
+                        "question": f"q{i + 1}",
+                        "options": ["A", "B", "C", "D"],
+                        "answer_index": 0,
+                        "explanation": "e",
+                        "concepts": ["错题概念X"],
+                    }
+                    for i in range(5)
+                ]
+            ),
+        )
+    )
+    db_session.commit()
+
+    with patch(
+        "app.routers.quiz._resolve_keypoints_for_question",
+        return_value=[keypoint_id],
+    ):
+        submit = client.post(
+            "/api/quiz/submit",
+            json={
+                "quiz_id": quiz_id,
+                "user_id": user_id,
+                "answers": [1, 1, 1, 1, 1],  # all wrong to trigger next recommendation
+            },
+        )
+
+    assert submit.status_code == 200
+    data = submit.json()
+    assert data.get("next_quiz_recommendation")
+    focuses = data["next_quiz_recommendation"]["focus_concepts"]
+    assert "矩阵求导" in focuses
+    assert "错题概念X" not in focuses
 
 
 def test_quiz_generate_with_nonexistent_doc_returns_404(client, seeded_session):

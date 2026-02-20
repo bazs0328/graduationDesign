@@ -24,7 +24,7 @@
         <section v-if="busy.init" class="bg-card border border-border rounded-xl p-6 shadow-sm">
           <SkeletonBlock type="card" :lines="6" />
         </section>
-        <LearnerProfileCard v-else :profile="profile" />
+        <LearnerProfileCard v-else :profile="profile" :kb-id="profileContextKbId" />
         <!-- KB Selector & Stats -->
         <section class="bg-card border border-border rounded-xl p-8 shadow-sm space-y-8">
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -441,6 +441,8 @@ const kbProgress = computed(() => {
   if (!progress.value || !selectedKbId.value) return null
   return progress.value.by_kb.find((kb) => kb.kb_id === selectedKbId.value) || null
 })
+
+const profileContextKbId = computed(() => selectedKbId.value || kbs.value[0]?.id || '')
 
 const kbStatItems = computed(() => {
   if (!kbProgress.value) return []

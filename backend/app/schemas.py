@@ -181,6 +181,8 @@ class LearnerProfileOut(BaseModel):
     weak_concepts: List[str]
     recent_accuracy: float
     total_attempts: int
+    mastery_avg: float = 0.0
+    mastery_completion_rate: float = 0.0
     updated_at: datetime
 
 

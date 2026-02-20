@@ -47,7 +47,7 @@ def test_qa_passes_adaptive_profile_to_service(client, seeded_session):
     profile = SimpleNamespace(ability_level="advanced")
     with (
         patch("app.routers.qa.get_or_create_profile", return_value=profile),
-        patch("app.routers.qa.get_weak_concepts", return_value=["矩阵", "特征值"]),
+        patch("app.routers.qa.get_weak_concepts_by_mastery", return_value=["矩阵", "特征值"]),
         patch("app.routers.qa.answer_question", side_effect=_mock_answer) as mocked_answer,
     ):
         resp = client.post(

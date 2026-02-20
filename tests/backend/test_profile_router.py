@@ -1,5 +1,7 @@
 """Tests for profile router (GET profile, GET difficulty-plan)."""
 
+from app.models import Keypoint
+
 
 def test_get_profile_returns_200_and_schema(client, seeded_session):
     """GET /api/profile with user_id returns 200 and LearnerProfileOut schema."""
@@ -21,6 +23,10 @@ def test_get_profile_returns_200_and_schema(client, seeded_session):
     assert isinstance(data["recent_accuracy"], (int, float))
     assert "total_attempts" in data
     assert isinstance(data["total_attempts"], int)
+    assert "mastery_avg" in data
+    assert isinstance(data["mastery_avg"], (int, float))
+    assert "mastery_completion_rate" in data
+    assert isinstance(data["mastery_completion_rate"], (int, float))
     assert "updated_at" in data
 
 
@@ -50,3 +56,69 @@ def test_get_difficulty_plan_returns_200_and_schema(client, seeded_session):
     assert isinstance(data["hard"], (int, float))
     total = data["easy"] + data["medium"] + data["hard"]
     assert abs(total - 1.0) < 1e-6
+
+
+def test_get_profile_weak_concepts_derive_from_mastery_level(client, db_session, seeded_session):
+    """Weak concepts should be selected from low-mastery keypoints, not untouched defaults."""
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+
+    db_session.add(
+        Keypoint(
+            id="kp-profile-weak-1",
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            text="矩阵求导",
+            mastery_level=0.12,
+            attempt_count=2,
+            correct_count=0,
+        )
+    )
+    db_session.add(
+        Keypoint(
+            id="kp-profile-weak-2",
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            text="特征值分解",
+            mastery_level=0.28,
+            attempt_count=1,
+            correct_count=0,
+        )
+    )
+    db_session.add(
+        Keypoint(
+            id="kp-profile-mastered",
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            text="线性变换",
+            mastery_level=0.88,
+            attempt_count=3,
+            correct_count=3,
+        )
+    )
+    db_session.add(
+        Keypoint(
+            id="kp-profile-untouched",
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            text="未学习默认项",
+            mastery_level=0.0,
+            attempt_count=0,
+            correct_count=0,
+        )
+    )
+    db_session.commit()
+
+    resp = client.get(f"/api/profile?user_id={user_id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "weak_concepts" in data
+    assert "矩阵求导" in data["weak_concepts"]
+    assert "特征值分解" in data["weak_concepts"]
+    assert "线性变换" not in data["weak_concepts"]
+    assert "未学习默认项" not in data["weak_concepts"]

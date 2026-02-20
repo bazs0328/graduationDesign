@@ -26,6 +26,10 @@ const props = defineProps({
   profile: {
     type: Object,
     default: null
+  },
+  kbId: {
+    type: String,
+    default: ''
   }
 })
 
@@ -52,6 +56,16 @@ const accuracyPercent = computed(() => {
 const frustrationPercent = computed(() => {
   if (!props.profile) return 0
   return Math.round((props.profile.frustration_score || 0) * 100)
+})
+
+const masteryAvgPercent = computed(() => {
+  if (!props.profile) return 0
+  return Math.round((props.profile.mastery_avg || 0) * 100)
+})
+
+const masteryCompletionPercent = computed(() => {
+  if (!props.profile) return 0
+  return Math.round((props.profile.mastery_completion_rate || 0) * 100)
 })
 
 const weakConcepts = computed(() => {
@@ -154,11 +168,19 @@ const frustrationLabel = computed(() => {
 })
 
 function goToQuiz(concept) {
-  router.push({ name: 'Quiz', query: { focus: concept } })
+  const query = {}
+  const focus = String(concept || '').trim()
+  if (focus) query.focus = focus
+  if (props.kbId) query.kb_id = props.kbId
+  router.push({ name: 'Quiz', query })
 }
 
 function goToQA(concept) {
-  router.push(concept ? { name: 'QA', query: { focus: concept } } : { name: 'QA' })
+  const query = {}
+  const focus = String(concept || '').trim()
+  if (focus) query.focus = focus
+  if (props.kbId) query.kb_id = props.kbId
+  router.push({ name: 'QA', query })
 }
 </script>
 
@@ -205,6 +227,34 @@ function goToQA(concept) {
             />
           </div>
         </div>
+        <div class="space-y-2">
+          <div
+            class="flex items-center justify-between text-xs font-semibold text-muted-foreground uppercase tracking-wider"
+          >
+            <span>掌握度均值</span>
+            <span>{{ masteryAvgPercent }}%</span>
+          </div>
+          <div class="h-2 rounded-full bg-muted overflow-hidden">
+            <div
+              class="h-full bg-blue-500 transition-all duration-300"
+              :style="{ width: `${masteryAvgPercent}%` }"
+            />
+          </div>
+        </div>
+        <div class="space-y-2">
+          <div
+            class="flex items-center justify-between text-xs font-semibold text-muted-foreground uppercase tracking-wider"
+          >
+            <span>掌握完成度</span>
+            <span>{{ masteryCompletionPercent }}%</span>
+          </div>
+          <div class="h-2 rounded-full bg-muted overflow-hidden">
+            <div
+              class="h-full bg-emerald-500 transition-all duration-300"
+              :style="{ width: `${masteryCompletionPercent}%` }"
+            />
+          </div>
+        </div>
         <div class="space-y-2 flex-1 min-h-[120px]">
           <div
             class="flex items-center justify-between text-xs font-semibold text-muted-foreground uppercase tracking-wider"
@@ -227,28 +277,36 @@ function goToQA(concept) {
       <p class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
         薄弱知识点
       </p>
-      <div v-if="weakConcepts.length" class="flex flex-wrap gap-2">
-        <button
+      <div v-if="weakConcepts.length" class="space-y-2">
+        <div
           v-for="concept in weakConcepts"
           :key="concept"
-          type="button"
-          class="px-2 py-1 bg-primary/10 text-primary text-xs font-semibold rounded-full hover:bg-primary/20 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-colors"
-          :aria-label="`针对「${concept}」去测验`"
-          @click="goToQuiz(concept)"
+          class="flex items-center justify-between gap-2 rounded-lg border border-border bg-accent/20 px-3 py-2"
         >
-          {{ concept }}
-        </button>
-        <span class="text-[10px] text-muted-foreground self-center">
-          点击可前往测验；或
-          <button
-            type="button"
-            class="underline focus:outline-none focus:ring-2 focus:ring-primary rounded"
-            aria-label="前往问答页"
-            @click="goToQA()"
-          >
-            去问答
-          </button>
-        </span>
+          <span class="text-sm font-medium truncate">{{ concept }}</span>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <button
+              type="button"
+              class="px-2 py-1 bg-primary/10 text-primary text-[11px] font-semibold rounded-md hover:bg-primary/20 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-colors"
+              :aria-label="`针对「${concept}」去测验`"
+              @click="goToQuiz(concept)"
+            >
+              去测验
+            </button>
+            <button
+              type="button"
+              class="px-2 py-1 bg-secondary text-secondary-foreground text-[11px] font-semibold rounded-md hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-colors"
+              :aria-label="`针对「${concept}」去问答`"
+              @click="goToQA(concept)"
+            >
+              去问答
+            </button>
+          </div>
+        </div>
+        <p class="text-[10px] text-muted-foreground">
+          跳转会自动携带当前知识点
+          <span v-if="props.kbId">与知识库上下文</span>
+        </p>
       </div>
       <p v-else class="text-sm text-muted-foreground">暂无薄弱知识点记录</p>
     </div>
