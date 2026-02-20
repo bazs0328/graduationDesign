@@ -52,7 +52,8 @@
                   {{ getLevelMeta(msg.abilityLevel).text }}
                 </span>
               </div>
-              <p class="text-sm leading-relaxed whitespace-pre-wrap">{{ msg.content }}</p>
+              <p v-if="msg.role === 'question'" class="text-sm leading-relaxed whitespace-pre-wrap">{{ msg.content }}</p>
+              <div v-else class="qa-markdown" v-html="renderMarkdown(msg.content)"></div>
               
               <!-- Sources -->
               <div v-if="msg.sources && msg.sources.length" class="mt-4 pt-3 border-t border-accent-foreground/10 space-y-2">
@@ -298,6 +299,7 @@ import { useToast } from '../composables/useToast'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import SourcePreviewModal from '../components/ui/SourcePreviewModal.vue'
+import { renderMarkdown } from '../utils/markdown'
 
 const { showToast } = useToast()
 const route = useRoute()

@@ -109,3 +109,124 @@
   from { transform: scaleX(1); }
   to   { transform: scaleX(0); }
 }
+
+@layer components {
+  .markdown-content {
+    @apply break-words;
+  }
+
+  .markdown-content p,
+  .markdown-content ul,
+  .markdown-content ol,
+  .markdown-content blockquote,
+  .markdown-content pre,
+  .markdown-content table {
+    @apply my-4;
+  }
+
+  .markdown-content ul {
+    @apply list-disc pl-6;
+  }
+
+  .markdown-content ol {
+    @apply list-decimal pl-6;
+  }
+
+  .markdown-content li {
+    @apply my-1;
+  }
+
+  .markdown-content li > p {
+    @apply my-1;
+  }
+
+  .markdown-content hr {
+    @apply my-6 border-border;
+  }
+
+  .markdown-content strong {
+    @apply font-semibold;
+  }
+
+  .markdown-content code {
+    @apply rounded bg-accent px-1.5 py-0.5 text-sm;
+  }
+
+  .markdown-content pre {
+    @apply overflow-x-auto rounded-lg border border-border bg-accent/50 p-4;
+  }
+
+  .markdown-content pre code {
+    @apply bg-transparent p-0;
+  }
+
+  .markdown-content blockquote {
+    @apply border-l-4 border-primary/40 bg-primary/5 px-4 py-2 text-muted-foreground;
+  }
+
+  .markdown-content a {
+    @apply text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary;
+  }
+
+  .markdown-content .katex-display {
+    @apply my-4 overflow-x-auto overflow-y-hidden;
+  }
+
+  .summary-markdown {
+    @apply break-words text-base leading-8 text-foreground;
+  }
+
+  .summary-markdown h1,
+  .summary-markdown h2,
+  .summary-markdown h3,
+  .summary-markdown h4 {
+    @apply mt-8 mb-4 font-bold tracking-tight text-foreground;
+  }
+
+  .summary-markdown h1 {
+    @apply text-3xl;
+  }
+
+  .summary-markdown h2 {
+    @apply text-2xl;
+  }
+
+  .summary-markdown h3 {
+    @apply text-xl;
+  }
+
+  .summary-markdown h4 {
+    @apply text-lg;
+  }
+
+  .qa-markdown {
+    @apply break-words text-sm leading-7 text-current;
+  }
+
+  .qa-markdown h1,
+  .qa-markdown h2,
+  .qa-markdown h3,
+  .qa-markdown h4 {
+    @apply mt-5 mb-2.5 font-semibold text-current;
+  }
+
+  .qa-markdown h1 {
+    @apply text-base;
+  }
+
+  .qa-markdown h2,
+  .qa-markdown h3,
+  .qa-markdown h4 {
+    @apply text-sm;
+  }
+}
+
+.summary-markdown > :first-child,
+.qa-markdown > :first-child {
+  margin-top: 0;
+}
+
+.summary-markdown > :last-child,
+.qa-markdown > :last-child {
+  margin-bottom: 0;
+}

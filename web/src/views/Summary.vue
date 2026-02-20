@@ -89,9 +89,11 @@
           <div v-if="busy.summary" class="flex flex-col items-center justify-center py-20 space-y-4">
             <LoadingSpinner size="lg" message="正在分析文档内容…" vertical />
           </div>
-          <div v-else-if="summary" class="prose prose-invert max-w-none">
-            <p class="text-lg leading-relaxed whitespace-pre-wrap">{{ summary }}</p>
-          </div>
+          <div
+            v-else-if="summary"
+            class="summary-markdown max-w-none"
+            v-html="renderedSummary"
+          ></div>
           <div v-else class="flex flex-col items-center justify-center py-20 text-muted-foreground space-y-4">
             <FileText class="w-16 h-16 opacity-10" />
             <p>选择文档并点击「生成摘要」开始。</p>
@@ -229,6 +231,7 @@ import Button from '../components/ui/Button.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import SourcePreviewModal from '../components/ui/SourcePreviewModal.vue'
+import { renderMarkdown } from '../utils/markdown'
 import {
   masteryLabel as _masteryLabel,
   masteryPercent as _masteryPercent,
@@ -266,6 +269,10 @@ const busy = ref({
   summary: false,
   keypoints: false,
   init: false
+})
+
+const renderedSummary = computed(() => {
+  return renderMarkdown(summary.value)
 })
 
 const selectedKbName = computed(() => {

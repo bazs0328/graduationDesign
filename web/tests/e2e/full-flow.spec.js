@@ -142,7 +142,7 @@ test.describe('GradTutor E2E', () => {
     await selectDocInCard(summaryCard, fixtureName)
     await summaryCard.getByRole('button', { name: '生成摘要' }).click()
     const summarySection = page.getByRole('heading', { name: '内容摘要' }).locator('..').locator('..').locator('..')
-    await expect(summarySection.locator('p.text-lg').first()).toBeVisible({ timeout: 120000 })
+    await expect(summarySection.locator('.summary-markdown').first()).toBeVisible({ timeout: 120000 })
 
     await summaryCard.getByRole('button', { name: '提取要点' }).click()
     const keypointsSection = page.getByRole('heading', { name: '核心知识点' }).locator('..').locator('..').locator('..')
