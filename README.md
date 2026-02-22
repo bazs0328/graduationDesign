@@ -3,7 +3,7 @@
 This project implements a personalized learning assistant inspired by the DeepTutor workflow, adapted to FastAPI + Vue and a local RAG pipeline. It supports document upload, summarization, Q&A, quiz generation, and progress tracking.
 
 ## Features
-- Document upload and parsing (PDF/TXT/MD, scanned PDF OCR fallback)
+- Document upload and parsing (PDF/TXT/MD/DOCX/PPTX, scanned PDF OCR fallback)
 - Knowledge summary & keypoint generation (chunk-map-reduce)
 - RAG-style Q&A with source snippets
 - Auto quiz generation (MCQ) + grading

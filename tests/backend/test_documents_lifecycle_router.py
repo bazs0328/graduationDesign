@@ -1,6 +1,7 @@
 """Tests for document lifecycle endpoints."""
 
 from datetime import datetime, timedelta
+import io
 import os
 from unittest.mock import patch
 
@@ -486,3 +487,45 @@ def test_preview_doc_source_returns_traceable_snippet(client, db_session):
     assert payload["chunk"] == 7
     assert payload["matched_by"] == "chunk"
     assert "矩阵" in payload["snippet"]
+
+
+def test_upload_doc_accepts_docx_and_pptx(client):
+    user_id = "doc_upload_office_user_1"
+    cases = [
+        (
+            "lecture-notes.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "docx",
+        ),
+        (
+            "chapter-slides.pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "pptx",
+        ),
+    ]
+
+    for idx, (filename, mime, expected_type) in enumerate(cases, start=1):
+        with patch("app.routers.documents.process_document_task") as task_mock:
+            resp = client.post(
+                "/api/docs/upload",
+                data={"user_id": f"{user_id}_{idx}"},
+                files={"file": (filename, io.BytesIO(f"office-{idx}".encode()), mime)},
+            )
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["filename"] == filename
+        assert payload["file_type"] == expected_type
+        assert payload["status"] == "processing"
+        task_mock.assert_called_once()
+
+
+def test_upload_doc_rejects_unsupported_legacy_office_format(client):
+    resp = client.post(
+        "/api/docs/upload",
+        data={"user_id": "doc_upload_legacy_office_user"},
+        files={"file": ("legacy.doc", io.BytesIO(b"legacy"), "application/msword")},
+    )
+
+    assert resp.status_code == 400
+    assert "Unsupported file type" in resp.json()["detail"]

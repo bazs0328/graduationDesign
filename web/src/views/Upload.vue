@@ -73,10 +73,10 @@
               @drop.prevent="onDrop"
               :class="{ 'border-primary bg-primary/5': dragActive }"
             >
-              <input type="file" ref="fileInputRef" class="hidden" @change="onFileChange" />
+              <input type="file" ref="fileInputRef" class="hidden" accept=".pdf,.txt,.md,.docx,.pptx" @change="onFileChange" />
               <div v-if="!uploadFile" class="space-y-2">
                 <UploadIcon class="w-10 h-10 mx-auto text-muted-foreground" />
-                <p class="text-sm text-muted-foreground">点击或拖拽 PDF/文本文件到此处</p>
+                <p class="text-sm text-muted-foreground">点击或拖拽 PDF/TXT/MD/DOCX/PPTX 文件到此处</p>
               </div>
               <div v-else class="flex items-center justify-center gap-2 text-primary font-medium">
                 <FileText class="w-5 h-5" />
@@ -141,6 +141,8 @@
               <option value="pdf">PDF</option>
               <option value="txt">TXT</option>
               <option value="md">MD</option>
+              <option value="docx">DOCX</option>
+              <option value="pptx">PPTX</option>
             </select>
             <select v-model="docFilters.status" class="bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary">
               <option value="">全部状态</option>
@@ -387,7 +389,7 @@ const isDocFilterActive = computed(() => {
 })
 const uploadDocsEmptyDescription = computed(() => {
   if (!hasAnyKb.value) {
-    return '先创建一个知识库，再上传 PDF/TXT/MD 文档进行解析。'
+    return '先创建一个知识库，再上传 PDF/TXT/MD/DOCX/PPTX 文档进行解析。'
   }
   if (isDocFilterActive.value) {
     return '当前筛选条件下没有匹配文档，可以清空筛选后查看全部结果。'

@@ -35,7 +35,7 @@
 - [x] **知识库/文档上传与解析**
   - 范围：PDF/TXT/MD 上传、KB 创建、增量添加、结构化元数据（页码/来源）
   - 方案：上传只落盘，解析/向量化走后台任务
-  - 预留扩展：Docx/图片解析延后；**编号条目抽取**（Definition/Theorem 等，对标 DeepTutor extract_numbered_items）为可选扩展
+  - 预留扩展：图片解析延后（Docx 已支持）；**编号条目抽取**（Definition/Theorem 等，对标 DeepTutor extract_numbered_items）为可选扩展
   - 验收标准：
     - `POST /api/kb` 可创建 KB，重复名称返回已存在记录
     - `POST /api/docs/upload` 返回 `doc_id`，状态为 `processing`/`ready`

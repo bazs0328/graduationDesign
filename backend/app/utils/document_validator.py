@@ -9,12 +9,15 @@ class DocumentValidator:
 
     MAX_FILE_SIZE: ClassVar[int] = 50 * 1024 * 1024
     MAX_PDF_SIZE: ClassVar[int] = 50 * 1024 * 1024
-    ALLOWED_EXTENSIONS: ClassVar[set[str]] = {".pdf", ".txt", ".md"}
+    ALLOWED_EXTENSIONS: ClassVar[set[str]] = {".pdf", ".txt", ".md", ".docx", ".pptx"}
     ALLOWED_MIME_TYPES: ClassVar[set[str]] = {
         "application/pdf",
         "text/plain",
         "text/markdown",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     }
+    STRICT_MIME_EXTENSIONS: ClassVar[set[str]] = {".pdf", ".docx", ".pptx"}
 
     @staticmethod
     def validate_upload_safety(
@@ -46,8 +49,15 @@ class DocumentValidator:
         if guessed_mime and guessed_mime not in DocumentValidator.ALLOWED_MIME_TYPES:
             raise ValueError("MIME type validation failed")
 
-        if content_type and content_type not in DocumentValidator.ALLOWED_MIME_TYPES:
-            if content_type != "application/octet-stream":
+        if content_type:
+            if content_type not in DocumentValidator.ALLOWED_MIME_TYPES:
+                if content_type != "application/octet-stream":
+                    raise ValueError("MIME type validation failed")
+            elif (
+                ext in DocumentValidator.STRICT_MIME_EXTENSIONS
+                and guessed_mime
+                and content_type != guessed_mime
+            ):
                 raise ValueError("MIME type validation failed")
 
         return safe_name

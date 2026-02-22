@@ -11,7 +11,8 @@ from app.services.text_extraction import extract_text
 from app.services.lexical import append_lexical_chunks
 
 
-SUPPORTED_TYPES = {".pdf", ".txt", ".md"}
+SUPPORTED_TYPES = {".pdf", ".txt", ".md", ".docx", ".pptx"}
+PAGE_AWARE_TYPES = {".pdf", ".pptx"}
 
 
 def ingest_document(
@@ -38,7 +39,7 @@ def ingest_document(
     )
 
     docs: list[LCDocument] = []
-    if suffix == ".pdf":
+    if suffix in PAGE_AWARE_TYPES:
         for page_num, page_text in enumerate(extraction.pages, start=1):
             if not page_text:
                 continue

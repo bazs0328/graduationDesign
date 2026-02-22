@@ -133,50 +133,111 @@ def _ocr_page(file_path: str, page_num: int, language: str) -> str:
     return _normalize_text(ocr_text)
 
 
-def extract_text(file_path: str, suffix: str) -> ExtractionResult:
-    if suffix == ".pdf":
-        pages: List[str] = []
-        with pdfplumber.open(file_path) as pdf:
-            page_count = len(pdf.pages)
-            for page in pdf.pages:
-                try:
-                    page_text = page.extract_text() or ""
-                except Exception:
-                    page_text = ""
-                pages.append(_normalize_text(page_text))
+def _extract_pdf(file_path: str) -> ExtractionResult:
+    pages: List[str] = []
+    with pdfplumber.open(file_path) as pdf:
+        page_count = len(pdf.pages)
+        for page in pdf.pages:
+            try:
+                page_text = page.extract_text() or ""
+            except Exception:
+                page_text = ""
+            pages.append(_normalize_text(page_text))
 
-        min_text_length = max(1, settings.ocr_min_text_length)
-        scanned_pdf = _is_scanned_pdf(pages, min_text_length)
-        if settings.ocr_enabled:
-            if scanned_pdf:
-                ocr_pages = list(range(1, page_count + 1))
+    min_text_length = max(1, settings.ocr_min_text_length)
+    scanned_pdf = _is_scanned_pdf(pages, min_text_length)
+    if settings.ocr_enabled:
+        if scanned_pdf:
+            ocr_pages = list(range(1, page_count + 1))
+        else:
+            ocr_pages = [
+                idx
+                for idx, page_text in enumerate(pages, start=1)
+                if _is_low_text_page(page_text, min_text_length)
+            ]
+        for page_num in ocr_pages:
+            try:
+                ocr_text = _ocr_page(file_path, page_num, settings.ocr_language)
+            except RuntimeError:
+                if scanned_pdf:
+                    raise
+                logger.exception("Skip OCR on page %s due to setup/runtime error", page_num)
+                continue
+
+            if not ocr_text:
+                continue
+            if pages[page_num - 1]:
+                pages[page_num - 1] = f"{pages[page_num - 1]}\n{ocr_text}".strip()
             else:
-                ocr_pages = [
-                    idx
-                    for idx, page_text in enumerate(pages, start=1)
-                    if _is_low_text_page(page_text, min_text_length)
-                ]
-            for page_num in ocr_pages:
-                try:
-                    ocr_text = _ocr_page(file_path, page_num, settings.ocr_language)
-                except RuntimeError:
-                    if scanned_pdf:
-                        raise
-                    logger.exception("Skip OCR on page %s due to setup/runtime error", page_num)
-                    continue
+                pages[page_num - 1] = ocr_text
+    elif scanned_pdf:
+        logger.info("Scanned PDF detected but OCR is disabled")
 
-                if not ocr_text:
-                    continue
-                if pages[page_num - 1]:
-                    pages[page_num - 1] = f"{pages[page_num - 1]}\n{ocr_text}".strip()
-                else:
-                    pages[page_num - 1] = ocr_text
-        elif scanned_pdf:
-            logger.info("Scanned PDF detected but OCR is disabled")
+    combined = "\n\n".join([p for p in pages if p])
+    return ExtractionResult(text=combined, page_count=page_count, pages=pages)
 
-        combined = "\n\n".join([p for p in pages if p])
-        return ExtractionResult(text=combined, page_count=page_count, pages=pages)
 
+def _extract_text_file(file_path: str) -> ExtractionResult:
     raw_text, encoding = _read_text_with_fallback(file_path)
     normalized = _normalize_text(raw_text)
     return ExtractionResult(text=normalized, page_count=1, pages=[normalized], encoding=encoding)
+
+
+def _extract_docx(file_path: str) -> ExtractionResult:
+    try:
+        from docx import Document as WordDocument  # type: ignore
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("DOCX dependency missing: install python-docx.") from exc
+
+    try:
+        doc = WordDocument(file_path)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("Failed to read DOCX file.") from exc
+
+    paragraphs: List[str] = []
+    for paragraph in doc.paragraphs:
+        text = _normalize_text(paragraph.text or "")
+        if text:
+            paragraphs.append(text)
+
+    combined = "\n\n".join(paragraphs)
+    return ExtractionResult(text=combined, page_count=1, pages=[combined])
+
+
+def _extract_pptx(file_path: str) -> ExtractionResult:
+    try:
+        from pptx import Presentation  # type: ignore
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("PPTX dependency missing: install python-pptx.") from exc
+
+    try:
+        presentation = Presentation(file_path)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("Failed to read PPTX file.") from exc
+
+    pages: List[str] = []
+    for slide in presentation.slides:
+        parts: List[str] = []
+        for shape in slide.shapes:
+            if not getattr(shape, "has_text_frame", False):
+                continue
+            shape_text = _normalize_text(getattr(shape, "text", "") or "")
+            if shape_text:
+                parts.append(shape_text)
+        pages.append(_normalize_text("\n\n".join(parts)) if parts else "")
+
+    combined = "\n\n".join([p for p in pages if p])
+    return ExtractionResult(text=combined, page_count=len(pages), pages=pages)
+
+
+def extract_text(file_path: str, suffix: str) -> ExtractionResult:
+    normalized_suffix = (suffix or "").lower()
+    if normalized_suffix == ".pdf":
+        return _extract_pdf(file_path)
+    if normalized_suffix in {".txt", ".md"}:
+        return _extract_text_file(file_path)
+    if normalized_suffix == ".docx":
+        return _extract_docx(file_path)
+    if normalized_suffix == ".pptx":
+        return _extract_pptx(file_path)
+    raise ValueError(f"Unsupported file type: {suffix}")
