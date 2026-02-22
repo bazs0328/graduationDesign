@@ -42,6 +42,14 @@ class DocumentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class DocumentPageResponse(BaseModel):
+    items: List[DocumentOut] = []
+    total: int = 0
+    offset: int = 0
+    limit: int = 20
+    has_more: bool = False
+
+
 class DocumentTaskCenterResponse(BaseModel):
     processing: List[DocumentOut] = []
     error: List[DocumentOut] = []
@@ -306,6 +314,10 @@ class ActivityItem(BaseModel):
 
 class ActivityResponse(BaseModel):
     items: List[ActivityItem]
+    total: int = 0
+    offset: int = 0
+    limit: int = 20
+    has_more: bool = False
 
 
 class ChatSessionCreateRequest(BaseModel):
@@ -329,6 +341,14 @@ class ChatSessionOut(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ChatSessionPageResponse(BaseModel):
+    items: List[ChatSessionOut] = []
+    total: int = 0
+    offset: int = 0
+    limit: int = 20
+    has_more: bool = False
 
 
 class ChatMessageOut(BaseModel):

@@ -16,9 +16,16 @@ def _doc_name_map(query):
 
 
 @router.get("/activity", response_model=ActivityResponse)
-def get_activity(limit: int = 20, user_id: str | None = None, db: Session = Depends(get_db)):
+def get_activity(
+    limit: int = 20,
+    offset: int = 0,
+    user_id: str | None = None,
+    db: Session = Depends(get_db),
+):
     resolved_user_id = ensure_user(db, user_id)
+    offset = max(0, int(offset or 0))
     limit = max(1, min(limit, 100))
+    fetch_window = offset + limit
 
     doc_query = db.query(Document)
     quiz_query = db.query(Quiz)
@@ -37,10 +44,17 @@ def get_activity(limit: int = 20, user_id: str | None = None, db: Session = Depe
 
     doc_name = _doc_name_map(doc_query)
     quiz_doc = {quiz.id: quiz.doc_id for quiz in quiz_query.all()}
+    total = (
+        doc_query.count()
+        + summary_query.count()
+        + keypoint_query.count()
+        + qa_query.count()
+        + attempt_query.count()
+    )
 
     items: list[ActivityItem] = []
 
-    for doc in doc_query.order_by(Document.created_at.desc()).limit(limit).all():
+    for doc in doc_query.order_by(Document.created_at.desc()).limit(fetch_window).all():
         items.append(
             ActivityItem(
                 type="document_upload",
@@ -51,7 +65,7 @@ def get_activity(limit: int = 20, user_id: str | None = None, db: Session = Depe
             )
         )
 
-    for record in summary_query.order_by(SummaryRecord.created_at.desc()).limit(limit).all():
+    for record in summary_query.order_by(SummaryRecord.created_at.desc()).limit(fetch_window).all():
         items.append(
             ActivityItem(
                 type="summary_generated",
@@ -62,7 +76,7 @@ def get_activity(limit: int = 20, user_id: str | None = None, db: Session = Depe
             )
         )
 
-    for record in keypoint_query.order_by(KeypointRecord.created_at.desc()).limit(limit).all():
+    for record in keypoint_query.order_by(KeypointRecord.created_at.desc()).limit(fetch_window).all():
         items.append(
             ActivityItem(
                 type="keypoints_generated",
@@ -73,7 +87,7 @@ def get_activity(limit: int = 20, user_id: str | None = None, db: Session = Depe
             )
         )
 
-    for record in qa_query.order_by(QARecord.created_at.desc()).limit(limit).all():
+    for record in qa_query.order_by(QARecord.created_at.desc()).limit(fetch_window).all():
         items.append(
             ActivityItem(
                 type="question_asked",
@@ -84,7 +98,7 @@ def get_activity(limit: int = 20, user_id: str | None = None, db: Session = Depe
             )
         )
 
-    for attempt in attempt_query.order_by(QuizAttempt.created_at.desc()).limit(limit).all():
+    for attempt in attempt_query.order_by(QuizAttempt.created_at.desc()).limit(fetch_window).all():
         doc_id = quiz_doc.get(attempt.quiz_id)
         detail = "Quiz submitted (style mimic)" if doc_id is None else "Quiz submitted"
         items.append(
@@ -100,4 +114,11 @@ def get_activity(limit: int = 20, user_id: str | None = None, db: Session = Depe
         )
 
     items.sort(key=lambda item: item.timestamp or datetime.min, reverse=True)
-    return ActivityResponse(items=items[:limit])
+    paged_items = items[offset: offset + limit]
+    return ActivityResponse(
+        items=paged_items,
+        total=total,
+        offset=offset,
+        limit=limit,
+        has_more=(offset + len(paged_items)) < total,
+    )

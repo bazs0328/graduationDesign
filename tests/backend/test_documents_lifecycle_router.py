@@ -450,6 +450,111 @@ def test_list_docs_supports_filter_search_and_sort(client, db_session):
     assert names == sorted(names)
 
 
+def test_list_docs_page_returns_metadata_and_items(client, db_session):
+    user_id = "doc_page_user_1"
+    kb_id = "doc_page_kb_1"
+    _seed_user_kbs_doc(db_session, user_id=user_id, kb_id=kb_id, doc_id="doc_page_a")
+    db_session.add(
+        Document(
+            id="doc_page_b",
+            user_id=user_id,
+            kb_id=kb_id,
+            filename="origin-b.txt",
+            file_type="txt",
+            text_path=os.path.join("tmp", "doc_page_b.txt"),
+            num_chunks=1,
+            num_pages=1,
+            char_count=100,
+            file_hash="hash-doc-page-b",
+            status="ready",
+        )
+    )
+    db_session.add(
+        Document(
+            id="doc_page_c",
+            user_id=user_id,
+            kb_id=kb_id,
+            filename="origin-c.txt",
+            file_type="txt",
+            text_path=os.path.join("tmp", "doc_page_c.txt"),
+            num_chunks=1,
+            num_pages=1,
+            char_count=100,
+            file_hash="hash-doc-page-c",
+            status="ready",
+        )
+    )
+    db_session.commit()
+
+    docs = db_session.query(Document).filter(Document.user_id == user_id).all()
+    name_map = {
+        "doc_page_a": ("alpha.pdf", datetime.utcnow() - timedelta(days=3)),
+        "doc_page_b": ("beta.pdf", datetime.utcnow() - timedelta(days=2)),
+        "doc_page_c": ("gamma.pdf", datetime.utcnow() - timedelta(days=1)),
+    }
+    for doc in docs:
+        filename, created_at = name_map[doc.id]
+        doc.filename = filename
+        doc.file_type = "pdf"
+        doc.created_at = created_at
+        db_session.add(doc)
+    db_session.commit()
+
+    resp = client.get(
+        "/api/docs/page",
+        params={
+            "user_id": user_id,
+            "kb_id": kb_id,
+            "sort_by": "filename",
+            "sort_order": "asc",
+            "offset": 1,
+            "limit": 1,
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["total"] == 3
+    assert payload["offset"] == 1
+    assert payload["limit"] == 1
+    assert payload["has_more"] is True
+    assert [item["filename"] for item in payload["items"]] == ["beta.pdf"]
+
+    last_page = client.get(
+        "/api/docs/page",
+        params={
+            "user_id": user_id,
+            "kb_id": kb_id,
+            "sort_by": "filename",
+            "sort_order": "asc",
+            "offset": 2,
+            "limit": 1,
+        },
+    )
+    assert last_page.status_code == 200
+    last_payload = last_page.json()
+    assert last_payload["has_more"] is False
+    assert [item["filename"] for item in last_payload["items"]] == ["gamma.pdf"]
+
+
+def test_get_doc_returns_single_doc_and_enforces_user_scope(client, db_session):
+    user_id = "doc_get_user_1"
+    kb_id = "doc_get_kb_1"
+    doc_id = "doc_get_1"
+    _seed_user_kbs_doc(db_session, user_id=user_id, kb_id=kb_id, doc_id=doc_id)
+
+    resp = client.get(f"/api/docs/{doc_id}", params={"user_id": user_id})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["id"] == doc_id
+    assert payload["user_id"] == user_id
+
+    wrong_user_resp = client.get(f"/api/docs/{doc_id}", params={"user_id": "doc_get_user_other"})
+    assert wrong_user_resp.status_code == 404
+
+    missing_resp = client.get("/api/docs/not-found", params={"user_id": user_id})
+    assert missing_resp.status_code == 404
+
+
 def test_preview_doc_source_returns_traceable_snippet(client, db_session):
     user_id = "doc_preview_user_1"
     kb_id = "doc_preview_kb_1"

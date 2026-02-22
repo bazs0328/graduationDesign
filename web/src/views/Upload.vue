@@ -154,7 +154,7 @@
             <h2 class="text-xl font-bold">我的文档</h2>
           </div>
           <span class="text-xs font-bold bg-secondary px-2 py-1 rounded text-secondary-foreground">
-            {{ busy.init ? '加载中…' : `共 ${docs.length} 个` }}
+            {{ busy.init ? '加载中…' : `共 ${docsTotal} 个` }}
           </span>
         </div>
 
@@ -284,6 +284,33 @@
             </div>
           </div>
         </div>
+        <div
+          v-if="!busy.init && docsTotal > 0"
+          class="mt-4 pt-4 border-t border-border/70 flex items-center justify-between gap-3 text-xs"
+        >
+          <span class="text-muted-foreground">
+            显示 {{ docsPageStart }}-{{ docsPageEnd }} / {{ docsTotal }}
+          </span>
+          <div class="flex items-center gap-2">
+            <button
+              class="px-3 py-1.5 rounded border border-border hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              :disabled="busy.refresh || docsOffset <= 0"
+              @click="goToPrevDocsPage"
+            >
+              上一页
+            </button>
+            <span class="text-muted-foreground">
+              第 {{ docsPageNumber }} / {{ docsTotalPages }} 页
+            </span>
+            <button
+              class="px-3 py-1.5 rounded border border-border hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              :disabled="busy.refresh || !docsHasMore"
+              @click="goToNextDocsPage"
+            >
+              下一页
+            </button>
+          </div>
+        </div>
       </section>
     </div>
 
@@ -373,6 +400,10 @@ const UPLOAD_MAX_FILE_BYTES = 50 * 1024 * 1024
 
 const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
 const docs = ref([])
+const docsTotal = ref(0)
+const docsOffset = ref(0)
+const docsLimit = ref(20)
+const docsHasMore = ref(false)
 const kbs = computed(() => appContext.kbs)
 const selectedKbId = computed({
   get: () => appContext.selectedKbId,
@@ -480,6 +511,19 @@ const uploadProgressDetail = computed(() => {
 const uploadProgressWidth = computed(() => {
   if (uploadProgress.value.phase === 'processing') return '100%'
   return `${Math.max(0, Math.min(100, uploadProgress.value.percent || 0))}%`
+})
+const docsTotalPages = computed(() => {
+  if (docsTotal.value <= 0) return 1
+  return Math.max(1, Math.ceil(docsTotal.value / docsLimit.value))
+})
+const docsPageNumber = computed(() => Math.floor(docsOffset.value / docsLimit.value) + 1)
+const docsPageStart = computed(() => {
+  if (docsTotal.value <= 0 || docs.value.length === 0) return 0
+  return docsOffset.value + 1
+})
+const docsPageEnd = computed(() => {
+  if (docsTotal.value <= 0 || docs.value.length === 0) return 0
+  return Math.min(docsOffset.value + docs.value.length, docsTotal.value)
 })
 
 function normalizeUploadFileSelection(file) {
@@ -638,7 +682,12 @@ async function refreshTaskCenter() {
   }
 }
 
-function buildDocsQueryParams() {
+function buildDocsQueryParams(options = {}) {
+  const {
+    includePaging = false,
+    offset = docsOffset.value,
+    limit = docsLimit.value,
+  } = options
   const params = new URLSearchParams()
   params.set('user_id', resolvedUserId.value)
   if (selectedKbId.value) params.set('kb_id', selectedKbId.value)
@@ -649,19 +698,58 @@ function buildDocsQueryParams() {
   if (docFilters.value.status) params.set('status', docFilters.value.status)
   if (docFilters.value.sortBy) params.set('sort_by', docFilters.value.sortBy)
   if (docFilters.value.sortOrder) params.set('sort_order', docFilters.value.sortOrder)
-  return params.toString()
+  if (includePaging) {
+    params.set('offset', String(Math.max(0, Number(offset) || 0)))
+    params.set('limit', String(Math.max(1, Math.min(100, Number(limit) || docsLimit.value || 20))))
+  }
+  return params
 }
 
 function toggleSortOrder() {
   docFilters.value.sortOrder = docFilters.value.sortOrder === 'desc' ? 'asc' : 'desc'
 }
 
-async function refreshDocs() {
+async function goToPrevDocsPage() {
+  if (docsOffset.value <= 0 || busy.value.refresh) return
+  const nextOffset = Math.max(0, docsOffset.value - docsLimit.value)
+  await refreshDocs({ offset: nextOffset })
+}
+
+async function goToNextDocsPage() {
+  if (!docsHasMore.value || busy.value.refresh) return
+  const nextOffset = docsOffset.value + docsLimit.value
+  await refreshDocs({ offset: nextOffset })
+}
+
+async function refreshDocs(options = {}) {
+  const { resetPage = false, offset = null } = options
+  if (resetPage) {
+    docsOffset.value = 0
+  } else if (Number.isFinite(Number(offset))) {
+    docsOffset.value = Math.max(0, Number(offset))
+  }
   busy.value.refresh = true
   try {
-    const query = buildDocsQueryParams()
-    const result = await apiGet(`/api/docs?${query}`)
-    docs.value = result
+    while (true) {
+      const query = buildDocsQueryParams({ includePaging: true }).toString()
+      const result = await apiGet(`/api/docs/page?${query}`)
+      const items = Array.isArray(result?.items) ? result.items : []
+      const total = Math.max(0, Number(result?.total) || 0)
+      docs.value = items
+      docsTotal.value = total
+      docsOffset.value = Math.max(0, Number(result?.offset) || 0)
+      docsLimit.value = Math.max(1, Number(result?.limit) || docsLimit.value || 20)
+      docsHasMore.value = Boolean(result?.has_more)
+
+      if (total > 0 && items.length === 0 && docsOffset.value > 0) {
+        const lastPageOffset = Math.max(0, (Math.ceil(total / docsLimit.value) - 1) * docsLimit.value)
+        if (lastPageOffset !== docsOffset.value) {
+          docsOffset.value = lastPageOffset
+          continue
+        }
+      }
+      break
+    }
     await refreshTaskCenter()
 
     // 刷新后检查是否有处理中的文档需要轮询
@@ -712,7 +800,7 @@ async function uploadDoc() {
     })
     showToast('文档上传成功，正在处理中...', 'success')
     clearSelectedUploadFile()
-    await refreshDocs()
+    await refreshDocs({ resetPage: true })
 
     // 如果文档状态是 processing，开始轮询
     if (uploadedDoc.status === 'processing') {
@@ -747,21 +835,12 @@ function startPolling(docId) {
 
 async function checkDocStatus(docId) {
   try {
-    const query = buildDocsQueryParams()
-    const result = await apiGet(`/api/docs?${query}`)
-
-    // 更新文档列表
-    docs.value = result
-
-    // 查找当前文档
-    const doc = result.find(d => d.id === docId)
-    if (!doc) {
-      // 文档不存在，停止轮询
-      if (uploadProgress.value.docId === docId) {
-        clearUploadProgress(800)
-      }
-      stopPolling(docId)
-      return
+    const doc = await apiGet(`/api/docs/${encodeURIComponent(docId)}?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    const docIndex = docs.value.findIndex((item) => item.id === docId)
+    if (docIndex >= 0) {
+      const nextDocs = docs.value.slice()
+      nextDocs.splice(docIndex, 1, doc)
+      docs.value = nextDocs
     }
 
     // 如果状态不再是 processing，停止轮询
@@ -771,6 +850,7 @@ async function checkDocStatus(docId) {
       }
       stopPolling(docId)
       await refreshTaskCenter()
+      await refreshDocs()
       if (doc.status === 'ready') {
         showToast('文档处理完成', 'success')
       } else if (doc.status === 'error') {
@@ -779,6 +859,9 @@ async function checkDocStatus(docId) {
     }
   } catch (error) {
     console.error('检查文档状态失败:', error)
+    if (uploadProgress.value.docId === docId) {
+      clearUploadProgress(800)
+    }
     // 出错时也停止轮询，避免无限重试
     stopPolling(docId)
   }
@@ -853,7 +936,7 @@ async function renameCurrentKb() {
 
 async function deleteCurrentKb() {
   if (!selectedKbId.value) return
-  const docCount = docs.value.length
+  const docCount = docsTotal.value
   let cascade = false
   if (docCount > 0) {
     cascade = window.confirm(`当前知识库包含 ${docCount} 个文档，是否级联删除该知识库及其全部文档？`)
@@ -867,7 +950,7 @@ async function deleteCurrentKb() {
     await apiDelete(`/api/kb/${selectedKbId.value}?user_id=${encodeURIComponent(resolvedUserId.value)}&cascade=${cascade}`)
     showToast('知识库已删除', 'success')
     await refreshKbs(true)
-    await refreshDocs()
+    await refreshDocs({ resetPage: true })
   } catch {
     // error toast handled globally
   } finally {
@@ -1042,7 +1125,7 @@ watch(selectedKbId, async () => {
     docsFilterDebounce = null
   }
   kbRenameInput.value = selectedKb.value ? selectedKb.value.name : ''
-  await refreshDocs()
+  await refreshDocs({ resetPage: true })
 })
 
 watch(
@@ -1058,7 +1141,7 @@ watch(
       clearTimeout(docsFilterDebounce)
     }
     docsFilterDebounce = setTimeout(() => {
-      refreshDocs()
+      refreshDocs({ resetPage: true })
     }, 300)
   }
 )

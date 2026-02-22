@@ -400,6 +400,21 @@
             </div>
           </div>
         </div>
+        <div
+          v-if="!busy.init && activity.length > 0"
+          class="mt-4 pt-4 border-t border-border/70 flex items-center justify-between gap-3 text-xs"
+        >
+          <span class="text-muted-foreground">已显示 {{ activity.length }} / {{ activityTotal }}</span>
+          <button
+            v-if="activityHasMore"
+            class="px-3 py-1.5 rounded border border-border hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="busy.activityMore"
+            @click="loadMoreActivity"
+          >
+            {{ busy.activityMore ? '加载中…' : '加载更多' }}
+          </button>
+          <span v-else class="text-muted-foreground">已显示全部</span>
+        </div>
       </section>
     </div>
   </div>
@@ -462,6 +477,9 @@ const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
 const progress = ref(null)
 const profile = ref(null)
 const activity = ref([])
+const activityTotal = ref(0)
+const activityLimit = ref(30)
+const activityHasMore = ref(false)
 const recommendations = ref([])
 const nextRecommendation = ref(null)
 const recommendationsUpdatedAt = ref('')
@@ -481,6 +499,7 @@ const busy = ref({
   recommendations: false,
   pathLoad: false,
   pathBuild: false,
+  activityMore: false,
 })
 
 const topStats = computed(() => {
@@ -659,13 +678,46 @@ async function fetchProfile() {
   }
 }
 
-async function fetchActivity() {
-  try {
-    const res = await apiGet(`/api/activity?user_id=${encodeURIComponent(resolvedUserId.value)}`)
-    activity.value = res.items || []
-  } catch {
-    // error toast handled globally
+async function fetchActivity(options = {}) {
+  const {
+    reset = true,
+    append = false,
+    offset = null,
+  } = options
+  const targetOffset = reset
+    ? 0
+    : Math.max(0, Number.isFinite(Number(offset)) ? Number(offset) : activity.value.length)
+  if (append) {
+    busy.value.activityMore = true
   }
+  try {
+    const params = new URLSearchParams()
+    params.set('user_id', resolvedUserId.value)
+    params.set('limit', String(activityLimit.value))
+    params.set('offset', String(targetOffset))
+    const res = await apiGet(`/api/activity?${params.toString()}`)
+    const items = Array.isArray(res?.items) ? res.items : []
+    activity.value = append ? [...activity.value, ...items] : items
+    activityTotal.value = Math.max(0, Number(res?.total) || 0)
+    activityLimit.value = Math.max(1, Number(res?.limit) || activityLimit.value || 30)
+    activityHasMore.value = Boolean(res?.has_more)
+  } catch {
+    if (!append) {
+      activity.value = []
+      activityTotal.value = 0
+      activityHasMore.value = false
+    }
+    // error toast handled globally
+  } finally {
+    if (append) {
+      busy.value.activityMore = false
+    }
+  }
+}
+
+async function loadMoreActivity() {
+  if (busy.value.activityMore || !activityHasMore.value) return
+  await fetchActivity({ reset: false, append: true, offset: activity.value.length })
 }
 
 async function fetchRecommendations() {

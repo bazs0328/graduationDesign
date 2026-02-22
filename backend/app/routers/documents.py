@@ -39,6 +39,7 @@ from app.models import (
     SummaryRecord,
 )
 from app.schemas import (
+    DocumentPageResponse,
     DocumentOut,
     DocumentRetryRequest,
     DocumentRetryResponse,
@@ -53,20 +54,16 @@ from app.utils.document_validator import DocumentValidator
 router = APIRouter()
 
 
-@router.get("/docs", response_model=list[DocumentOut])
-def list_docs(
-    user_id: str | None = None,
+def _build_docs_list_query(
+    db: Session,
+    *,
+    user_id: str,
     kb_id: str | None = None,
     status: str | None = None,
     file_type: str | None = None,
     keyword: str | None = None,
-    sort_by: str = "created_at",
-    sort_order: str = "desc",
-    db: Session = Depends(get_db),
 ):
-    resolved_user_id = ensure_user(db, user_id)
-    query = db.query(Document)
-    query = query.filter(Document.user_id == resolved_user_id)
+    query = db.query(Document).filter(Document.user_id == user_id)
     if kb_id:
         query = query.filter(Document.kb_id == kb_id)
     if status:
@@ -82,7 +79,10 @@ def list_docs(
         normalized_keyword = keyword.strip()
         if normalized_keyword:
             query = query.filter(Document.filename.ilike(f"%{normalized_keyword}%"))
+    return query
 
+
+def _apply_docs_sort(query, sort_by: str = "created_at", sort_order: str = "desc"):
     sort_columns = {
         "created_at": Document.created_at,
         "filename": Document.filename,
@@ -91,10 +91,83 @@ def list_docs(
         "num_pages": Document.num_pages,
         "num_chunks": Document.num_chunks,
     }
-    column = sort_columns.get(sort_by, Document.created_at)
+    resolved_sort_by = (sort_by or "created_at").strip()
+    column = sort_columns.get(resolved_sort_by, Document.created_at)
     order_desc = (sort_order or "desc").strip().lower() != "asc"
     order_clause = desc(column) if order_desc else asc(column)
-    return query.order_by(order_clause, Document.created_at.desc()).all()
+    order_clauses = [order_clause]
+    if resolved_sort_by != "created_at":
+        order_clauses.append(Document.created_at.desc())
+    order_clauses.append(Document.id.desc())
+    return query.order_by(*order_clauses)
+
+
+def _normalize_page_args(offset: int = 0, limit: int = 20) -> tuple[int, int]:
+    normalized_offset = max(0, int(offset or 0))
+    normalized_limit = max(1, min(int(limit or 20), 100))
+    return normalized_offset, normalized_limit
+
+
+@router.get("/docs", response_model=list[DocumentOut])
+def list_docs(
+    user_id: str | None = None,
+    kb_id: str | None = None,
+    status: str | None = None,
+    file_type: str | None = None,
+    keyword: str | None = None,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
+    db: Session = Depends(get_db),
+):
+    resolved_user_id = ensure_user(db, user_id)
+    query = _build_docs_list_query(
+        db,
+        user_id=resolved_user_id,
+        kb_id=kb_id,
+        status=status,
+        file_type=file_type,
+        keyword=keyword,
+    )
+    return _apply_docs_sort(query, sort_by=sort_by, sort_order=sort_order).all()
+
+
+@router.get("/docs/page", response_model=DocumentPageResponse)
+def list_docs_page(
+    user_id: str | None = None,
+    kb_id: str | None = None,
+    status: str | None = None,
+    file_type: str | None = None,
+    keyword: str | None = None,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
+    offset: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+):
+    resolved_user_id = ensure_user(db, user_id)
+    offset, limit = _normalize_page_args(offset=offset, limit=limit)
+    query = _build_docs_list_query(
+        db,
+        user_id=resolved_user_id,
+        kb_id=kb_id,
+        status=status,
+        file_type=file_type,
+        keyword=keyword,
+    )
+    total = query.count()
+    items = (
+        _apply_docs_sort(query, sort_by=sort_by, sort_order=sort_order)
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return DocumentPageResponse(
+        items=items,
+        total=total,
+        offset=offset,
+        limit=limit,
+        has_more=(offset + len(items)) < total,
+    )
 
 
 def _get_doc_or_404(db: Session, user_id: str, doc_id: str) -> Document:
@@ -516,6 +589,12 @@ def get_doc_tasks(
         processing_count=len(processing),
         error_count=len(error),
     )
+
+
+@router.get("/docs/{doc_id}", response_model=DocumentOut)
+def get_doc(doc_id: str, user_id: str | None = None, db: Session = Depends(get_db)):
+    resolved_user_id = ensure_user(db, user_id)
+    return _get_doc_or_404(db, resolved_user_id, doc_id)
 
 
 @router.post("/docs/retry-failed", response_model=DocumentRetryResponse)

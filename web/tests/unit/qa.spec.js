@@ -86,6 +86,23 @@ beforeEach(() => {
   apiGet.mockImplementation((path) => {
     if (path.startsWith('/api/kb')) return Promise.resolve([kbFixture])
     if (path.startsWith('/api/docs')) return Promise.resolve([docFixture])
+    if (path.startsWith('/api/chat/sessions/page')) {
+      return Promise.resolve({
+        items: [
+          {
+            id: 'session-qa-1',
+            title: 'What is a matrix?',
+            kb_id: 'kb-1',
+            doc_id: null,
+            created_at: new Date().toISOString(),
+          }
+        ],
+        total: 1,
+        offset: 0,
+        limit: 20,
+        has_more: false,
+      })
+    }
     if (path.startsWith('/api/chat/sessions/session-qa-1/messages')) {
       return Promise.resolve([
         { role: 'user', content: 'What is a matrix?' },
@@ -111,7 +128,7 @@ beforeEach(() => {
         last_activity: null
       })
     }
-    if (path.startsWith('/api/activity')) return Promise.resolve({ items: [] })
+    if (path.startsWith('/api/activity')) return Promise.resolve({ items: [], total: 0, offset: 0, limit: 30, has_more: false })
     if (path.startsWith('/api/recommendations')) return Promise.resolve({ items: [] })
     return Promise.resolve({})
   })

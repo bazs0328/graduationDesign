@@ -284,10 +284,32 @@
               class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
             >
               <option value="">未选择（将自动新建）</option>
-              <option v-for="session in sessions" :key="session.id" :value="session.id">
+              <option v-for="session in sessionSelectOptions" :key="session.id" :value="session.id">
                 {{ sessionLabel(session) }}
               </option>
             </select>
+            <div
+              v-if="sessionsTotal > 0"
+              class="flex items-center justify-between gap-2 text-[10px] text-muted-foreground"
+            >
+              <span>第 {{ sessionsPageNumber }} / {{ sessionsTotalPages }} 页（共 {{ sessionsTotal }} 条）</span>
+              <div class="flex items-center gap-1">
+                <button
+                  class="px-2 py-1 rounded border border-border hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="busy.sessions || sessionsOffset <= 0"
+                  @click="goToPrevSessionsPage"
+                >
+                  上一页
+                </button>
+                <button
+                  class="px-2 py-1 rounded border border-border hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="busy.sessions || !sessionsHasMore"
+                  @click="goToNextSessionsPage"
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
           </div>
           <div v-if="selectedSessionId" class="space-y-2">
             <input
@@ -513,6 +535,11 @@ const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
 const kbs = computed(() => appContext.kbs)
 const docsInKb = ref([])
 const sessions = ref([])
+const sessionCacheMap = ref({})
+const sessionsTotal = ref(0)
+const sessionsOffset = ref(0)
+const sessionsLimit = ref(20)
+const sessionsHasMore = ref(false)
 const selectedKbId = computed({
   get: () => appContext.selectedKbId,
   set: (value) => appContext.setSelectedKbId(value),
@@ -595,11 +622,42 @@ const selectedDoc = computed(() => {
   return docsInKb.value.find(d => d.id === selectedDocId.value) || null
 })
 const selectedSession = computed(() => {
-  return sessions.value.find((session) => session.id === selectedSessionId.value) || null
+  if (!selectedSessionId.value) return null
+  return sessionCacheMap.value[selectedSessionId.value] || sessions.value.find((session) => session.id === selectedSessionId.value) || null
+})
+const cachedSessions = computed(() =>
+  Object.values(sessionCacheMap.value)
+    .filter(Boolean)
+    .sort((a, b) => {
+      const aTime = new Date(a.created_at || 0).getTime()
+      const bTime = new Date(b.created_at || 0).getTime()
+      if (bTime !== aTime) return bTime - aTime
+      return String(b.id || '').localeCompare(String(a.id || ''))
+    })
+)
+const sessionSelectOptions = computed(() => {
+  const items = []
+  const seen = new Set()
+  const selected = selectedSession.value
+  if (selected && selected.id && !sessions.value.some((item) => item.id === selected.id)) {
+    items.push(selected)
+    seen.add(selected.id)
+  }
+  for (const session of sessions.value) {
+    if (!session?.id || seen.has(session.id)) continue
+    items.push(session)
+    seen.add(session.id)
+  }
+  return items
 })
 const selectedKbSessions = computed(() =>
-  sessions.value.filter((session) => session.kb_id === selectedKbId.value)
+  cachedSessions.value.filter((session) => session.kb_id === selectedKbId.value)
 )
+const sessionsTotalPages = computed(() => {
+  if (sessionsTotal.value <= 0) return 1
+  return Math.max(1, Math.ceil(sessionsTotal.value / sessionsLimit.value))
+})
+const sessionsPageNumber = computed(() => Math.floor(sessionsOffset.value / sessionsLimit.value) + 1)
 const docsReadyCount = computed(() =>
   docsInKb.value.filter((doc) => doc.status === 'ready').length
 )
@@ -923,18 +981,72 @@ async function refreshDocsInKb() {
   }
 }
 
-async function refreshSessions() {
+function mergeSessionCache(items) {
+  if (!Array.isArray(items) || items.length === 0) return
+  const next = { ...sessionCacheMap.value }
+  for (const session of items) {
+    if (!session?.id) continue
+    next[session.id] = session
+  }
+  sessionCacheMap.value = next
+}
+
+function removeSessionFromCache(sessionId) {
+  if (!sessionId || !sessionCacheMap.value[sessionId]) return
+  const next = { ...sessionCacheMap.value }
+  delete next[sessionId]
+  sessionCacheMap.value = next
+}
+
+async function goToPrevSessionsPage() {
+  if (busy.value.sessions || sessionsOffset.value <= 0) return
+  const nextOffset = Math.max(0, sessionsOffset.value - sessionsLimit.value)
+  await refreshSessions({ offset: nextOffset })
+}
+
+async function goToNextSessionsPage() {
+  if (busy.value.sessions || !sessionsHasMore.value) return
+  const nextOffset = sessionsOffset.value + sessionsLimit.value
+  await refreshSessions({ offset: nextOffset })
+}
+
+async function refreshSessions(options = {}) {
+  const { resetPage = false, offset = null } = options
+  if (resetPage) {
+    sessionsOffset.value = 0
+  } else if (Number.isFinite(Number(offset))) {
+    sessionsOffset.value = Math.max(0, Number(offset))
+  }
   busy.value.sessions = true
   try {
-    const result = await apiGet(`/api/chat/sessions?user_id=${encodeURIComponent(resolvedUserId.value)}`)
-    sessions.value = Array.isArray(result) ? result : []
-    if (selectedSessionId.value && !sessions.value.some((session) => session.id === selectedSessionId.value)) {
-      selectedSessionId.value = ''
-      sessionTitleInput.value = ''
+    while (true) {
+      const params = new URLSearchParams()
+      params.set('user_id', resolvedUserId.value)
+      params.set('offset', String(sessionsOffset.value))
+      params.set('limit', String(sessionsLimit.value))
+      const result = await apiGet(`/api/chat/sessions/page?${params.toString()}`)
+      const items = Array.isArray(result?.items) ? result.items : []
+      const total = Math.max(0, Number(result?.total) || 0)
+      sessions.value = items
+      sessionsTotal.value = total
+      sessionsOffset.value = Math.max(0, Number(result?.offset) || 0)
+      sessionsLimit.value = Math.max(1, Number(result?.limit) || sessionsLimit.value || 20)
+      sessionsHasMore.value = Boolean(result?.has_more)
+      mergeSessionCache(items)
+
+      if (total > 0 && items.length === 0 && sessionsOffset.value > 0) {
+        const lastPageOffset = Math.max(0, (Math.ceil(total / sessionsLimit.value) - 1) * sessionsLimit.value)
+        if (lastPageOffset !== sessionsOffset.value) {
+          sessionsOffset.value = lastPageOffset
+          continue
+        }
+      }
+      break
     }
   } catch {
     // error toast handled globally
     sessions.value = []
+    sessionsHasMore.value = false
   } finally {
     busy.value.sessions = false
   }
@@ -999,7 +1111,8 @@ async function createSession(options = {}) {
     }
     const session = await apiPost('/api/chat/sessions', payload)
     const sessionId = session?.id || null
-    await refreshSessions()
+    mergeSessionCache(session ? [session] : [])
+    await refreshSessions({ resetPage: true })
     if (activate && sessionId) {
       selectedSessionId.value = sessionId
       sessionTitleInput.value = session.title || ''
@@ -1021,10 +1134,11 @@ async function renameCurrentSession() {
   if (!selectedSessionId.value) return
   busy.value.sessionAction = true
   try {
-    await apiPatch(`/api/chat/sessions/${selectedSessionId.value}`, {
+    const updated = await apiPatch(`/api/chat/sessions/${selectedSessionId.value}`, {
       user_id: resolvedUserId.value,
       name: sessionTitleInput.value
     })
+    mergeSessionCache(updated ? [updated] : [])
     await refreshSessions()
     showToast('会话已重命名', 'success')
   } catch {
@@ -1059,6 +1173,7 @@ async function deleteCurrentSession() {
   try {
     const deletingSessionId = selectedSessionId.value
     await apiDelete(`/api/chat/sessions/${deletingSessionId}?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    removeSessionFromCache(deletingSessionId)
     selectedSessionId.value = ''
     sessionTitleInput.value = ''
     qaMessages.value = []
@@ -1341,7 +1456,7 @@ async function askQuestion() {
     })
 
     if (streamDone) {
-      await refreshSessions()
+      await refreshSessions({ resetPage: true })
       if (!selectedSessionId.value && activeSessionId) {
         preserveQaFlowOnNextSessionLoad.value = true
         selectedSessionId.value = activeSessionId
@@ -1377,7 +1492,7 @@ async function askQuestion() {
           result: res?.answer ? 'ok' : qaFlow.value.result,
           errorCode: null,
         })
-        await refreshSessions()
+        await refreshSessions({ resetPage: true })
         if (!selectedSessionId.value && (res?.session_id || activeSessionId)) {
           preserveQaFlowOnNextSessionLoad.value = true
           selectedSessionId.value = res?.session_id || activeSessionId
@@ -1490,7 +1605,7 @@ watch(selectedSessionId, async (sessionId) => {
     resetQaFlow()
     return
   }
-  const session = sessions.value.find((item) => item.id === sessionId)
+  const session = sessionCacheMap.value[sessionId] || sessions.value.find((item) => item.id === sessionId)
   if (!session) {
     preserveQaFlowOnNextSessionLoad.value = false
     return
