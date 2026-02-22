@@ -13,6 +13,16 @@ logger = logging.getLogger(__name__)
 
 NO_RESULTS_ANSWER = "无法找到与该问题相关的内容。"
 
+QA_MODE_NORMAL = "normal"
+QA_MODE_EXPLAIN = "explain"
+QA_EXPLAIN_SECTION_TITLES = [
+    "题意理解",
+    "相关知识点",
+    "分步解答",
+    "易错点",
+    "自测问题",
+]
+
 _QA_HUMAN_TEMPLATE = (
     "Conversation history:\n{history}\n\nQuestion: {question}\n\nContext:\n{context}\n\nAnswer:"
 )
@@ -41,6 +51,13 @@ ADAPTIVE_SYSTEM_PROMPTS = {
         "- 鼓励批判性思考，并提出开放式问题。"
     ),
 }
+
+
+def normalize_qa_mode(mode: str | None) -> str:
+    normalized = (mode or QA_MODE_NORMAL).strip().lower()
+    if normalized == QA_MODE_EXPLAIN:
+        return QA_MODE_EXPLAIN
+    return QA_MODE_NORMAL
 
 
 def build_adaptive_system_prompt(
@@ -80,6 +97,26 @@ def build_adaptive_system_prompt(
     return "\n".join(prompt_parts)
 
 
+def build_explain_system_prompt(
+    ability_level: str = "intermediate",
+    weak_concepts: list[str] | None = None,
+    focus_keypoint: str | None = None,
+) -> str:
+    base_prompt = build_adaptive_system_prompt(
+        ability_level=ability_level,
+        weak_concepts=weak_concepts,
+        focus_keypoint=focus_keypoint,
+    )
+    titles = " / ".join(QA_EXPLAIN_SECTION_TITLES)
+    explain_rules = (
+        "你当前处于“讲解模式（Solve-Lite）”。请严格按照以下 5 个二级标题输出，"
+        f"并保持顺序不变：{titles}。\n"
+        "格式要求：每段使用 `## 标题` 开头；若上下文不足，也必须保留标题并说明缺失信息。"
+        "回答中继续使用 [1]、[2] 形式引用来源。"
+    )
+    return f"{base_prompt}\n{explain_rules}"
+
+
 def build_qa_prompt(system_prompt: str) -> ChatPromptTemplate:
     return ChatPromptTemplate.from_messages(
         [
@@ -100,6 +137,7 @@ def answer_question(
     ability_level: str = "intermediate",
     weak_concepts: list[str] | None = None,
     focus_keypoint: str | None = None,
+    mode: str | None = None,
 ) -> Tuple[str, List[dict]]:
     prepared = prepare_qa_answer(
         user_id=user_id,
@@ -112,6 +150,7 @@ def answer_question(
         ability_level=ability_level,
         weak_concepts=weak_concepts,
         focus_keypoint=focus_keypoint,
+        mode=mode,
     )
     if prepared["no_results"]:
         return NO_RESULTS_ANSWER, []
@@ -131,7 +170,9 @@ def prepare_qa_answer(
     ability_level: str = "intermediate",
     weak_concepts: list[str] | None = None,
     focus_keypoint: str | None = None,
+    mode: str | None = None,
 ) -> dict:
+    resolved_mode = normalize_qa_mode(mode)
     docs = retrieve_documents(
         user_id=user_id,
         question=question,
@@ -146,14 +187,22 @@ def prepare_qa_answer(
             "formatted_messages": None,
             "retrieved_count": 0,
             "no_results": True,
+            "mode": resolved_mode,
         }
 
     sources, context = build_sources_and_context(docs)
-    system_prompt = build_adaptive_system_prompt(
-        ability_level=ability_level,
-        weak_concepts=weak_concepts,
-        focus_keypoint=focus_keypoint,
-    )
+    if resolved_mode == QA_MODE_EXPLAIN:
+        system_prompt = build_explain_system_prompt(
+            ability_level=ability_level,
+            weak_concepts=weak_concepts,
+            focus_keypoint=focus_keypoint,
+        )
+    else:
+        system_prompt = build_adaptive_system_prompt(
+            ability_level=ability_level,
+            weak_concepts=weak_concepts,
+            focus_keypoint=focus_keypoint,
+        )
     qa_prompt = build_qa_prompt(system_prompt)
     msg = qa_prompt.format_messages(
         question=question, context=context, history=history or "None"
@@ -163,6 +212,7 @@ def prepare_qa_answer(
         "formatted_messages": msg,
         "retrieved_count": len(sources),
         "no_results": False,
+        "mode": resolved_mode,
     }
 
 

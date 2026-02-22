@@ -21,6 +21,7 @@ from app.services.mastery import record_study_interaction
 from app.services.qa import (
     NO_RESULTS_ANSWER,
     generate_qa_answer,
+    normalize_qa_mode,
     prepare_qa_answer,
     stream_qa_answer,
 )
@@ -239,6 +240,7 @@ def _qa_stream_response(payload: QARequest, db: Session) -> StreamingResponse:
                 ability_level=ctx.profile.ability_level,
                 weak_concepts=ctx.weak_concepts,
                 focus_keypoint=payload.focus,
+                mode=payload.mode,
             )
             retrieve_ms = int((time.perf_counter() - retrieve_started) * 1000)
             retrieved_count = int(prepared.get("retrieved_count") or 0)
@@ -253,12 +255,14 @@ def _qa_stream_response(payload: QARequest, db: Session) -> StreamingResponse:
 
             if prepared.get("no_results"):
                 no_results_answer = NO_RESULTS_ANSWER
+                resolved_mode = prepared.get("mode") or normalize_qa_mode(payload.mode)
                 current_stage = "saving"
                 _persist_qa_result(db, payload, ctx, no_results_answer, [])
                 total_ms = int((time.perf_counter() - total_started) * 1000)
                 done_payload = {
                     "session_id": ctx.session.id if ctx.session else None,
                     "ability_level": getattr(ctx.profile, "ability_level", None),
+                    "mode": resolved_mode,
                     "result": "no_results",
                     "retrieved_count": 0,
                     "timings": {
@@ -324,6 +328,7 @@ def _qa_stream_response(payload: QARequest, db: Session) -> StreamingResponse:
             done_payload = {
                 "session_id": ctx.session.id if ctx.session else None,
                 "ability_level": getattr(ctx.profile, "ability_level", None),
+                "mode": prepared.get("mode") or normalize_qa_mode(payload.mode),
                 "result": "ok",
                 "retrieved_count": retrieved_count,
                 "timings": {
@@ -410,6 +415,7 @@ def ask_question(payload: QARequest, db: Session = Depends(get_db)):
         ability_level=ctx.profile.ability_level,
         weak_concepts=ctx.weak_concepts,
         focus_keypoint=payload.focus,
+        mode=payload.mode,
     )
     if prepared["no_results"]:
         answer = NO_RESULTS_ANSWER
@@ -426,6 +432,7 @@ def ask_question(payload: QARequest, db: Session = Depends(get_db)):
         sources=[SourceSnippet(**s) for s in sources],
         session_id=ctx.session.id if ctx.session else None,
         ability_level=ctx.profile.ability_level,
+        mode=prepared.get("mode") or normalize_qa_mode(payload.mode),
     )
 
 
@@ -445,6 +452,7 @@ def ask_question_stream_get(
     top_k: int | None = Query(default=None, ge=1, le=20),
     fetch_k: int | None = Query(default=None, ge=1, le=50),
     focus: str | None = None,
+    mode: str | None = None,
 ):
     payload = QARequest(
         question=question,
@@ -455,6 +463,7 @@ def ask_question_stream_get(
         top_k=top_k,
         fetch_k=fetch_k,
         focus=focus,
+        mode=mode,
     )
     return _qa_stream_response(payload, db)
 

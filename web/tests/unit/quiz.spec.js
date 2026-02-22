@@ -1,0 +1,179 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
+import { createRouter, createMemoryHistory } from 'vue-router'
+
+import App from '@/App.vue'
+import { routes } from '@/router'
+import { apiGet, apiPost, apiSsePost } from '@/api'
+
+vi.mock('@/api', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    apiGet: vi.fn(),
+    apiPost: vi.fn(),
+    apiSsePost: vi.fn(),
+  }
+})
+
+const kbFixture = { id: 'kb-1', name: 'Default' }
+
+function flushPromises() {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+async function mountAppWithRouter() {
+  localStorage.setItem('gradtutor_user_id', 'test')
+  localStorage.setItem('gradtutor_user', 'test')
+  localStorage.setItem('gradtutor_access_token', 'test-token')
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes,
+  })
+  await router.push('/')
+  await router.isReady()
+  const wrapper = mount(App, {
+    global: { plugins: [pinia, router] },
+  })
+  await flushPromises()
+  await nextTick()
+  return { wrapper, router }
+}
+
+beforeEach(() => {
+  apiGet.mockReset()
+  apiPost.mockReset()
+  apiSsePost.mockReset()
+  localStorage.clear()
+
+  apiGet.mockImplementation((path) => {
+    if (path.startsWith('/api/kb')) return Promise.resolve([kbFixture])
+    if (path.startsWith('/api/profile')) return Promise.resolve({ ability_level: 'intermediate' })
+    if (path.startsWith('/api/chat/sessions')) return Promise.resolve([])
+    if (path.startsWith('/api/docs')) return Promise.resolve([])
+    if (path.startsWith('/api/progress')) {
+      return Promise.resolve({
+        total_docs: 1,
+        total_quizzes: 0,
+        total_attempts: 0,
+        total_questions: 0,
+        total_summaries: 0,
+        total_keypoints: 0,
+        avg_score: 0,
+        last_activity: null,
+      })
+    }
+    if (path.startsWith('/api/activity')) return Promise.resolve({ items: [] })
+    if (path.startsWith('/api/recommendations')) return Promise.resolve({ items: [] })
+    return Promise.resolve({})
+  })
+
+  apiPost.mockImplementation((path) => {
+    if (path === '/api/quiz/generate') {
+      return Promise.resolve({
+        quiz_id: 'quiz-1',
+        questions: [
+          {
+            question: '矩阵的行列式为零意味着什么？',
+            options: ['可逆', '不可逆', '对称', '正定'],
+            answer_index: 1,
+            explanation: '行列式为零表示矩阵不可逆。',
+            concepts: ['矩阵可逆性'],
+          },
+        ],
+      })
+    }
+    if (path === '/api/quiz/submit') {
+      return Promise.resolve({
+        score: 0,
+        correct: 0,
+        total: 1,
+        results: [false],
+        explanations: ['因为行列式为零，所以矩阵不可逆。'],
+        feedback: null,
+        next_quiz_recommendation: null,
+        profile_delta: {
+          theta_delta: -0.1,
+          frustration_delta: 0.1,
+          recent_accuracy_delta: -0.2,
+          ability_level_changed: false,
+        },
+        wrong_questions_by_concept: [
+          { concept: '矩阵可逆性', question_indices: [1] },
+        ],
+        mastery_updates: [],
+      })
+    }
+    if (path === '/api/chat/sessions') {
+      return Promise.resolve({ id: 'session-1', title: null })
+    }
+    if (path === '/api/qa') {
+      return Promise.resolve({ answer: 'fallback', sources: [], mode: 'explain', ability_level: 'intermediate' })
+    }
+    return Promise.resolve({})
+  })
+
+  apiSsePost.mockResolvedValue(undefined)
+})
+
+describe('Quiz wrong-answer explain link', () => {
+  it('navigates to /qa with explain autosend query payload', async () => {
+    const pendingSse = new Promise(() => {})
+    apiSsePost.mockImplementation(() => pendingSse)
+
+    const { wrapper, router } = await mountAppWithRouter()
+    const pushSpy = vi.spyOn(router, 'push')
+
+    await router.push('/quiz')
+    await flushPromises()
+    await nextTick()
+    await nextTick()
+
+    const quizCard = wrapper.findAll('select').at(0)
+    expect(quizCard?.exists()).toBe(true)
+    await quizCard.setValue('kb-1')
+    await flushPromises()
+    await nextTick()
+
+    const generateButton = wrapper.findAll('button').find((btn) => btn.text().includes('生成新测验'))
+    expect(generateButton).toBeTruthy()
+    await generateButton.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const firstWrongRadio = wrapper.find('input[type="radio"][name="q-0"][value="0"]')
+    await firstWrongRadio.setValue(true)
+    await nextTick()
+
+    const submitButton = wrapper.findAll('button').find((btn) => btn.text().includes('提交全部答案'))
+    expect(submitButton).toBeTruthy()
+    await submitButton.trigger('click')
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+
+    const explainButton = wrapper.findAll('button').find((btn) => btn.text().includes('讲解此题'))
+    expect(explainButton).toBeTruthy()
+    await explainButton.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(pushSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: '/qa',
+        query: expect.objectContaining({
+          qa_mode: 'explain',
+          qa_autosend: '1',
+          qa_from: 'quiz_wrong',
+        }),
+      })
+    )
+    const pushArg = pushSpy.mock.calls.at(-1)?.[0]
+    expect(String(pushArg?.query?.qa_question || '')).toContain('请用讲解模式解析这道选择题')
+  })
+})

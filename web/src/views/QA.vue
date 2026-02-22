@@ -101,7 +101,42 @@
                   <span v-if="msg.errorCode" class="opacity-60">{{ msg.errorCode }}</span>
                 </div>
                 <div
-                  v-if="msg.content && msg.content.trim()"
+                  v-if="shouldRenderExplainCards(msg)"
+                  class="space-y-3"
+                >
+                  <div class="flex flex-wrap items-center gap-2 text-[10px]">
+                    <span class="px-1.5 py-0.5 rounded-full border border-primary/30 bg-primary/10 text-primary font-semibold">
+                      讲解模式
+                    </span>
+                    <span
+                      v-if="msg.explainIncomplete"
+                      class="px-1.5 py-0.5 rounded-full border border-amber-300 bg-amber-50 text-amber-700 font-semibold"
+                    >
+                      结构容错展示
+                    </span>
+                  </div>
+                  <section
+                    v-for="section in msg.explainSections"
+                    :key="section.key"
+                    class="rounded-xl border border-accent-foreground/10 bg-background/35 p-3"
+                  >
+                    <p class="text-[10px] font-bold uppercase tracking-widest opacity-60">
+                      {{ section.title }}
+                    </p>
+                    <div
+                      class="mt-2 qa-markdown markdown-content"
+                      v-html="renderMarkdown(section.content || '（该部分暂无可解析内容）')"
+                    ></div>
+                  </section>
+                  <p
+                    v-if="msg.streaming"
+                    class="mt-1 text-sm leading-relaxed"
+                  >
+                    <span class="qa-stream-cursor" aria-hidden="true"></span>
+                  </p>
+                </div>
+                <div
+                  v-else-if="msg.content && msg.content.trim()"
                   class="qa-markdown markdown-content"
                   v-html="renderMarkdown(msg.content)"
                 ></div>
@@ -143,6 +178,30 @@
 
         <!-- Input -->
         <div class="p-4 border-t border-border bg-card/50">
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              <Sparkles class="w-3.5 h-3.5 text-primary" />
+              回答模式
+            </div>
+            <div class="inline-flex rounded-lg border border-border bg-background p-1">
+              <button
+                class="px-3 py-1.5 rounded-md text-xs font-semibold transition-colors"
+                :class="qaMode === 'normal' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'"
+                :disabled="busy.qa"
+                @click="qaMode = 'normal'"
+              >
+                普通问答
+              </button>
+              <button
+                class="px-3 py-1.5 rounded-md text-xs font-semibold transition-colors"
+                :class="qaMode === 'explain' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'"
+                :disabled="busy.qa"
+                @click="qaMode = 'explain'"
+              >
+                讲解模式
+              </button>
+            </div>
+          </div>
           <div class="flex gap-2">
             <textarea
               v-model="qaInput"
@@ -429,6 +488,7 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import SourcePreviewModal from '../components/ui/SourcePreviewModal.vue'
+import { parseExplainMarkdownSections } from '../utils/qaExplain'
 import { renderMarkdown } from '../utils/markdown'
 import { parseRouteContext } from '../utils/routeContext'
 
@@ -455,9 +515,12 @@ const sessionTitleInput = ref('')
 const qaInput = ref('')
 const qaMessages = ref([])
 const qaAbilityLevel = ref('intermediate')
+const qaMode = ref('normal')
 const qaFlow = ref(createQaFlowState())
 const syncingFromSession = ref(false)
 const preserveQaFlowOnNextSessionLoad = ref(false)
+const lastAutoQaRouteKey = ref('')
+const autoQaMissingContextToastKey = ref('')
 const sourcePreview = ref({
   open: false,
   loading: false,
@@ -486,6 +549,7 @@ const QA_FLOW_STAGES = [
 ]
 
 const STREAM_NON_FALLBACK_CODES = new Set(['validation_error', 'not_found', 'no_results'])
+const QA_EXPLAIN_DISPLAY_THRESHOLD = 3
 
 const LEVEL_LABELS = {
   beginner: {
@@ -616,6 +680,11 @@ function getLevelMeta(level) {
   return LEVEL_LABELS[normalizeAbilityLevel(level)] || LEVEL_LABELS.intermediate
 }
 
+function normalizeQaMode(mode) {
+  const normalized = String(mode || '').trim().toLowerCase()
+  return normalized === 'explain' ? 'explain' : 'normal'
+}
+
 function createQaFlowState() {
   return {
     phase: 'idle',
@@ -690,8 +759,25 @@ function normalizeQaSource(raw) {
   }
 }
 
+function applyExplainStateToAssistantMessage(msg) {
+  if (!msg || msg.role !== 'answer') return msg
+  const parsed = parseExplainMarkdownSections(msg.content || '')
+  const requestedMode = normalizeQaMode(msg.requestedMode)
+  const resolvedMode = normalizeQaMode(msg.resolvedMode || msg.mode || requestedMode)
+  const explicitExplain = requestedMode === 'explain' || resolvedMode === 'explain'
+  const canRenderExplain = parsed.sections.length >= QA_EXPLAIN_DISPLAY_THRESHOLD && parsed.isExplainLike
+
+  msg.requestedMode = requestedMode
+  msg.resolvedMode = resolvedMode
+  msg.explainSections = parsed.sections
+  msg.explainMissing = parsed.missing
+  msg.explainIncomplete = explicitExplain && parsed.missing.length > 0
+  msg.displayMode = (explicitExplain || parsed.isExplainLike) && canRenderExplain ? 'explain' : 'normal'
+  return msg
+}
+
 function makeAssistantPlaceholder() {
-  return {
+  return applyExplainStateToAssistantMessage({
     role: 'answer',
     content: '',
     sources: [],
@@ -699,7 +785,22 @@ function makeAssistantPlaceholder() {
     streaming: true,
     status: 'pending',
     errorCode: null,
-  }
+    requestedMode: qaMode.value,
+    resolvedMode: qaMode.value,
+    displayMode: qaMode.value === 'explain' ? 'explain' : 'normal',
+    explainSections: [],
+    explainMissing: [],
+    explainIncomplete: false,
+  })
+}
+
+function shouldRenderExplainCards(msg) {
+  return (
+    msg?.role === 'answer'
+    && msg?.displayMode === 'explain'
+    && Array.isArray(msg?.explainSections)
+    && msg.explainSections.length > 0
+  )
 }
 
 function streamPayloadError(payload = {}) {
@@ -724,6 +825,7 @@ function buildQaPayload(question, activeSessionId) {
   const payload = {
     question,
     user_id: resolvedUserId.value,
+    mode: normalizeQaMode(qaMode.value),
   }
   if (activeSessionId) {
     payload.session_id = activeSessionId
@@ -801,14 +903,20 @@ function mapServerMessage(message) {
   if (message.role === 'user') {
     return { role: 'question', content: message.content }
   }
-  return {
+  return applyExplainStateToAssistantMessage({
     role: 'answer',
     content: message.content,
     sources: Array.isArray(message.sources) ? message.sources.map(normalizeQaSource).filter(Boolean) : [],
     streaming: false,
     status: 'done',
     errorCode: null,
-  }
+    requestedMode: 'normal',
+    resolvedMode: 'normal',
+    displayMode: 'normal',
+    explainSections: [],
+    explainMissing: [],
+    explainIncomplete: false,
+  })
 }
 
 async function loadSessionMessages(sessionId) {
@@ -981,6 +1089,59 @@ function applyDocContextSelection() {
 
 const syncingRouteContext = ref(false)
 
+function buildAutoQaRouteKey(parsed) {
+  return [
+    parsed.qaFrom || '',
+    parsed.qaMode || '',
+    parsed.qaQuestion || '',
+    parsed.kbId || '',
+    parsed.docId || '',
+  ].join('|')
+}
+
+async function clearTransientQaRouteParams() {
+  const nextQuery = { ...(route.query || {}) }
+  let changed = false
+  for (const key of ['qa_mode', 'qa_autosend', 'qa_question', 'qa_from']) {
+    if (Object.prototype.hasOwnProperty.call(nextQuery, key)) {
+      delete nextQuery[key]
+      changed = true
+    }
+  }
+  if (!changed) return
+  await router.replace({ path: route.path, query: nextQuery })
+}
+
+async function maybeAutoAskFromRoute() {
+  const parsed = parseRouteContext(route.query)
+  if (parsed.qaMode) {
+    qaMode.value = normalizeQaMode(parsed.qaMode)
+  }
+  if (parsed.qaQuestion) {
+    qaInput.value = parsed.qaQuestion
+  }
+  const shouldAutoSend = parsed.qaMode === 'explain' && parsed.qaAutoSend === '1' && !!parsed.qaQuestion
+  if (!shouldAutoSend || busy.value.qa) return
+
+  const routeKey = buildAutoQaRouteKey(parsed)
+  if (lastAutoQaRouteKey.value === routeKey) return
+
+  if (!selectedKbId.value && !selectedSessionId.value) {
+    if (autoQaMissingContextToastKey.value !== routeKey) {
+      autoQaMissingContextToastKey.value = routeKey
+      showToast('请先选择知识库后再发送', 'error')
+    }
+    return
+  }
+
+  lastAutoQaRouteKey.value = routeKey
+  try {
+    await askQuestion()
+  } finally {
+    await clearTransientQaRouteParams()
+  }
+}
+
 async function syncFromRoute(options = {}) {
   if (syncingRouteContext.value) return
   syncingRouteContext.value = true
@@ -997,6 +1158,7 @@ async function syncFromRoute(options = {}) {
       await refreshDocsInKb()
     }
     applyDocContextSelection()
+    await maybeAutoAskFromRoute()
   } finally {
     syncingRouteContext.value = false
   }
@@ -1079,6 +1241,7 @@ async function askQuestion() {
         msg.streaming = true
         msg.status = 'streaming'
         msg.content = `${msg.content || ''}${data.delta || ''}`
+        applyExplainStateToAssistantMessage(msg)
       },
       onSources(data = {}) {
         const msg = qaMessages.value[placeholderIndex]
@@ -1096,9 +1259,11 @@ async function askQuestion() {
         if (msg && msg.role === 'answer') {
           msg.abilityLevel = responseLevel
           msg.streaming = false
+          msg.resolvedMode = normalizeQaMode(data.mode || msg.resolvedMode || msg.requestedMode)
           if ((!msg.content || !msg.content.trim()) && data.result === 'no_results') {
             msg.content = '无法找到与该问题相关的内容。'
           }
+          applyExplainStateToAssistantMessage(msg)
           msg.status = qaFlow.value.usedFallback ? 'fallback' : 'done'
         }
         updateQaFlow({
@@ -1156,7 +1321,9 @@ async function askQuestion() {
           msg.content = res?.answer || ''
           msg.sources = Array.isArray(res?.sources) ? res.sources.map(normalizeQaSource).filter(Boolean) : []
           msg.abilityLevel = responseLevel
+          msg.resolvedMode = normalizeQaMode(res?.mode || msg.resolvedMode || msg.requestedMode)
           msg.streaming = false
+          applyExplainStateToAssistantMessage(msg)
           msg.status = 'fallback'
           msg.errorCode = null
         }

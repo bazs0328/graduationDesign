@@ -1,6 +1,6 @@
 """Tests for adaptive QA prompt behavior."""
 
-from app.services.qa import build_adaptive_system_prompt
+from app.services.qa import build_adaptive_system_prompt, build_explain_system_prompt
 
 
 def test_adaptive_system_prompt_differs_by_ability_level():
@@ -23,3 +23,15 @@ def test_adaptive_system_prompt_includes_weak_concepts():
     assert "薄弱知识点" in prompt
     assert "矩阵" in prompt
     assert "特征值" in prompt
+
+
+def test_explain_system_prompt_requires_fixed_sections():
+    prompt = build_explain_system_prompt(ability_level="intermediate")
+
+    assert "讲解模式" in prompt
+    assert "## 标题" in prompt
+    assert "题意理解" in prompt
+    assert "相关知识点" in prompt
+    assert "分步解答" in prompt
+    assert "易错点" in prompt
+    assert "自测问题" in prompt

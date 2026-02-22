@@ -34,8 +34,22 @@ const docFixture = {
 
 const qaResponse = {
   answer: 'A matrix is a rectangular array of numbers.',
-  sources: [{ source: 'doc p.1 c.0', snippet: 'Matrix definition...' }]
+  sources: [{ source: 'doc p.1 c.0', snippet: 'Matrix definition...' }],
+  mode: 'normal'
 }
+const explainAnswer = [
+  '## 题意理解',
+  '这是在问矩阵的基本定义。',
+  '## 相关知识点',
+  '- 矩阵',
+  '- 行与列',
+  '## 分步解答',
+  '矩阵是按行列排列的数表。',
+  '## 易错点',
+  '不要把矩阵和行向量混淆。',
+  '## 自测问题',
+  '2x3 矩阵有几行几列？'
+].join('\n')
 
 function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0))
@@ -117,7 +131,7 @@ beforeEach(() => {
     handlers?.onChunk?.({ delta: 'is a rectangular array of numbers.' })
     handlers?.onStatus?.({ stage: 'saving', message: '正在保存会话记录...' })
     handlers?.onStatus?.({ stage: 'done', message: '回答生成完成', result: 'ok' })
-    handlers?.onDone?.({ result: 'ok', retrieved_count: 1, ability_level: 'intermediate', timings: { total_ms: 123 } })
+    handlers?.onDone?.({ result: 'ok', mode: 'normal', retrieved_count: 1, ability_level: 'intermediate', timings: { total_ms: 123 } })
   })
 })
 
@@ -220,5 +234,52 @@ describe('Q&A', () => {
       })
     )
     expect(wrapper.html()).toContain('已回退非流式')
+  })
+
+  it('auto-sends explain mode from route query and clears transient qa query params', async () => {
+    apiSsePost.mockImplementationOnce(async (path, body, handlers) => {
+      handlers?.onStatus?.({ stage: 'retrieving', message: '正在检索相关片段...' })
+      handlers?.onSources?.({ sources: qaResponse.sources, retrieved_count: 1 })
+      handlers?.onStatus?.({ stage: 'generating', message: '正在生成回答...', retrieved_count: 1 })
+      handlers?.onChunk?.({ delta: explainAnswer })
+      handlers?.onStatus?.({ stage: 'done', message: '回答生成完成', result: 'ok' })
+      handlers?.onDone?.({
+        result: 'ok',
+        mode: 'explain',
+        retrieved_count: 1,
+        ability_level: 'intermediate',
+        timings: { total_ms: 88 }
+      })
+    })
+
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await router.push({
+      path: '/qa',
+      query: {
+        kb_id: 'kb-1',
+        qa_mode: 'explain',
+        qa_autosend: '1',
+        qa_question: '请讲解这道错题',
+        qa_from: 'quiz_wrong'
+      }
+    })
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+
+    expect(apiSsePost).toHaveBeenCalledWith(
+      '/api/qa/stream',
+      expect.objectContaining({
+        kb_id: 'kb-1',
+        mode: 'explain',
+        question: '请讲解这道错题'
+      }),
+      expect.any(Object)
+    )
+    expect(wrapper.html()).toContain('讲解模式')
+    expect(router.currentRoute.value.query.qa_mode).toBeUndefined()
+    expect(router.currentRoute.value.query.qa_question).toBeUndefined()
   })
 })

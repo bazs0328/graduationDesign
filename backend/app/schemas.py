@@ -119,6 +119,7 @@ class QARequest(BaseModel):
     top_k: Optional[int] = Field(default=None, ge=1, le=20)
     fetch_k: Optional[int] = Field(default=None, ge=1, le=50)
     focus: Optional[str] = None  # Target keypoint text from learning path
+    mode: Optional[str] = "normal"
 
 
 class SourceSnippet(BaseModel):
@@ -135,6 +136,7 @@ class QAResponse(BaseModel):
     sources: List[SourceSnippet] = []
     session_id: Optional[str] = None
     ability_level: Optional[str] = None
+    mode: Optional[str] = None
 
 
 class QuizGenerateRequest(BaseModel):

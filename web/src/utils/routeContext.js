@@ -18,6 +18,10 @@ export function parseRouteContext(query = {}) {
   const focus = normalizeQueryString(query.focus).trim()
   const difficulty = normalizeDifficulty(query.difficulty)
   const keypointText = normalizeQueryString(query.keypoint_text).trim()
+  const qaMode = normalizeQueryString(query.qa_mode).trim().toLowerCase()
+  const qaAutoSend = normalizeQueryString(query.qa_autosend).trim()
+  const qaQuestion = normalizeQueryString(query.qa_question).trim()
+  const qaFrom = normalizeQueryString(query.qa_from).trim()
 
   return {
     kbId,
@@ -25,6 +29,10 @@ export function parseRouteContext(query = {}) {
     focus,
     difficulty,
     keypointText,
+    qaMode,
+    qaAutoSend,
+    qaQuestion,
+    qaFrom,
   }
 }
 

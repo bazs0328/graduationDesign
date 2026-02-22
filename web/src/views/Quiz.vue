@@ -187,6 +187,14 @@
                     class="quiz-explanation-markdown markdown-content"
                     v-html="renderMarkdown(quizResult.explanations[idx])"
                   ></div>
+                  <div v-if="quizResult.results?.[idx] === false" class="pt-2 flex justify-end">
+                    <button
+                      class="px-3 py-2 rounded-lg border border-primary/30 bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/15 transition-colors"
+                      @click="goToQaExplainForWrongQuestion(idx)"
+                    >
+                      讲解此题
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -297,7 +305,7 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingOverlay from '../components/ui/LoadingOverlay.vue'
 import { masteryLabel, masteryPercent, masteryBadgeClass, masteryBorderClass } from '../utils/mastery'
 import { renderMarkdown, renderMarkdownInline } from '../utils/markdown'
-import { normalizeDifficulty, parseRouteContext } from '../utils/routeContext'
+import { buildRouteContextQuery, normalizeDifficulty, parseRouteContext } from '../utils/routeContext'
 
 const { showToast } = useToast()
 const appContext = useAppContextStore()
@@ -358,6 +366,7 @@ const quizEmptyPrimaryAction = computed(() => {
   if (!selectedKbId.value) return null
   return { label: '生成新测验', loading: busy.value.quiz }
 })
+const OPTION_LABELS = ['A', 'B', 'C', 'D']
 
 function goToUpload() {
   router.push({ path: '/upload' })
@@ -433,6 +442,64 @@ function generateTargetedQuiz() {
     return
   }
   generateQuiz({ focusConcepts: concepts })
+}
+
+function formatQuizOptionLabel(optionIndex, options) {
+  if (!Number.isInteger(optionIndex) || optionIndex < 0 || optionIndex >= OPTION_LABELS.length) {
+    return '未作答'
+  }
+  const label = OPTION_LABELS[optionIndex] || `选项${optionIndex + 1}`
+  const text = Array.isArray(options) ? String(options[optionIndex] ?? '').trim() : ''
+  return text ? `${label}. ${text}` : label
+}
+
+function buildWrongQuestionExplainPrompt(questionIndex) {
+  const q = quiz.value?.questions?.[questionIndex]
+  if (!q) return ''
+  const selectedIndex = Number.isInteger(quizAnswers.value?.[questionIndex])
+    ? quizAnswers.value[questionIndex]
+    : null
+  const answerIndex = Number.isInteger(q.answer_index) ? q.answer_index : null
+  const optionLines = Array.isArray(q.options)
+    ? q.options.map((opt, idx) => `${OPTION_LABELS[idx] || `选项${idx + 1}`}. ${String(opt ?? '').trim()}`).join('\n')
+    : ''
+
+  return [
+    '请用讲解模式解析这道选择题，并重点解释我为什么会错、如何避免再次出错。',
+    '',
+    `题干：${String(q.question || '').trim()}`,
+    '选项：',
+    optionLines,
+    `我的答案：${formatQuizOptionLabel(selectedIndex, q.options)}`,
+    `正确答案：${formatQuizOptionLabel(answerIndex, q.options)}`,
+    '额外要求：请总结易错点，并给出 1-2 个自测变式问题。',
+  ].join('\n')
+}
+
+function goToQaExplainForWrongQuestion(questionIndex) {
+  const q = quiz.value?.questions?.[questionIndex]
+  if (!q || !selectedKbId.value) return
+  const explainPrompt = buildWrongQuestionExplainPrompt(questionIndex)
+  if (!explainPrompt) return
+
+  const focusConcept = Array.isArray(q.concepts)
+    ? q.concepts.find((concept) => concept && String(concept).trim())
+    : ''
+
+  const query = buildRouteContextQuery(
+    {
+      kbId: selectedKbId.value,
+      focus: focusConcept ? String(focusConcept).trim() : '',
+    },
+    {
+      qa_mode: 'explain',
+      qa_autosend: '1',
+      qa_question: explainPrompt,
+      qa_from: 'quiz_wrong',
+    }
+  )
+
+  router.push({ path: '/qa', query })
 }
 
 function scrollToQuestion(index) {

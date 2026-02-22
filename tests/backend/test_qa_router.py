@@ -16,6 +16,7 @@ def _mock_prepare(*args, **kwargs):
         "sources": MOCK_SOURCES,
         "formatted_messages": ["mock-message"],
         "retrieved_count": len(MOCK_SOURCES),
+        "mode": "normal",
     }
 
 
@@ -25,6 +26,7 @@ def _mock_prepare_no_results(*args, **kwargs):
         "sources": [],
         "formatted_messages": None,
         "retrieved_count": 0,
+        "mode": "normal",
     }
 
 
@@ -85,6 +87,40 @@ def test_qa_with_kb_id_success(client, seeded_session):
     assert data["answer"] == "mock answer from LLM"
     assert isinstance(data["sources"], list)
     assert len(data["sources"]) > 0
+    assert data["mode"] == "normal"
+
+
+def test_qa_explain_mode_passed_and_returned(client, seeded_session):
+    profile = SimpleNamespace(ability_level="intermediate")
+    explain_prepare = {
+        "no_results": False,
+        "sources": MOCK_SOURCES,
+        "formatted_messages": ["mock-message"],
+        "retrieved_count": 1,
+        "mode": "explain",
+    }
+    with (
+        patch("app.routers.qa.get_or_create_profile", return_value=profile),
+        patch("app.routers.qa.get_weak_concepts_by_mastery", return_value=[]),
+        patch("app.routers.qa.prepare_qa_answer", return_value=explain_prepare) as mocked_prepare,
+        patch("app.routers.qa.get_llm", return_value=object()),
+        patch("app.routers.qa.generate_qa_answer", return_value="## 题意理解\n...\n## 分步解答\n..."),
+        patch("app.routers.qa._update_mastery_from_qa"),
+    ):
+        resp = client.post(
+            "/api/qa",
+            json={
+                "kb_id": seeded_session["kb_id"],
+                "user_id": seeded_session["user_id"],
+                "question": "请讲解这道题",
+                "mode": "explain",
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mode"] == "explain"
+    assert mocked_prepare.call_args.kwargs["mode"] == "explain"
 
 
 def test_qa_passes_adaptive_profile_to_service(client, seeded_session):
@@ -208,6 +244,7 @@ def test_qa_stream_post_success_sends_ordered_events(client, seeded_session):
     done_payload = [payload for name, payload in events if name == "done"][-1]
     assert done_payload["result"] == "ok"
     assert "ability_level" in done_payload
+    assert done_payload["mode"] == "normal"
     assert "timings" in done_payload
     assert done_payload["retrieved_count"] == 1
 

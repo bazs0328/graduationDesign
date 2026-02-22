@@ -36,7 +36,7 @@ from app.services.keypoints import (
     match_keypoints_by_kb,
 )
 from app.services.mastery import record_quiz_result
-from app.services.quiz import generate_quiz
+from app.services.quiz import filter_quiz_questions_quality, generate_quiz
 from app.services.text_extraction import extract_text
 from app.utils.document_validator import DocumentValidator
 
@@ -133,6 +133,7 @@ def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
             for difficulty, count in counts.items():
                 if count <= 0:
                     continue
+                existing_stems = [str(item.get("question") or "") for item in questions if isinstance(item, dict)]
                 questions.extend(
                     generate_quiz(
                         resolved_user_id,
@@ -143,7 +144,14 @@ def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
                         focus_concepts=payload.focus_concepts,
                         style_prompt=payload.style_prompt,
                         reference_questions=payload.reference_questions,
+                        avoid_question_texts=existing_stems,
                     )
+                )
+            if questions:
+                questions = filter_quiz_questions_quality(
+                    questions,
+                    target_count=payload.count,
+                    focus_concepts=payload.focus_concepts,
                 )
             if len(questions) > payload.count:
                 questions = questions[: payload.count]
