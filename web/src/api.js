@@ -91,12 +91,23 @@ export function getCurrentUser() {
 }
 
 export function logout() {
+  const appCtxKeys = []
+  for (let idx = 0; idx < localStorage.length; idx += 1) {
+    const key = localStorage.key(idx)
+    if (key && key.startsWith('gradtutor_app_ctx_v1:')) {
+      appCtxKeys.push(key)
+    }
+  }
+  appCtxKeys.forEach((key) => localStorage.removeItem(key))
   localStorage.removeItem('gradtutor_user_id')
   localStorage.removeItem('gradtutor_username')
   localStorage.removeItem('gradtutor_name')
   localStorage.removeItem('gradtutor_user')
   localStorage.removeItem('gradtutor_access_token')
-  window.location.href = '/login'
+  const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent || '' : ''
+  if (!/jsdom/i.test(userAgent)) {
+    window.location.href = '/login'
+  }
 }
 
 export async function apiPost(path, body, isForm = false) {

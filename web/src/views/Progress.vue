@@ -379,7 +379,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, onActivated, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   FileText,
@@ -402,9 +402,11 @@ import VChart from 'vue-echarts'
 import LearnerProfileCard from '../components/LearnerProfileCard.vue'
 import { apiGet, getProfile, buildLearningPath } from '../api'
 import { useToast } from '../composables/useToast'
+import { useAppContextStore } from '../stores/appContext'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import { MASTERY_MASTERED, masteryPercent } from '../utils/mastery'
 import { renderMarkdown } from '../utils/markdown'
+import { buildRouteContextQuery, normalizeDifficulty } from '../utils/routeContext'
 
 const { showToast } = useToast()
 
@@ -426,8 +428,9 @@ const STAGE_COLOR_MAP = {
 
 const router = useRouter()
 const route = useRoute()
-const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
-const resolvedUserId = computed(() => userId.value || 'default')
+const appContext = useAppContextStore()
+appContext.hydrate()
+const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
 const progress = ref(null)
 const profile = ref(null)
 const activity = ref([])
@@ -439,8 +442,11 @@ const learningPathEdges = ref([])
 const learningPathStages = ref([])
 const learningPathModules = ref([])
 const learningPathSummary = ref({})
-const kbs = ref([])
-const selectedKbId = ref('')
+const kbs = computed(() => appContext.kbs)
+const selectedKbId = computed({
+  get: () => appContext.selectedKbId,
+  set: (value) => appContext.setSelectedKbId(value),
+})
 const pathChartRef = ref(null)
 const busy = ref({
   init: false,
@@ -683,21 +689,6 @@ async function rebuildPath() {
   }
 }
 
-async function refreshKbs() {
-  try {
-    kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(resolvedUserId.value)}`)
-    const queryKbId = normalizeQueryString(route.query.kb_id)
-    const hasSelected = !!selectedKbId.value && kbs.value.some((kb) => kb.id === selectedKbId.value)
-    if (queryKbId && kbs.value.some((kb) => kb.id === queryKbId)) {
-      selectedKbId.value = queryKbId
-    } else if (!hasSelected && kbs.value.length > 0) {
-      selectedKbId.value = kbs.value[0].id
-    }
-  } catch {
-    // error toast handled globally
-  }
-}
-
 function activityLabel(item) {
   switch (item.type) {
     case 'document_upload': return '上传了文档'
@@ -719,21 +710,6 @@ function actionLabel(type) {
     case 'challenge': return '挑战'
     default: return type
   }
-}
-
-function normalizeQueryString(value) {
-  if (Array.isArray(value)) {
-    return value[0] || ''
-  }
-  return typeof value === 'string' ? value : ''
-}
-
-function normalizeDifficulty(value) {
-  const normalized = String(value || '').trim().toLowerCase()
-  if (normalized === 'easy' || normalized === 'medium' || normalized === 'hard') {
-    return normalized
-  }
-  return ''
 }
 
 function difficultyLabel(value) {
@@ -824,27 +800,33 @@ function runRecommendation(item, action) {
       if (!item?.doc_id) return
       router.push({
         path: '/summary',
-        query: { doc_id: item.doc_id },
+        query: buildRouteContextQuery({ docId: item.doc_id }),
       })
       return
     }
     case 'quiz':
     case 'challenge': {
-      const query = {}
-      if (selectedKbId.value) query.kb_id = selectedKbId.value
-      if (focusConcept) query.focus = focusConcept
       const difficulty = normalizeDifficulty(action?.params?.difficulty)
-      if (difficulty) query.difficulty = difficulty
-      router.push({ path: '/quiz', query })
+      router.push({
+        path: '/quiz',
+        query: buildRouteContextQuery({
+          kbId: selectedKbId.value,
+          focus: focusConcept,
+          difficulty,
+        }),
+      })
       return
     }
     case 'qa':
     case 'review': {
-      const query = {}
-      if (selectedKbId.value) query.kb_id = selectedKbId.value
-      if (item?.doc_id) query.doc_id = item.doc_id
-      if (focusConcept) query.focus = focusConcept
-      router.push({ path: '/qa', query })
+      router.push({
+        path: '/qa',
+        query: buildRouteContextQuery({
+          kbId: selectedKbId.value,
+          docId: item?.doc_id,
+          focus: focusConcept,
+        }),
+      })
       return
     }
     default:
@@ -1020,29 +1002,60 @@ function goToAction(item) {
   if (item.action === 'quiz') {
     router.push({
       path: '/quiz',
-      query: {
-        kb_id: selectedKbId.value || '',
+      query: buildRouteContextQuery({
+        kbId: selectedKbId.value,
         focus: item.text || '',
-      },
+      }),
     })
     return
   }
   router.push({
     path: '/qa',
-    query: {
-      kb_id: selectedKbId.value || '',
+    query: buildRouteContextQuery({
+      kbId: selectedKbId.value,
       focus: item.text || '',
-    },
+    }),
   })
+}
+
+const syncingRouteContext = ref(false)
+
+async function syncFromRoute(options = {}) {
+  if (syncingRouteContext.value) return
+  syncingRouteContext.value = true
+  try {
+    try {
+      await appContext.applyRouteContext(route.query, {
+        ensureKbs: options.ensureKbs === true,
+        fallbackToFirstKb: true,
+      })
+    } catch {
+      // error toast handled globally
+    }
+  } finally {
+    syncingRouteContext.value = false
+  }
 }
 
 onMounted(async () => {
   busy.value.init = true
   try {
-    await Promise.all([fetchProfile(), fetchProgress(), fetchActivity(), refreshKbs()])
+    try {
+      await appContext.loadKbs()
+    } catch {
+      // error toast handled globally
+    }
+    await syncFromRoute({ ensureKbs: false })
+    await Promise.all([fetchProfile(), fetchProgress(), fetchActivity()])
   } finally {
     busy.value.init = false
   }
+})
+
+onActivated(async () => {
+  await syncFromRoute({
+    ensureKbs: !appContext.kbs.length,
+  })
 })
 
 watch(selectedKbId, () => {
@@ -1053,12 +1066,10 @@ watch(selectedKbId, () => {
 })
 
 watch(
-  () => normalizeQueryString(route.query.kb_id),
-  (queryKbId) => {
-    if (!queryKbId) return
-    if (kbs.value.some((kb) => kb.id === queryKbId)) {
-      selectedKbId.value = queryKbId
-    }
+  () => route.fullPath,
+  async () => {
+    if (busy.value.init) return
+    await syncFromRoute({ ensureKbs: false })
   }
 )
 </script>

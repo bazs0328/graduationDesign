@@ -291,26 +291,35 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, onActivated, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { MessageSquare, Send, Trash2, Database, FileText, Sparkles, User, Bot } from 'lucide-vue-next'
 import { apiDelete, apiGet, apiPatch, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
+import { useAppContextStore } from '../stores/appContext'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import SourcePreviewModal from '../components/ui/SourcePreviewModal.vue'
 import { renderMarkdown } from '../utils/markdown'
+import { parseRouteContext } from '../utils/routeContext'
 
 const { showToast } = useToast()
+const appContext = useAppContextStore()
+appContext.hydrate()
 const route = useRoute()
 
-const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
-const resolvedUserId = computed(() => userId.value || 'default')
-const kbs = ref([])
+const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
+const kbs = computed(() => appContext.kbs)
 const docsInKb = ref([])
 const sessions = ref([])
-const selectedKbId = ref('')
-const selectedDocId = ref('')
+const selectedKbId = computed({
+  get: () => appContext.selectedKbId,
+  set: (value) => appContext.setSelectedKbId(value),
+})
+const selectedDocId = computed({
+  get: () => appContext.selectedDocId,
+  set: (value) => appContext.setSelectedDocId(value),
+})
 const selectedSessionId = ref('')
 const sessionTitleInput = ref('')
 const qaInput = ref('')
@@ -381,15 +390,8 @@ const docsErrorCount = computed(() =>
 )
 
 const currentLevelMeta = computed(() => getLevelMeta(qaAbilityLevel.value))
-const entryFocusContext = computed(() => normalizeQueryString(route.query.focus).trim())
-const entryDocContextId = computed(() => normalizeQueryString(route.query.doc_id))
-
-function normalizeQueryString(value) {
-  if (Array.isArray(value)) {
-    return value[0] || ''
-  }
-  return typeof value === 'string' ? value : ''
-}
+const entryFocusContext = computed(() => appContext.routeContext.focus)
+const entryDocContextId = computed(() => parseRouteContext(route.query).docId)
 
 function normalizeAbilityLevel(level) {
   const normalized = (level || '').toString().trim().toLowerCase()
@@ -401,14 +403,6 @@ function normalizeAbilityLevel(level) {
 
 function getLevelMeta(level) {
   return LEVEL_LABELS[normalizeAbilityLevel(level)] || LEVEL_LABELS.intermediate
-}
-
-async function refreshKbs() {
-  try {
-    kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(resolvedUserId.value)}`)
-  } catch {
-    // error toast handled globally
-  }
 }
 
 async function refreshDocsInKb() {
@@ -618,6 +612,29 @@ function applyDocContextSelection() {
   }
 }
 
+const syncingRouteContext = ref(false)
+
+async function syncFromRoute(options = {}) {
+  if (syncingRouteContext.value) return
+  syncingRouteContext.value = true
+  try {
+    try {
+      await appContext.applyRouteContext(route.query, {
+        ensureKbs: options.ensureKbs === true,
+        fallbackToFirstKb: true,
+      })
+    } catch {
+      // error toast handled globally
+    }
+    if (options.refreshDocs && selectedKbId.value) {
+      await refreshDocsInKb()
+    }
+    applyDocContextSelection()
+  } finally {
+    syncingRouteContext.value = false
+  }
+}
+
 async function refreshAbilityLevel() {
   try {
     const profile = await apiGet(`/api/profile?user_id=${encodeURIComponent(resolvedUserId.value)}`)
@@ -696,21 +713,38 @@ function scrollToBottom() {
 onMounted(async () => {
   busy.value.init = true
   try {
-    await Promise.all([refreshKbs(), refreshAbilityLevel(), refreshSessions()])
-    const queryKbId = normalizeQueryString(route.query.kb_id)
-    if (queryKbId && kbs.value.some((kb) => kb.id === queryKbId)) {
-      selectedKbId.value = queryKbId
-    } else if (!selectedKbId.value && kbs.value.length > 0) {
-      selectedKbId.value = kbs.value[0].id
+    try {
+      await appContext.loadKbs()
+    } catch {
+      // error toast handled globally
     }
+    await Promise.all([refreshAbilityLevel(), refreshSessions()])
+    await syncFromRoute({ refreshDocs: false })
     if (selectedKbId.value) {
       await refreshDocsInKb()
       applyDocContextSelection()
+    } else {
+      docsInKb.value = []
     }
   } finally {
     busy.value.init = false
   }
 })
+
+onActivated(async () => {
+  await syncFromRoute({
+    ensureKbs: !appContext.kbs.length,
+    refreshDocs: false,
+  })
+})
+
+watch(
+  () => route.fullPath,
+  async () => {
+    if (busy.value.init) return
+    await syncFromRoute({ refreshDocs: false })
+  }
+)
 
 watch(selectedKbId, async () => {
   if (!syncingFromSession.value && selectedSessionId.value) {

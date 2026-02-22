@@ -283,24 +283,30 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onActivated, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { PenTool, Sparkles, CheckCircle2, XCircle } from 'lucide-vue-next'
-import { apiGet, apiPost } from '../api'
+import { apiPost } from '../api'
 import AnimatedNumber from '../components/ui/AnimatedNumber.vue'
 import { useToast } from '../composables/useToast'
+import { useAppContextStore } from '../stores/appContext'
 import Button from '../components/ui/Button.vue'
 import LoadingOverlay from '../components/ui/LoadingOverlay.vue'
 import { masteryLabel, masteryPercent, masteryBadgeClass, masteryBorderClass } from '../utils/mastery'
 import { renderMarkdown, renderMarkdownInline } from '../utils/markdown'
+import { normalizeDifficulty, parseRouteContext } from '../utils/routeContext'
 
 const { showToast } = useToast()
+const appContext = useAppContextStore()
+appContext.hydrate()
 const route = useRoute()
 
-const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
-const resolvedUserId = computed(() => userId.value || 'default')
-const kbs = ref([])
-const selectedKbId = ref('')
+const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
+const kbs = computed(() => appContext.kbs)
+const selectedKbId = computed({
+  get: () => appContext.selectedKbId,
+  set: (value) => appContext.setSelectedKbId(value),
+})
 const quiz = ref(null)
 const quizAnswers = ref({})
 const quizResult = ref(null)
@@ -318,8 +324,8 @@ const wrongQuestionGroups = computed(() => quizResult.value?.wrong_questions_by_
 const hasWrongGroups = computed(() => wrongQuestionGroups.value.length > 0)
 const masteryUpdates = computed(() => quizResult.value?.mastery_updates || [])
 const hasMasteryUpdates = computed(() => masteryUpdates.value.length > 0)
-const entryKbContextId = computed(() => normalizeQueryString(route.query.kb_id))
-const entryFocusContext = computed(() => normalizeQueryString(route.query.focus).trim())
+const entryKbContextId = computed(() => parseRouteContext(route.query).kbId)
+const entryFocusContext = computed(() => appContext.routeContext.focus)
 const hasPathContext = computed(() => Boolean(entryKbContextId.value || entryFocusContext.value))
 const entryKbContextName = computed(() => {
   if (!entryKbContextId.value) return ''
@@ -327,29 +333,6 @@ const entryKbContextName = computed(() => {
   if (kb?.name) return kb.name
   return `${entryKbContextId.value.slice(0, 8)}...`
 })
-
-function normalizeQueryString(value) {
-  if (Array.isArray(value)) {
-    return value[0] || ''
-  }
-  return typeof value === 'string' ? value : ''
-}
-
-function normalizeDifficulty(value) {
-  const normalized = String(value || '').trim().toLowerCase()
-  if (normalized === 'easy' || normalized === 'medium' || normalized === 'hard') {
-    return normalized
-  }
-  return ''
-}
-
-async function refreshKbs() {
-  try {
-    kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(resolvedUserId.value)}`)
-  } catch {
-    // error toast handled globally
-  }
-}
 
 async function generateQuiz(options = {}) {
   if (!selectedKbId.value) return
@@ -421,26 +404,66 @@ function scrollToQuestion(index) {
   }
 }
 
-onMounted(async () => {
-  await refreshKbs()
-  const queryKbId = normalizeQueryString(route.query.kb_id)
-  if (queryKbId && kbs.value.some((kb) => kb.id === queryKbId)) {
-    selectedKbId.value = queryKbId
-  }
+const lastAutoContextKey = ref('')
+const syncingRouteContext = ref(false)
 
-  const queryDifficulty = normalizeDifficulty(normalizeQueryString(route.query.difficulty))
-  if (queryDifficulty) {
-    autoAdapt.value = false
-    quizDifficulty.value = queryDifficulty
-  }
-
-  const queryFocus = normalizeQueryString(route.query.focus).trim()
-  if ((queryFocus || queryDifficulty) && selectedKbId.value) {
-    const options = {}
-    if (queryFocus) {
-      options.focusConcepts = [queryFocus]
+async function syncFromRoute(options = {}) {
+  if (syncingRouteContext.value) return
+  syncingRouteContext.value = true
+  try {
+    try {
+      await appContext.applyRouteContext(route.query, {
+        ensureKbs: options.ensureKbs === true,
+        fallbackToFirstKb: true,
+      })
+    } catch {
+      // error toast handled globally
     }
-    await generateQuiz(options)
+
+    const queryDifficulty = appContext.routeContext.difficulty
+    if (queryDifficulty) {
+      autoAdapt.value = false
+      quizDifficulty.value = queryDifficulty
+    }
+
+    const queryFocus = entryFocusContext.value
+    if (!options.autoGenerate) return
+    if ((!queryFocus && !queryDifficulty) || !selectedKbId.value) return
+
+    const contextKey = `${selectedKbId.value}|${queryFocus}|${queryDifficulty}`
+    if (lastAutoContextKey.value === contextKey) return
+    lastAutoContextKey.value = contextKey
+
+    const generateOptions = {}
+    if (queryFocus) {
+      generateOptions.focusConcepts = [queryFocus]
+    }
+    await generateQuiz(generateOptions)
+  } finally {
+    syncingRouteContext.value = false
   }
+}
+
+onMounted(async () => {
+  try {
+    await appContext.loadKbs()
+  } catch {
+    // error toast handled globally
+  }
+  await syncFromRoute({ autoGenerate: true })
 })
+
+onActivated(async () => {
+  await syncFromRoute({
+    ensureKbs: !appContext.kbs.length,
+    autoGenerate: true,
+  })
+})
+
+watch(
+  () => route.fullPath,
+  async () => {
+    await syncFromRoute({ autoGenerate: true })
+  }
+)
 </script>

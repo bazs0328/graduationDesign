@@ -12,6 +12,7 @@ import {
 } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { renderMarkdown } from '../utils/markdown'
+import { buildRouteContextQuery } from '../utils/routeContext'
 
 use([
   CanvasRenderer,
@@ -169,18 +170,18 @@ const frustrationLabel = computed(() => {
 })
 
 function goToQuiz(concept) {
-  const query = {}
-  const focus = String(concept || '').trim()
-  if (focus) query.focus = focus
-  if (props.kbId) query.kb_id = props.kbId
+  const query = buildRouteContextQuery({
+    kbId: props.kbId,
+    focus: String(concept || '').trim(),
+  })
   router.push({ name: 'Quiz', query })
 }
 
 function goToQA(concept) {
-  const query = {}
-  const focus = String(concept || '').trim()
-  if (focus) query.focus = focus
-  if (props.kbId) query.kb_id = props.kbId
+  const query = buildRouteContextQuery({
+    kbId: props.kbId,
+    focus: String(concept || '').trim(),
+  })
   router.push({ name: 'QA', query })
 }
 </script>

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 
 import App from '@/App.vue'
@@ -37,7 +38,10 @@ function flushPromises() {
 
 async function mountAppWithRouter() {
   localStorage.setItem('gradtutor_user_id', 'test')
+  localStorage.setItem('gradtutor_user', 'test')
   localStorage.setItem('gradtutor_access_token', 'test-token')
+  const pinia = createPinia()
+  setActivePinia(pinia)
   const router = createRouter({
     history: createMemoryHistory(),
     routes
@@ -46,7 +50,7 @@ async function mountAppWithRouter() {
   await router.isReady()
   const wrapper = mount(App, {
     global: {
-      plugins: [router]
+      plugins: [pinia, router]
     }
   })
   await flushPromises()

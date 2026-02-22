@@ -93,10 +93,12 @@
 <script setup>
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAppContextStore } from '../stores/appContext'
 import { authRegister, authLogin } from '../api'
 import Button from '../components/ui/Button.vue'
 
 const router = useRouter()
+const appContext = useAppContextStore()
 const isLogin = ref(true)
 const username = ref('')
 const password = ref('')
@@ -147,6 +149,7 @@ async function submit() {
     } else {
       localStorage.removeItem('gradtutor_access_token')
     }
+    appContext.hydrate()
     router.push('/')
   } catch (err) {
     if (err?.name === 'AbortError') {

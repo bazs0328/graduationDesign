@@ -304,9 +304,9 @@
   - 说明：Summary / Quiz / QA / Progress 已支持 `kb_id`、`doc_id`、`focus` 等上下文透传与回填。
   - 验收标准：跨页跳转后无需重复选择核心上下文。
 
-- [ ] **状态管理进一步收敛（可选 Pinia）**
-  - 说明：当前依赖 route query + 组件状态 + `keep-alive`，演示可用；若后续出现跨页状态不一致，再引入 Pinia。
-  - 验收标准：引入后仅保留单一状态源，减少重复请求与状态漂移。
+- [x] **状态管理进一步收敛（可选 Pinia）**
+  - 说明：已引入 Pinia，跨页上下文（`userId` / `kb_id` / `doc_id` / route context）收敛为单一状态源；URL query 保持兼容。
+  - 验收标准：已实现 query > persisted store > 默认 KB 的优先级，并通过 store 请求去重减少重复加载与状态漂移。
 
 ### UX-P1（关键交互收口）
 

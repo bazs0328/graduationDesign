@@ -318,16 +318,21 @@ import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { Upload, FileText, Database, X, RefreshCw } from 'lucide-vue-next'
 import { apiDelete, apiGet, apiPatch, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
+import { useAppContextStore } from '../stores/appContext'
 import Button from '../components/ui/Button.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 
 const { showToast } = useToast()
+const appContext = useAppContextStore()
+appContext.hydrate()
 
-const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
-const resolvedUserId = computed(() => userId.value || 'default')
+const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
 const docs = ref([])
-const kbs = ref([])
-const selectedKbId = ref('')
+const kbs = computed(() => appContext.kbs)
+const selectedKbId = computed({
+  get: () => appContext.selectedKbId,
+  set: (value) => appContext.setSelectedKbId(value),
+})
 const kbNameInput = ref('')
 const kbRenameInput = ref('')
 const docFilters = ref({
@@ -370,13 +375,9 @@ function onDrop(event) {
   uploadFile.value = event.dataTransfer.files[0]
 }
 
-async function refreshKbs() {
+async function refreshKbs(force = false) {
   try {
-    kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(resolvedUserId.value)}`)
-    const found = kbs.value.find((kb) => kb.id === selectedKbId.value)
-    if (!found) {
-      selectedKbId.value = kbs.value.length ? kbs.value[0].id : ''
-    }
+    await appContext.loadKbs(force)
     const active = kbs.value.find((kb) => kb.id === selectedKbId.value)
     kbRenameInput.value = active ? active.name : ''
   } catch {
@@ -560,7 +561,7 @@ async function createKb() {
     })
     showToast('知识库创建成功', 'success')
     kbNameInput.value = ''
-    await refreshKbs()
+    await refreshKbs(true)
     if (res?.id) {
       selectedKbId.value = res.id
     }
@@ -584,7 +585,7 @@ async function renameCurrentKb() {
       name: targetName
     })
     showToast('知识库重命名成功', 'success')
-    await refreshKbs()
+    await refreshKbs(true)
   } catch {
     // error toast handled globally
   } finally {
@@ -607,7 +608,7 @@ async function deleteCurrentKb() {
   try {
     await apiDelete(`/api/kb/${selectedKbId.value}?user_id=${encodeURIComponent(resolvedUserId.value)}&cascade=${cascade}`)
     showToast('知识库已删除', 'success')
-    await refreshKbs()
+    await refreshKbs(true)
     await refreshDocs()
   } catch {
     // error toast handled globally

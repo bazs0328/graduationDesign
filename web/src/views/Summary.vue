@@ -222,16 +222,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onActivated, watch, computed, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { FileText, Sparkles, Layers } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
+import { useAppContextStore } from '../stores/appContext'
 import Button from '../components/ui/Button.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import SourcePreviewModal from '../components/ui/SourcePreviewModal.vue'
 import { renderMarkdown } from '../utils/markdown'
+import { buildRouteContextQuery, parseRouteContext } from '../utils/routeContext'
 import {
   masteryLabel as _masteryLabel,
   masteryPercent as _masteryPercent,
@@ -241,14 +243,18 @@ import {
 } from '../utils/mastery'
 
 const { showToast } = useToast()
+const appContext = useAppContextStore()
+appContext.hydrate()
 
 const router = useRouter()
 const route = useRoute()
-const userId = ref(localStorage.getItem('gradtutor_user') || 'default')
-const resolvedUserId = computed(() => userId.value || 'default')
+const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
 const docs = ref([])
-const kbs = ref([])
-const selectedDocId = ref('')
+const kbs = computed(() => appContext.kbs)
+const selectedDocId = computed({
+  get: () => appContext.selectedDocId,
+  set: (value) => appContext.setSelectedDocId(value),
+})
 const summary = ref('')
 const summaryCached = ref(false)
 const keypoints = ref([])
@@ -281,8 +287,8 @@ const selectedKbName = computed(() => {
   const kb = kbs.value.find(k => k.id === doc.kb_id)
   return kb ? kb.name : '未知'
 })
-const entryDocContextId = computed(() => normalizeQueryString(route.query.doc_id))
-const entryKeypointText = computed(() => normalizeQueryString(route.query.keypoint_text).trim())
+const entryDocContextId = computed(() => parseRouteContext(route.query).docId)
+const entryKeypointText = computed(() => appContext.routeContext.keypointText)
 const entryDocContextName = computed(() => {
   if (!entryDocContextId.value) return ''
   const doc = docs.value.find((d) => d.id === entryDocContextId.value)
@@ -376,23 +382,8 @@ function goToProgress(point) {
   const kbId = doc?.kb_id || ''
   router.push({
     path: '/progress',
-    query: kbId ? { kb_id: kbId } : {},
+    query: buildRouteContextQuery({ kbId }),
   })
-}
-
-function normalizeQueryString(value) {
-  if (Array.isArray(value)) {
-    return value[0] || ''
-  }
-  return typeof value === 'string' ? value : ''
-}
-
-async function refreshKbs() {
-  try {
-    kbs.value = await apiGet(`/api/kb?user_id=${encodeURIComponent(resolvedUserId.value)}`)
-  } catch {
-    // error toast handled globally
-  }
 }
 
 async function refreshDocs() {
@@ -458,17 +449,75 @@ async function generateKeypoints(force = false) {
   }
 }
 
+function normalizeDocSelection() {
+  if (selectedDocId.value && !docs.value.some((doc) => doc.id === selectedDocId.value)) {
+    selectedDocId.value = ''
+  }
+}
+
+const lastAutoContextKey = ref('')
+const syncingRouteContext = ref(false)
+
+async function syncFromRoute(options = {}) {
+  if (syncingRouteContext.value) return
+  syncingRouteContext.value = true
+  try {
+    try {
+      await appContext.applyRouteContext(route.query, {
+        ensureKbs: options.ensureKbs === true,
+        fallbackToFirstKb: true,
+      })
+    } catch {
+      // error toast handled globally
+    }
+
+    if (options.refreshDocs === true) {
+      await refreshDocs()
+    }
+    normalizeDocSelection()
+
+    const queryDocId = entryDocContextId.value
+    if (!queryDocId) return
+    if (!docs.value.some((doc) => doc.id === queryDocId)) return
+
+    if (selectedDocId.value !== queryDocId) {
+      selectedDocId.value = queryDocId
+    }
+
+    const contextKey = `${queryDocId}|${entryKeypointText.value}`
+    if (lastAutoContextKey.value === contextKey) return
+    lastAutoContextKey.value = contextKey
+    await Promise.all([generateSummary(), generateKeypoints()])
+  } finally {
+    syncingRouteContext.value = false
+  }
+}
+
 onMounted(async () => {
   busy.value.init = true
   try {
-    await Promise.all([refreshKbs(), refreshDocs()])
-    const queryDocId = normalizeQueryString(route.query.doc_id)
-    if (queryDocId && docs.value.some((d) => d.id === queryDocId)) {
-      selectedDocId.value = queryDocId
-      await Promise.all([generateSummary(), generateKeypoints()])
+    try {
+      await appContext.loadKbs()
+    } catch {
+      // error toast handled globally
     }
+    await refreshDocs()
+    normalizeDocSelection()
+    await syncFromRoute({ refreshDocs: false })
   } finally {
     busy.value.init = false
   }
 })
+
+onActivated(async () => {
+  await syncFromRoute({ ensureKbs: !appContext.kbs.length })
+})
+
+watch(
+  () => route.fullPath,
+  async () => {
+    if (busy.value.init) return
+    await syncFromRoute()
+  }
+)
 </script>
