@@ -26,6 +26,35 @@
             <Trash2 class="w-5 h-5" />
           </button>
         </div>
+        <div class="px-4 py-3 border-b border-border/80 bg-gradient-to-r from-accent/40 via-background to-background">
+          <div class="flex flex-wrap items-center gap-2">
+            <span
+              v-for="stage in qaFlowStages"
+              :key="stage.key"
+              class="px-2 py-1 rounded-full border text-[10px] font-semibold tracking-wide"
+              :class="qaFlowPhaseChipClass(stage.key)"
+            >
+              {{ stage.label }}
+            </span>
+            <span
+              v-if="qaFlow.usedFallback"
+              class="px-2 py-1 rounded-full border border-amber-300 bg-amber-50 text-amber-700 text-[10px] font-semibold tracking-wide"
+            >
+              已回退非流式
+            </span>
+          </div>
+          <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <p class="text-muted-foreground">
+              {{ qaFlow.message || '等待提问…' }}
+            </p>
+            <p v-if="qaFlow.retrievedCount > 0" class="text-muted-foreground">
+              检索到 {{ qaFlow.retrievedCount }} 个片段
+            </p>
+            <p v-if="qaFlow.timings.total_ms" class="text-muted-foreground">
+              总耗时 {{ qaFlow.timings.total_ms }} ms
+            </p>
+          </div>
+        </div>
 
         <!-- Messages -->
         <div class="flex-1 overflow-y-auto p-6 space-y-6" ref="scrollContainer">
@@ -58,11 +87,42 @@
                 </span>
               </div>
               <p v-if="msg.role === 'question'" class="text-sm leading-relaxed whitespace-pre-wrap">{{ msg.content }}</p>
-              <div v-else class="qa-markdown markdown-content" v-html="renderMarkdown(msg.content)"></div>
+              <div v-else>
+                <div
+                  v-if="msg.status && msg.status !== 'done'"
+                  class="mb-2 flex flex-wrap items-center gap-2 text-[10px]"
+                >
+                  <span
+                    class="px-1.5 py-0.5 rounded-full border font-semibold normal-case tracking-normal"
+                    :class="qaMessageStatusBadgeClass(msg)"
+                  >
+                    {{ qaMessageStatusText(msg) }}
+                  </span>
+                  <span v-if="msg.errorCode" class="opacity-60">{{ msg.errorCode }}</span>
+                </div>
+                <div
+                  v-if="msg.content && msg.content.trim()"
+                  class="qa-markdown markdown-content"
+                  v-html="renderMarkdown(msg.content)"
+                ></div>
+                <p
+                  v-else
+                  class="text-sm leading-relaxed opacity-70 italic flex items-center gap-1"
+                >
+                  {{ msg.streaming ? '正在生成回答…' : '暂无回答内容' }}
+                  <span v-if="msg.streaming" class="qa-stream-cursor" aria-hidden="true"></span>
+                </p>
+                <p
+                  v-if="msg.streaming && msg.content && msg.content.trim()"
+                  class="mt-1 text-sm leading-relaxed"
+                >
+                  <span class="qa-stream-cursor" aria-hidden="true"></span>
+                </p>
+              </div>
               
               <!-- Sources -->
               <div v-if="msg.sources && msg.sources.length" class="mt-4 pt-3 border-t border-accent-foreground/10 space-y-2">
-                <p class="text-[10px] font-bold uppercase opacity-50">参考来源：</p>
+                <p class="text-[10px] font-bold uppercase opacity-50">参考来源（{{ msg.sources.length }}）</p>
                 <div class="flex flex-wrap gap-2">
                   <button
                     v-for="(source, sIdx) in msg.sources"
@@ -72,20 +132,11 @@
                   >
                     <FileText class="w-3 h-3 text-primary" />
                     <span class="font-medium truncate max-w-[120px]">{{ source.source }}</span>
-                    <span v-if="source.page" class="opacity-50">p.{{ source.page }}</span>
+                    <span v-if="source.page" class="opacity-50 px-1 py-0.5 rounded border border-accent-foreground/10">p.{{ source.page }}</span>
+                    <span v-if="source.chunk !== undefined && source.chunk !== null" class="opacity-50 px-1 py-0.5 rounded border border-accent-foreground/10">c.{{ source.chunk }}</span>
                   </button>
                 </div>
               </div>
-            </div>
-          </div>
-          <div v-if="busy.qa" class="flex items-start">
-            <div class="bg-accent text-accent-foreground p-4 rounded-2xl rounded-tl-none shadow-sm flex items-center gap-3">
-              <div class="flex gap-1">
-                <div class="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style="animation-delay: 0s"></div>
-                <div class="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
-                <div class="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style="animation-delay: 0.4s"></div>
-              </div>
-              <span class="text-xs font-medium opacity-70">辅导正在思考…</span>
             </div>
           </div>
         </div>
@@ -204,6 +255,74 @@
           </p>
         </div>
 
+        <div class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground">本次回答来源</h3>
+            <span
+              class="text-[10px] font-semibold px-2 py-1 rounded-full border"
+              :class="qaFlowPanelBadgeClass"
+            >
+              {{ qaFlowPanelBadgeText }}
+            </span>
+          </div>
+          <div class="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+            <span v-if="qaFlow.retrievedCount > 0" class="px-2 py-1 rounded border border-border bg-accent/20">
+              检索片段 {{ qaFlow.retrievedCount }}
+            </span>
+            <span v-if="qaFlow.timings.retrieve_ms" class="px-2 py-1 rounded border border-border bg-accent/20">
+              检索 {{ qaFlow.timings.retrieve_ms }} ms
+            </span>
+            <span v-if="qaFlow.timings.generate_ms" class="px-2 py-1 rounded border border-border bg-accent/20">
+              生成 {{ qaFlow.timings.generate_ms }} ms
+            </span>
+          </div>
+
+          <div v-if="busy.qa && qaSourcePanelSources.length === 0" class="space-y-2">
+            <SkeletonBlock type="list" :lines="3" />
+            <p class="text-xs text-muted-foreground">正在收集检索来源...</p>
+          </div>
+
+          <div v-else-if="qaSourcePanelSources.length" class="space-y-2 max-h-56 overflow-y-auto pr-1">
+            <button
+              v-for="(source, index) in qaSourcePanelSources"
+              :key="`${source.doc_id || 'doc'}-${source.page ?? 'x'}-${source.chunk ?? index}`"
+              class="w-full text-left p-2 rounded-lg border border-border hover:border-primary/40 hover:bg-accent/20 transition-colors"
+              @click="openQaSource(source)"
+            >
+              <div class="flex items-start gap-2">
+                <FileText class="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                <div class="min-w-0 flex-1">
+                  <p class="text-xs font-semibold truncate">{{ source.source || `来源 ${index + 1}` }}</p>
+                  <div class="mt-1 flex flex-wrap gap-1">
+                    <span
+                      v-if="source.page !== undefined && source.page !== null"
+                      class="text-[10px] px-1.5 py-0.5 rounded border border-border bg-background"
+                    >
+                      页码 p.{{ source.page }}
+                    </span>
+                    <span
+                      v-if="source.chunk !== undefined && source.chunk !== null"
+                      class="text-[10px] px-1.5 py-0.5 rounded border border-border bg-background"
+                    >
+                      Chunk c.{{ source.chunk }}
+                    </span>
+                  </div>
+                  <p class="mt-1 text-[11px] text-muted-foreground line-clamp-2">{{ source.snippet || '点击查看原文片段' }}</p>
+                </div>
+              </div>
+            </button>
+          </div>
+
+          <EmptyState
+            v-else
+            :icon="FileText"
+            title="暂无来源"
+            description="提问后会在这里显示本次回答引用的文档片段。"
+            :hint="busy.qa ? '正在等待检索结果...' : '点击来源项可查看原文片段。'"
+            size="sm"
+          />
+        </div>
+
         <div class="flex-1 bg-card border border-border rounded-xl p-6 shadow-sm flex flex-col min-h-0">
           <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-4">简要统计</h3>
           <div v-if="busy.init" class="mt-2">
@@ -303,7 +422,7 @@
 import { ref, onMounted, onActivated, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessageSquare, Send, Trash2, Database, FileText, Sparkles, User, Bot } from 'lucide-vue-next'
-import { apiDelete, apiGet, apiPatch, apiPost } from '../api'
+import { apiDelete, apiGet, apiPatch, apiPost, apiSsePost } from '../api'
 import { useToast } from '../composables/useToast'
 import { useAppContextStore } from '../stores/appContext'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -336,7 +455,9 @@ const sessionTitleInput = ref('')
 const qaInput = ref('')
 const qaMessages = ref([])
 const qaAbilityLevel = ref('intermediate')
+const qaFlow = ref(createQaFlowState())
 const syncingFromSession = ref(false)
+const preserveQaFlowOnNextSessionLoad = ref(false)
 const sourcePreview = ref({
   open: false,
   loading: false,
@@ -355,6 +476,16 @@ const busy = ref({
   sessionAction: false
 })
 const scrollContainer = ref(null)
+
+const QA_FLOW_STAGES = [
+  { key: 'retrieving', label: '检索中' },
+  { key: 'generating', label: '生成中' },
+  { key: 'saving', label: '保存中' },
+  { key: 'done', label: '完成' },
+  { key: 'failed', label: '失败' },
+]
+
+const STREAM_NON_FALLBACK_CODES = new Set(['validation_error', 'not_found', 'no_results'])
 
 const LEVEL_LABELS = {
   beginner: {
@@ -426,6 +557,52 @@ const qaEmptyPrimaryAction = computed(() => {
 const currentLevelMeta = computed(() => getLevelMeta(qaAbilityLevel.value))
 const entryFocusContext = computed(() => appContext.routeContext.focus)
 const entryDocContextId = computed(() => parseRouteContext(route.query).docId)
+const qaFlowStages = QA_FLOW_STAGES
+const latestAssistantMessage = computed(() => {
+  for (let i = qaMessages.value.length - 1; i >= 0; i -= 1) {
+    const msg = qaMessages.value[i]
+    if (msg?.role === 'answer') return msg
+  }
+  return null
+})
+const qaStreamingMessage = computed(() => {
+  for (let i = qaMessages.value.length - 1; i >= 0; i -= 1) {
+    const msg = qaMessages.value[i]
+    if (msg?.role === 'answer' && msg.streaming) return msg
+  }
+  return null
+})
+const qaSourcePanelMessage = computed(() => qaStreamingMessage.value || latestAssistantMessage.value || null)
+const qaSourcePanelSources = computed(() => {
+  const sources = qaSourcePanelMessage.value?.sources
+  return Array.isArray(sources) ? sources : []
+})
+const qaFlowPanelBadgeText = computed(() => {
+  const phase = qaFlow.value.phase
+  if (phase === 'retrieving') return '检索中'
+  if (phase === 'generating') return '生成中'
+  if (phase === 'saving') return '保存中'
+  if (phase === 'done' && qaFlow.value.result === 'no_results') return '无结果'
+  if (phase === 'done') return '完成'
+  if (phase === 'failed') return '失败'
+  return '就绪'
+})
+const qaFlowPanelBadgeClass = computed(() => {
+  const phase = qaFlow.value.phase
+  if (phase === 'retrieving' || phase === 'generating' || phase === 'saving') {
+    return 'border-blue-200 bg-blue-50 text-blue-700'
+  }
+  if (phase === 'done' && qaFlow.value.result === 'no_results') {
+    return 'border-amber-200 bg-amber-50 text-amber-700'
+  }
+  if (phase === 'done') {
+    return 'border-green-200 bg-green-50 text-green-700'
+  }
+  if (phase === 'failed') {
+    return 'border-red-200 bg-red-50 text-red-700'
+  }
+  return 'border-border text-muted-foreground'
+})
 
 function normalizeAbilityLevel(level) {
   const normalized = (level || '').toString().trim().toLowerCase()
@@ -437,6 +614,133 @@ function normalizeAbilityLevel(level) {
 
 function getLevelMeta(level) {
   return LEVEL_LABELS[normalizeAbilityLevel(level)] || LEVEL_LABELS.intermediate
+}
+
+function createQaFlowState() {
+  return {
+    phase: 'idle',
+    message: '',
+    result: null,
+    retrievedCount: 0,
+    timings: {},
+    usedFallback: false,
+    errorCode: null,
+  }
+}
+
+function resetQaFlow() {
+  qaFlow.value = createQaFlowState()
+}
+
+function updateQaFlow(patch = {}) {
+  qaFlow.value = {
+    ...qaFlow.value,
+    ...patch,
+    timings: {
+      ...(qaFlow.value?.timings || {}),
+      ...(patch.timings || {}),
+    },
+  }
+}
+
+function qaFlowPhaseChipClass(stageKey) {
+  const phase = qaFlow.value.phase
+  const isCurrent = phase === stageKey
+  const isDone = phase === 'done' && (stageKey === 'retrieving' || stageKey === 'generating' || stageKey === 'saving' || stageKey === 'done')
+
+  if (phase === 'failed' && stageKey === 'failed') return 'border-red-300 bg-red-50 text-red-700'
+  if (qaFlow.value.result === 'no_results' && stageKey === 'done') return 'border-amber-300 bg-amber-50 text-amber-700'
+  if (isCurrent || isDone) return 'border-primary/30 bg-primary/10 text-primary'
+  return 'border-border text-muted-foreground'
+}
+
+function qaMessageStatusText(msg) {
+  if (!msg || msg.role === 'question') return ''
+  if (msg.status === 'pending') return '排队中'
+  if (msg.status === 'streaming') return msg.content?.trim() ? '生成中' : '准备生成'
+  if (msg.status === 'fallback') return '已回退非流式'
+  if (msg.status === 'error') return '生成失败'
+  return '已完成'
+}
+
+function qaMessageStatusBadgeClass(msg) {
+  if (!msg) return 'border-border text-muted-foreground'
+  if (msg.status === 'fallback') return 'border-amber-300 bg-amber-50 text-amber-700'
+  if (msg.status === 'error') return 'border-red-300 bg-red-50 text-red-700'
+  if (msg.status === 'streaming' || msg.status === 'pending') return 'border-blue-300 bg-blue-50 text-blue-700'
+  return 'border-green-300 bg-green-50 text-green-700'
+}
+
+function normalizeQaSource(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const rawSource = typeof raw.source === 'string' ? raw.source.trim() : ''
+  let friendlySource = rawSource
+  if (!friendlySource) {
+    friendlySource = raw.doc_id ? `文档片段 (${String(raw.doc_id).slice(0, 8)})` : '文档片段'
+  } else if (/^document(\b|[\s._-])/i.test(friendlySource) || /^document$/i.test(friendlySource)) {
+    friendlySource = friendlySource.replace(/^document/i, '文档片段')
+  }
+  return {
+    source: friendlySource,
+    snippet: raw.snippet || '',
+    doc_id: raw.doc_id ?? null,
+    kb_id: raw.kb_id ?? null,
+    page: raw.page ?? null,
+    chunk: raw.chunk ?? null,
+  }
+}
+
+function makeAssistantPlaceholder() {
+  return {
+    role: 'answer',
+    content: '',
+    sources: [],
+    abilityLevel: qaAbilityLevel.value,
+    streaming: true,
+    status: 'pending',
+    errorCode: null,
+  }
+}
+
+function streamPayloadError(payload = {}) {
+  const err = new Error(payload.message || '流式回答失败')
+  err.qaStream = {
+    code: payload.code || 'unknown',
+    stage: payload.stage || 'generating',
+    retryable: payload.retryable !== false,
+    message: payload.message || '流式回答失败',
+  }
+  return err
+}
+
+function isStreamErrorRetryable(err) {
+  const code = err?.qaStream?.code
+  if (code && STREAM_NON_FALLBACK_CODES.has(code)) return false
+  if (typeof err?.qaStream?.retryable === 'boolean') return err.qaStream.retryable
+  return true
+}
+
+function buildQaPayload(question, activeSessionId) {
+  const payload = {
+    question,
+    user_id: resolvedUserId.value,
+  }
+  if (activeSessionId) {
+    payload.session_id = activeSessionId
+  }
+  if (selectedSession.value?.doc_id) {
+    payload.doc_id = selectedSession.value.doc_id
+  } else if (selectedSession.value?.kb_id) {
+    payload.kb_id = selectedSession.value.kb_id
+  } else if (selectedDocId.value) {
+    payload.doc_id = selectedDocId.value
+  } else {
+    payload.kb_id = selectedKbId.value
+  }
+  if (entryFocusContext.value) {
+    payload.focus = entryFocusContext.value
+  }
+  return payload
 }
 
 function goToUpload() {
@@ -500,13 +804,17 @@ function mapServerMessage(message) {
   return {
     role: 'answer',
     content: message.content,
-    sources: Array.isArray(message.sources) ? message.sources : []
+    sources: Array.isArray(message.sources) ? message.sources.map(normalizeQaSource).filter(Boolean) : [],
+    streaming: false,
+    status: 'done',
+    errorCode: null,
   }
 }
 
 async function loadSessionMessages(sessionId) {
   if (!sessionId) {
     qaMessages.value = []
+    resetQaFlow()
     return
   }
   try {
@@ -547,6 +855,7 @@ async function createSession(options = {}) {
       selectedSessionId.value = sessionId
       sessionTitleInput.value = session.title || ''
       qaMessages.value = []
+      resetQaFlow()
     }
     if (!silent) {
       showToast('已创建新会话', 'success')
@@ -584,6 +893,7 @@ async function clearCurrentSessionMessages() {
   try {
     await apiDelete(`/api/chat/sessions/${selectedSessionId.value}/messages?user_id=${encodeURIComponent(resolvedUserId.value)}`)
     qaMessages.value = []
+    resetQaFlow()
     showToast('会话消息已清空', 'success')
   } catch {
     // error toast handled globally
@@ -603,6 +913,7 @@ async function deleteCurrentSession() {
     selectedSessionId.value = ''
     sessionTitleInput.value = ''
     qaMessages.value = []
+    resetQaFlow()
     await refreshSessions()
     showToast('会话已删除', 'success')
   } catch {
@@ -614,6 +925,7 @@ async function deleteCurrentSession() {
 
 function clearLocalMessages() {
   qaMessages.value = []
+  resetQaFlow()
 }
 
 function closeSourcePreview() {
@@ -640,8 +952,8 @@ async function openQaSource(source) {
   try {
     const params = new URLSearchParams()
     params.set('user_id', resolvedUserId.value)
-    if (source.page) params.set('page', String(source.page))
-    if (source.chunk) params.set('chunk', String(source.chunk))
+    if (source.page !== undefined && source.page !== null) params.set('page', String(source.page))
+    if (source.chunk !== undefined && source.chunk !== null) params.set('chunk', String(source.chunk))
     if (source.snippet) params.set('q', String(source.snippet).slice(0, 120))
     const res = await apiGet(`/api/docs/${docId}/preview?${params.toString()}`)
     sourcePreview.value = {
@@ -705,52 +1017,191 @@ async function askQuestion() {
   const question = qaInput.value.trim()
   qaInput.value = ''
   qaMessages.value.push({ role: 'question', content: question })
+  const placeholderIndex = qaMessages.value.push(makeAssistantPlaceholder()) - 1
   
+  resetQaFlow()
+  updateQaFlow({
+    phase: 'retrieving',
+    message: '正在检索相关片段...',
+  })
   busy.value.qa = true
   scrollToBottom()
+  let activeSessionId = selectedSessionId.value
   
   try {
-    let activeSessionId = selectedSessionId.value
     if (!activeSessionId) {
       activeSessionId = await createSession({ silent: true, activate: false })
     }
+    const payload = buildQaPayload(question, activeSessionId)
 
-    const payload = {
-      question,
-      user_id: resolvedUserId.value
-    }
-    if (activeSessionId) {
-      payload.session_id = activeSessionId
-    }
-    if (selectedSession.value?.doc_id) {
-      payload.doc_id = selectedSession.value.doc_id
-    } else if (selectedSession.value?.kb_id) {
-      payload.kb_id = selectedSession.value.kb_id
-    } else if (selectedDocId.value) {
-      payload.doc_id = selectedDocId.value
-    } else {
-      payload.kb_id = selectedKbId.value
-    }
-    // 如果从学习路径跳转过来，传递目标知识点
-    if (entryFocusContext.value) {
-      payload.focus = entryFocusContext.value
-    }
-
-    const res = await apiPost('/api/qa', payload)
-    await refreshSessions()
-    if (!selectedSessionId.value && activeSessionId) {
-      selectedSessionId.value = activeSessionId
-    }
-    const responseLevel = normalizeAbilityLevel(res?.ability_level || qaAbilityLevel.value)
-    qaAbilityLevel.value = responseLevel
-    qaMessages.value.push({
-      role: 'answer',
-      content: res.answer,
-      sources: res.sources,
-      abilityLevel: responseLevel,
+    let streamDone = false
+    await apiSsePost('/api/qa/stream', payload, {
+      onStatus(data = {}) {
+        const nextPhase = data.stage || qaFlow.value.phase
+        updateQaFlow({
+          phase: nextPhase,
+          message: data.message || qaFlow.value.message,
+          result: data.result ?? qaFlow.value.result,
+          retrievedCount: Number.isFinite(Number(data.retrieved_count))
+            ? Number(data.retrieved_count)
+            : qaFlow.value.retrievedCount,
+          timings: data.timings || {},
+          errorCode: nextPhase === 'failed' ? (qaFlow.value.errorCode || 'unknown') : qaFlow.value.errorCode,
+        })
+        const msg = qaMessages.value[placeholderIndex]
+        if (!msg || msg.role !== 'answer') return
+        if (nextPhase === 'retrieving') {
+          msg.status = 'pending'
+          msg.streaming = true
+        } else if (nextPhase === 'generating') {
+          msg.status = 'streaming'
+          msg.streaming = true
+        } else if (nextPhase === 'saving') {
+          msg.status = 'streaming'
+          msg.streaming = true
+        } else if (nextPhase === 'done') {
+          msg.streaming = false
+          if (qaFlow.value.usedFallback) {
+            msg.status = 'fallback'
+          } else if (data.result === 'no_results') {
+            msg.status = 'done'
+          } else {
+            msg.status = 'done'
+          }
+        } else if (nextPhase === 'failed') {
+          msg.status = 'error'
+          msg.streaming = false
+        }
+      },
+      onChunk(data = {}) {
+        const msg = qaMessages.value[placeholderIndex]
+        if (!msg || msg.role !== 'answer') return
+        msg.streaming = true
+        msg.status = 'streaming'
+        msg.content = `${msg.content || ''}${data.delta || ''}`
+      },
+      onSources(data = {}) {
+        const msg = qaMessages.value[placeholderIndex]
+        if (!msg || msg.role !== 'answer') return
+        msg.sources = Array.isArray(data.sources) ? data.sources.map(normalizeQaSource).filter(Boolean) : []
+        if (Number.isFinite(Number(data.retrieved_count))) {
+          updateQaFlow({ retrievedCount: Number(data.retrieved_count) })
+        }
+      },
+      onDone(data = {}) {
+        streamDone = true
+        const responseLevel = normalizeAbilityLevel(data.ability_level || qaAbilityLevel.value)
+        qaAbilityLevel.value = responseLevel
+        const msg = qaMessages.value[placeholderIndex]
+        if (msg && msg.role === 'answer') {
+          msg.abilityLevel = responseLevel
+          msg.streaming = false
+          if ((!msg.content || !msg.content.trim()) && data.result === 'no_results') {
+            msg.content = '无法找到与该问题相关的内容。'
+          }
+          msg.status = qaFlow.value.usedFallback ? 'fallback' : 'done'
+        }
+        updateQaFlow({
+          phase: 'done',
+          message: data.result === 'no_results' ? '未检索到相关内容' : '回答生成完成',
+          result: data.result || 'ok',
+          retrievedCount: Number.isFinite(Number(data.retrieved_count))
+            ? Number(data.retrieved_count)
+            : qaFlow.value.retrievedCount,
+          timings: data.timings || {},
+          errorCode: null,
+        })
+        if (!selectedSessionId.value && activeSessionId) {
+          preserveQaFlowOnNextSessionLoad.value = true
+          selectedSessionId.value = activeSessionId
+        }
+      },
+      onError(data = {}) {
+        const msg = qaMessages.value[placeholderIndex]
+        if (msg && msg.role === 'answer') {
+          msg.streaming = false
+          msg.status = 'error'
+          msg.errorCode = data.code || 'unknown'
+        }
+        updateQaFlow({
+          phase: 'failed',
+          message: data.message || '流式回答失败',
+          errorCode: data.code || 'unknown',
+        })
+        throw streamPayloadError(data)
+      },
     })
+
+    if (streamDone) {
+      await refreshSessions()
+      if (!selectedSessionId.value && activeSessionId) {
+        preserveQaFlowOnNextSessionLoad.value = true
+        selectedSessionId.value = activeSessionId
+      }
+    }
   } catch (err) {
-    qaMessages.value.push({ role: 'answer', content: '错误：' + err.message })
+    const canFallback = isStreamErrorRetryable(err)
+    if (canFallback) {
+      updateQaFlow({
+        phase: 'failed',
+        message: '流式连接中断，正在回退到非流式请求...',
+      })
+      try {
+        const payload = buildQaPayload(question, activeSessionId)
+        const res = await apiPost('/api/qa', payload)
+        const responseLevel = normalizeAbilityLevel(res?.ability_level || qaAbilityLevel.value)
+        qaAbilityLevel.value = responseLevel
+        const msg = qaMessages.value[placeholderIndex]
+        if (msg && msg.role === 'answer') {
+          msg.content = res?.answer || ''
+          msg.sources = Array.isArray(res?.sources) ? res.sources.map(normalizeQaSource).filter(Boolean) : []
+          msg.abilityLevel = responseLevel
+          msg.streaming = false
+          msg.status = 'fallback'
+          msg.errorCode = null
+        }
+        updateQaFlow({
+          phase: 'done',
+          message: '流式中断，已自动回退为非流式回答',
+          usedFallback: true,
+          result: res?.answer ? 'ok' : qaFlow.value.result,
+          errorCode: null,
+        })
+        await refreshSessions()
+        if (!selectedSessionId.value && (res?.session_id || activeSessionId)) {
+          preserveQaFlowOnNextSessionLoad.value = true
+          selectedSessionId.value = res?.session_id || activeSessionId
+        }
+      } catch (fallbackErr) {
+        const msg = qaMessages.value[placeholderIndex]
+        if (msg && msg.role === 'answer') {
+          msg.content = `错误：${fallbackErr.message}`
+          msg.streaming = false
+          msg.status = 'error'
+          msg.errorCode = fallbackErr?.qaStream?.code || 'fallback_failed'
+        }
+        updateQaFlow({
+          phase: 'failed',
+          message: fallbackErr?.message || '问答请求失败',
+          errorCode: fallbackErr?.qaStream?.code || 'fallback_failed',
+        })
+      }
+    } else {
+      const msg = qaMessages.value[placeholderIndex]
+      if (msg && msg.role === 'answer') {
+        msg.content = `错误：${err.message}`
+        msg.streaming = false
+        msg.status = 'error'
+        msg.errorCode = err?.qaStream?.code || 'request_failed'
+      } else {
+        qaMessages.value.push({ role: 'answer', content: '错误：' + err.message, status: 'error' })
+      }
+      updateQaFlow({
+        phase: 'failed',
+        message: err?.message || '问答请求失败',
+        errorCode: err?.qaStream?.code || 'request_failed',
+      })
+    }
   } finally {
     busy.value.qa = false
     scrollToBottom()
@@ -806,6 +1257,7 @@ watch(selectedKbId, async () => {
     selectedSessionId.value = ''
     sessionTitleInput.value = ''
     qaMessages.value = []
+    resetQaFlow()
   }
   selectedDocId.value = ''
   await refreshDocsInKb()
@@ -817,6 +1269,7 @@ watch(selectedDocId, () => {
     selectedSessionId.value = ''
     sessionTitleInput.value = ''
     qaMessages.value = []
+    resetQaFlow()
   }
 })
 
@@ -824,10 +1277,16 @@ watch(selectedSessionId, async (sessionId) => {
   if (!sessionId) {
     sessionTitleInput.value = ''
     qaMessages.value = []
+    resetQaFlow()
     return
   }
   const session = sessions.value.find((item) => item.id === sessionId)
-  if (!session) return
+  if (!session) {
+    preserveQaFlowOnNextSessionLoad.value = false
+    return
+  }
+  const skipFlowReset = preserveQaFlowOnNextSessionLoad.value
+  preserveQaFlowOnNextSessionLoad.value = false
 
   sessionTitleInput.value = session.title || ''
   syncingFromSession.value = true
@@ -840,9 +1299,36 @@ watch(selectedSessionId, async (sessionId) => {
   } finally {
     syncingFromSession.value = false
   }
+  if (!busy.value.qa && !skipFlowReset) {
+    resetQaFlow()
+  }
   await loadSessionMessages(sessionId)
 })
 
 watch(qaMessages, () => scrollToBottom(), { deep: true })
 
 </script>
+
+<style scoped>
+.qa-stream-cursor {
+  display: inline-block;
+  width: 0.45rem;
+  height: 1em;
+  vertical-align: text-bottom;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.8;
+  animation: qaCursorBlink 1s steps(2, start) infinite;
+}
+
+@keyframes qaCursorBlink {
+  0%,
+  49% {
+    opacity: 0.8;
+  }
+  50%,
+  100% {
+    opacity: 0.15;
+  }
+}
+</style>

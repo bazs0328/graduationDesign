@@ -11,6 +11,7 @@ const EMPTY_ROUTE_CONTEXT = {
 }
 
 const kbsInFlightByUser = new Map()
+const LEGACY_DEFAULT_KB_NAMES = new Set(['default'])
 
 function resolveUserIdFromStorage() {
   return (
@@ -23,6 +24,29 @@ function resolveUserIdFromStorage() {
 function storageKeyForUser(userId) {
   const normalized = normalizeQueryString(userId) || 'default'
   return `${APP_CONTEXT_KEY_PREFIX}${normalized}`
+}
+
+function normalizeKbNameForDisplay(name, kbId = '') {
+  const raw = (name ?? '').toString().trim()
+  if (!raw) return raw
+  if (LEGACY_DEFAULT_KB_NAMES.has(raw.toLowerCase())) {
+    return '默认知识库'
+  }
+  if (/^default knowledge base$/i.test(raw)) {
+    return '默认知识库'
+  }
+  if (raw === kbId) {
+    return raw
+  }
+  return raw
+}
+
+function normalizeKbRow(kb) {
+  if (!kb || typeof kb !== 'object') return kb
+  return {
+    ...kb,
+    name: normalizeKbNameForDisplay(kb.name, kb.id),
+  }
 }
 
 function readPersistedContext(userId) {
@@ -147,7 +171,7 @@ export const useAppContextStore = defineStore('appContext', {
 
       const request = apiGet(`/api/kb?user_id=${encodeURIComponent(userId)}`)
         .then((rows) => {
-          this.kbs = Array.isArray(rows) ? rows : []
+          this.kbs = Array.isArray(rows) ? rows.map(normalizeKbRow) : []
           this.kbsUserId = userId
           this.syncSelectionWithKbs()
           return this.kbs

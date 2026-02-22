@@ -1,4 +1,6 @@
-from typing import List, Tuple
+import logging
+import re
+from typing import Any, Iterator, List, Tuple
 
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -7,6 +9,9 @@ from app.core.config import settings
 from app.services.lexical import bm25_search
 from app.core.vectorstore import get_vectorstore
 
+logger = logging.getLogger(__name__)
+
+NO_RESULTS_ANSWER = "无法找到与该问题相关的内容。"
 
 _QA_HUMAN_TEMPLATE = (
     "Conversation history:\n{history}\n\nQuestion: {question}\n\nContext:\n{context}\n\nAnswer:"
@@ -96,6 +101,37 @@ def answer_question(
     weak_concepts: list[str] | None = None,
     focus_keypoint: str | None = None,
 ) -> Tuple[str, List[dict]]:
+    prepared = prepare_qa_answer(
+        user_id=user_id,
+        question=question,
+        doc_id=doc_id,
+        kb_id=kb_id,
+        history=history,
+        top_k=top_k,
+        fetch_k=fetch_k,
+        ability_level=ability_level,
+        weak_concepts=weak_concepts,
+        focus_keypoint=focus_keypoint,
+    )
+    if prepared["no_results"]:
+        return NO_RESULTS_ANSWER, []
+    llm = get_llm(temperature=0.2)
+    answer = generate_qa_answer(llm, prepared["formatted_messages"])
+    return answer, prepared["sources"]
+
+
+def prepare_qa_answer(
+    user_id: str,
+    question: str,
+    doc_id: str | None = None,
+    kb_id: str | None = None,
+    history: str | None = None,
+    top_k: int | None = None,
+    fetch_k: int | None = None,
+    ability_level: str = "intermediate",
+    weak_concepts: list[str] | None = None,
+    focus_keypoint: str | None = None,
+) -> dict:
     docs = retrieve_documents(
         user_id=user_id,
         question=question,
@@ -105,22 +141,83 @@ def answer_question(
         fetch_k=fetch_k,
     )
     if not docs:
-        return "无法找到与该问题相关的内容。", []
+        return {
+            "sources": [],
+            "formatted_messages": None,
+            "retrieved_count": 0,
+            "no_results": True,
+        }
 
     sources, context = build_sources_and_context(docs)
-
     system_prompt = build_adaptive_system_prompt(
         ability_level=ability_level,
         weak_concepts=weak_concepts,
         focus_keypoint=focus_keypoint,
     )
     qa_prompt = build_qa_prompt(system_prompt)
-    llm = get_llm(temperature=0.2)
     msg = qa_prompt.format_messages(
         question=question, context=context, history=history or "None"
     )
-    result = llm.invoke(msg)
-    return result.content.strip(), sources
+    return {
+        "sources": sources,
+        "formatted_messages": msg,
+        "retrieved_count": len(sources),
+        "no_results": False,
+    }
+
+
+def _coerce_text_content(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        chunks: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                chunks.append(item)
+                continue
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    chunks.append(text)
+        return "".join(chunks)
+    return str(content)
+
+
+def generate_qa_answer(llm: Any, formatted_messages: Any) -> str:
+    result = llm.invoke(formatted_messages)
+    return _coerce_text_content(getattr(result, "content", result)).strip()
+
+
+def _pseudo_stream_chunks(text: str) -> Iterator[str]:
+    normalized = (text or "").strip()
+    if not normalized:
+        return
+    parts = re.split(r"(?<=[。！？!?；;\n])", normalized)
+    for part in parts:
+        chunk = part.strip()
+        if chunk:
+            yield chunk
+
+
+def stream_qa_answer(llm: Any, formatted_messages: Any) -> Iterator[str]:
+    try:
+        for chunk in llm.stream(formatted_messages):
+            delta = _coerce_text_content(getattr(chunk, "content", chunk))
+            if delta:
+                yield delta
+        return
+    except Exception as exc:
+        logger.debug("LLM native stream unavailable, fallback to pseudo-stream: %s", exc, exc_info=True)
+
+    full_answer = generate_qa_answer(llm, formatted_messages)
+    yielded = False
+    for piece in _pseudo_stream_chunks(full_answer):
+        yielded = True
+        yield piece
+    if not yielded and full_answer:
+        yield full_answer
 
 
 def retrieve_documents(
@@ -249,7 +346,12 @@ def build_sources_and_context(docs: list) -> Tuple[List[dict], str]:
     for idx, doc in enumerate(docs, start=1):
         metadata = doc.metadata or {}
         snippet = doc.page_content[:400].replace("\n", " ")
-        source_name = metadata.get("source", "document")
+        source_name = (
+            metadata.get("source")
+            or metadata.get("filename")
+            or metadata.get("title")
+            or "文档片段"
+        )
         page = metadata.get("page")
         chunk = metadata.get("chunk")
         doc_id_meta = metadata.get("doc_id")

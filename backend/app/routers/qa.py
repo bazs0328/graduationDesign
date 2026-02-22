@@ -1,10 +1,15 @@
 import json
 import logging
+import time
+from dataclasses import dataclass
+from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.core.llm import get_llm
 from app.core.users import ensure_user
 from app.core.knowledge_bases import ensure_kb
 from app.core.vectorstore import get_vectorstore
@@ -13,7 +18,12 @@ from app.models import ChatMessage, ChatSession, Document, QARecord
 from app.schemas import QARequest, QAResponse, SourceSnippet
 from app.services.learner_profile import get_or_create_profile, get_weak_concepts_by_mastery
 from app.services.mastery import record_study_interaction
-from app.services.qa import answer_question
+from app.services.qa import (
+    NO_RESULTS_ANSWER,
+    generate_qa_answer,
+    prepare_qa_answer,
+    stream_qa_answer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +32,32 @@ router = APIRouter()
 HISTORY_LIMIT = 6
 
 
-@router.post("/qa", response_model=QAResponse)
-def ask_question(payload: QARequest, db: Session = Depends(get_db)):
+@dataclass
+class QAResolvedContext:
+    resolved_user_id: str
+    doc_id: str | None
+    kb_id: str | None
+    history: str | None
+    session: ChatSession | None
+    profile: Any
+    weak_concepts: list[str]
+
+
+def _serialize_sources(sources: list[dict]) -> list[dict]:
+    return [
+        {
+            "source": s.get("source", ""),
+            "snippet": s.get("snippet", ""),
+            "doc_id": s.get("doc_id"),
+            "kb_id": s.get("kb_id"),
+            "page": s.get("page"),
+            "chunk": s.get("chunk"),
+        }
+        for s in (sources or [])
+    ]
+
+
+def _resolve_qa_request_context(payload: QARequest, db: Session) -> QAResolvedContext:
     resolved_user_id = ensure_user(db, payload.user_id)
     doc = None
     kb_id = None
@@ -93,72 +127,336 @@ def ask_question(payload: QARequest, db: Session = Depends(get_db)):
     profile = get_or_create_profile(db, resolved_user_id)
     weak_concepts = get_weak_concepts_by_mastery(db, resolved_user_id)
 
-    answer, sources = answer_question(
-        resolved_user_id,
-        payload.question,
+    return QAResolvedContext(
+        resolved_user_id=resolved_user_id,
         doc_id=doc_id,
         kb_id=kb_id,
         history=history,
-        top_k=payload.top_k,
-        fetch_k=payload.fetch_k,
-        ability_level=profile.ability_level,
+        session=session,
+        profile=profile,
         weak_concepts=weak_concepts,
-        focus_keypoint=payload.focus,
     )
 
+
+def _persist_qa_result(
+    db: Session,
+    payload: QARequest,
+    ctx: QAResolvedContext,
+    answer: str,
+    sources: list[dict],
+) -> None:
     record = QARecord(
         id=str(uuid4()),
-        user_id=resolved_user_id,
-        kb_id=kb_id,
-        doc_id=doc_id,
+        user_id=ctx.resolved_user_id,
+        kb_id=ctx.kb_id,
+        doc_id=ctx.doc_id,
         question=payload.question,
         answer=answer,
     )
     db.add(record)
 
-    if session:
-        if not session.title:
-            session.title = payload.question[:60]
-            db.add(session)
+    if ctx.session:
+        if not ctx.session.title:
+            ctx.session.title = payload.question[:60]
+            db.add(ctx.session)
         db.add(
             ChatMessage(
                 id=str(uuid4()),
-                session_id=session.id,
+                session_id=ctx.session.id,
                 role="user",
                 content=payload.question,
             )
         )
-        sources_list = [
-            {
-                "source": s.get("source", ""),
-                "snippet": s.get("snippet", ""),
-                "doc_id": s.get("doc_id"),
-                "kb_id": s.get("kb_id"),
-                "page": s.get("page"),
-                "chunk": s.get("chunk"),
-            }
-            for s in sources
-        ]
+        sources_list = _serialize_sources(sources)
         db.add(
             ChatMessage(
                 id=str(uuid4()),
-                session_id=session.id,
+                session_id=ctx.session.id,
                 role="assistant",
                 content=answer,
                 sources_json=json.dumps(sources_list, ensure_ascii=False) if sources_list else None,
             )
         )
 
-    _update_mastery_from_qa(db, resolved_user_id, payload.question, doc_id, kb_id, payload.focus)
-
+    _update_mastery_from_qa(
+        db,
+        ctx.resolved_user_id,
+        payload.question,
+        ctx.doc_id,
+        ctx.kb_id,
+        payload.focus,
+    )
     db.commit()
+
+
+def _sse_event(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _http_error_event(exc: HTTPException, stage: str) -> tuple[dict, dict]:
+    detail = str(exc.detail)
+    code = "validation_error"
+    retryable = False
+    if exc.status_code == 404:
+        code = "not_found"
+    elif exc.status_code >= 500:
+        code = "unknown"
+        retryable = True
+    elif exc.status_code == 409:
+        code = "validation_error"
+    status_payload = {"stage": "failed", "message": detail}
+    error_payload = {
+        "code": code,
+        "stage": stage,
+        "message": detail,
+        "retryable": retryable,
+    }
+    return status_payload, error_payload
+
+
+def _qa_stream_response(payload: QARequest, db: Session) -> StreamingResponse:
+    def event_iter():
+        total_started = time.perf_counter()
+        retrieve_started = total_started
+        retrieve_ms = 0
+        generate_ms = 0
+        current_stage = "retrieving"
+        ctx: QAResolvedContext | None = None
+        try:
+            yield _sse_event(
+                "status",
+                {"stage": "retrieving", "message": "正在检索相关片段..."},
+            )
+            ctx = _resolve_qa_request_context(payload, db)
+            prepared = prepare_qa_answer(
+                user_id=ctx.resolved_user_id,
+                question=payload.question,
+                doc_id=ctx.doc_id,
+                kb_id=ctx.kb_id,
+                history=ctx.history,
+                top_k=payload.top_k,
+                fetch_k=payload.fetch_k,
+                ability_level=ctx.profile.ability_level,
+                weak_concepts=ctx.weak_concepts,
+                focus_keypoint=payload.focus,
+            )
+            retrieve_ms = int((time.perf_counter() - retrieve_started) * 1000)
+            retrieved_count = int(prepared.get("retrieved_count") or 0)
+            sources = prepared.get("sources") or []
+            yield _sse_event(
+                "sources",
+                {
+                    "sources": _serialize_sources(sources),
+                    "retrieved_count": retrieved_count,
+                },
+            )
+
+            if prepared.get("no_results"):
+                no_results_answer = NO_RESULTS_ANSWER
+                current_stage = "saving"
+                _persist_qa_result(db, payload, ctx, no_results_answer, [])
+                total_ms = int((time.perf_counter() - total_started) * 1000)
+                done_payload = {
+                    "session_id": ctx.session.id if ctx.session else None,
+                    "ability_level": getattr(ctx.profile, "ability_level", None),
+                    "result": "no_results",
+                    "retrieved_count": 0,
+                    "timings": {
+                        "retrieve_ms": retrieve_ms,
+                        "generate_ms": 0,
+                        "total_ms": total_ms,
+                    },
+                }
+                yield _sse_event(
+                    "status",
+                    {
+                        "stage": "done",
+                        "message": "未检索到相关内容",
+                        "result": "no_results",
+                        "retrieved_count": 0,
+                        "timings": done_payload["timings"],
+                    },
+                )
+                yield _sse_event("done", done_payload)
+                return
+
+            llm = get_llm(temperature=0.2)
+            current_stage = "generating"
+            yield _sse_event(
+                "status",
+                {
+                    "stage": "generating",
+                    "message": "正在生成回答...",
+                    "retrieved_count": retrieved_count,
+                    "timings": {"retrieve_ms": retrieve_ms},
+                },
+            )
+
+            generate_started = time.perf_counter()
+            answer_parts: list[str] = []
+            for delta in stream_qa_answer(llm, prepared["formatted_messages"]):
+                if not delta:
+                    continue
+                answer_parts.append(delta)
+                yield _sse_event("chunk", {"delta": delta})
+            generate_ms = int((time.perf_counter() - generate_started) * 1000)
+
+            answer = "".join(answer_parts).strip()
+            if not answer:
+                answer = generate_qa_answer(llm, prepared["formatted_messages"])
+                generate_ms = max(generate_ms, 1)
+
+            yield _sse_event(
+                "status",
+                {
+                    "stage": "saving",
+                    "message": "正在保存会话记录...",
+                    "retrieved_count": retrieved_count,
+                    "timings": {
+                        "retrieve_ms": retrieve_ms,
+                        "generate_ms": generate_ms,
+                    },
+                },
+            )
+            current_stage = "saving"
+            _persist_qa_result(db, payload, ctx, answer, sources)
+            total_ms = int((time.perf_counter() - total_started) * 1000)
+            done_payload = {
+                "session_id": ctx.session.id if ctx.session else None,
+                "ability_level": getattr(ctx.profile, "ability_level", None),
+                "result": "ok",
+                "retrieved_count": retrieved_count,
+                "timings": {
+                    "retrieve_ms": retrieve_ms,
+                    "generate_ms": generate_ms,
+                    "total_ms": total_ms,
+                },
+            }
+            yield _sse_event(
+                "status",
+                {
+                    "stage": "done",
+                    "message": "回答生成完成",
+                    "result": "ok",
+                    "retrieved_count": retrieved_count,
+                    "timings": done_payload["timings"],
+                },
+            )
+            yield _sse_event("done", done_payload)
+        except HTTPException as exc:
+            if db.in_transaction():
+                db.rollback()
+            status_payload, error_payload = _http_error_event(exc, current_stage)
+            yield _sse_event("status", status_payload)
+            yield _sse_event("error", error_payload)
+        except Exception as exc:
+            if db.in_transaction():
+                db.rollback()
+            logger.exception("QA stream failed")
+            total_ms = int((time.perf_counter() - total_started) * 1000)
+            if current_stage == "generating":
+                error_code = "generation_failed"
+                retryable = True
+            elif current_stage == "saving":
+                error_code = "unknown"
+                retryable = False
+            else:
+                error_code = "unknown"
+                retryable = True
+            yield _sse_event(
+                "status",
+                {
+                    "stage": "failed",
+                    "message": "回答生成失败",
+                    "timings": {
+                        "retrieve_ms": retrieve_ms,
+                        "generate_ms": generate_ms,
+                        "total_ms": total_ms,
+                    },
+                },
+            )
+            yield _sse_event(
+                "error",
+                {
+                    "code": error_code,
+                    "stage": current_stage,
+                    "message": str(exc) or "回答生成失败",
+                    "retryable": retryable,
+                },
+            )
+
+    return StreamingResponse(
+        event_iter(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/qa", response_model=QAResponse)
+def ask_question(payload: QARequest, db: Session = Depends(get_db)):
+    ctx = _resolve_qa_request_context(payload, db)
+    prepared = prepare_qa_answer(
+        user_id=ctx.resolved_user_id,
+        question=payload.question,
+        doc_id=ctx.doc_id,
+        kb_id=ctx.kb_id,
+        history=ctx.history,
+        top_k=payload.top_k,
+        fetch_k=payload.fetch_k,
+        ability_level=ctx.profile.ability_level,
+        weak_concepts=ctx.weak_concepts,
+        focus_keypoint=payload.focus,
+    )
+    if prepared["no_results"]:
+        answer = NO_RESULTS_ANSWER
+        sources = []
+    else:
+        llm = get_llm(temperature=0.2)
+        answer = generate_qa_answer(llm, prepared["formatted_messages"])
+        sources = prepared["sources"]
+
+    _persist_qa_result(db, payload, ctx, answer, sources)
 
     return QAResponse(
         answer=answer,
         sources=[SourceSnippet(**s) for s in sources],
-        session_id=session.id if session else None,
-        ability_level=profile.ability_level,
+        session_id=ctx.session.id if ctx.session else None,
+        ability_level=ctx.profile.ability_level,
     )
+
+
+@router.post("/qa/stream")
+def ask_question_stream(payload: QARequest, db: Session = Depends(get_db)):
+    return _qa_stream_response(payload, db)
+
+
+@router.get("/qa/stream")
+def ask_question_stream_get(
+    question: str,
+    db: Session = Depends(get_db),
+    user_id: str | None = None,
+    doc_id: str | None = None,
+    kb_id: str | None = None,
+    session_id: str | None = None,
+    top_k: int | None = Query(default=None, ge=1, le=20),
+    fetch_k: int | None = Query(default=None, ge=1, le=50),
+    focus: str | None = None,
+):
+    payload = QARequest(
+        question=question,
+        user_id=user_id,
+        doc_id=doc_id,
+        kb_id=kb_id,
+        session_id=session_id,
+        top_k=top_k,
+        fetch_k=fetch_k,
+        focus=focus,
+    )
+    return _qa_stream_response(payload, db)
 
 
 def _update_mastery_from_qa(

@@ -8,16 +8,59 @@ export function enableGlobalErrorToast() {
   globalErrorToast = true
 }
 
-async function request(path, options = {}) {
-  const fullUrl = `${API_BASE}${path}`
+function buildAuthHeaders(path, headersLike) {
   const isAuth = path.includes('/api/auth')
-  const headers = new Headers(options.headers || undefined)
+  const headers = new Headers(headersLike || undefined)
   if (!isAuth) {
     const token = localStorage.getItem('gradtutor_access_token')
     if (token) {
       headers.set('Authorization', `Bearer ${token}`)
     }
   }
+  return { headers, isAuth }
+}
+
+async function parseErrorResponse(res) {
+  const text = await res.text()
+  try {
+    const data = JSON.parse(text)
+    if (data && data.detail) {
+      if (Array.isArray(data.detail)) {
+        const message = data.detail
+          .map((item) => {
+            if (!item || typeof item !== 'object') {
+              return String(item)
+            }
+            const loc = Array.isArray(item.loc) ? item.loc.join('.') : ''
+            const msg = item.msg || item.message || JSON.stringify(item)
+            return loc ? `${loc}: ${msg}` : msg
+          })
+          .join('; ')
+        throw new Error(message)
+      }
+      if (typeof data.detail === 'string') {
+        throw new Error(data.detail)
+      }
+      throw new Error(JSON.stringify(data.detail))
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message) {
+      throw err
+    }
+  }
+  throw new Error(text || `Request failed: ${res.status}`)
+}
+
+function maybeShowGlobalErrorToast(err) {
+  if (globalErrorToast) {
+    const { showToast } = useToast()
+    showToast(err.message || '请求失败', 'error')
+  }
+}
+
+async function request(path, options = {}) {
+  const fullUrl = `${API_BASE}${path}`
+  const { headers, isAuth } = buildAuthHeaders(path, options.headers)
   let abortId
   let signal = options.signal
   if (isAuth && !signal) {
@@ -29,42 +72,124 @@ async function request(path, options = {}) {
     const res = await fetch(fullUrl, { ...options, headers, signal })
     if (abortId) clearTimeout(abortId)
     if (!res.ok) {
-      const text = await res.text()
-      try {
-        const data = JSON.parse(text)
-        if (data && data.detail) {
-          if (Array.isArray(data.detail)) {
-            const message = data.detail
-              .map((item) => {
-                if (!item || typeof item !== 'object') {
-                  return String(item)
-                }
-                const loc = Array.isArray(item.loc) ? item.loc.join('.') : ''
-                const msg = item.msg || item.message || JSON.stringify(item)
-                return loc ? `${loc}: ${msg}` : msg
-              })
-              .join('; ')
-            throw new Error(message)
-          }
-          if (typeof data.detail === 'string') {
-            throw new Error(data.detail)
-          }
-          throw new Error(JSON.stringify(data.detail))
-        }
-      } catch (err) {
-        if (err instanceof Error && err.message) {
-          throw err
-        }
-      }
-      throw new Error(text || `Request failed: ${res.status}`)
+      await parseErrorResponse(res)
     }
     return res.json()
   } catch (err) {
     if (abortId) clearTimeout(abortId)
-    if (globalErrorToast) {
-      const { showToast } = useToast()
-      showToast(err.message || '请求失败', 'error')
+    maybeShowGlobalErrorToast(err)
+    throw err
+  }
+}
+
+function parseSseBlocks(buffer) {
+  const normalized = buffer.replace(/\r\n/g, '\n')
+  const blocks = normalized.split('\n\n')
+  return {
+    completeBlocks: blocks.slice(0, -1),
+    remainder: blocks.at(-1) ?? ''
+  }
+}
+
+function parseSseEventBlock(block) {
+  let eventName = 'message'
+  const dataParts = []
+  for (const line of block.split('\n')) {
+    if (!line || line.startsWith(':')) continue
+    if (line.startsWith('event:')) {
+      eventName = line.slice(6).trim() || 'message'
+      continue
     }
+    if (line.startsWith('data:')) {
+      dataParts.push(line.slice(5).trimStart())
+    }
+  }
+  if (!dataParts.length) return null
+  const rawData = dataParts.join('\n')
+  let data = rawData
+  try {
+    data = JSON.parse(rawData)
+  } catch {
+    // keep raw string for non-JSON events
+  }
+  return { event: eventName, data }
+}
+
+function dispatchSseEvent(parsed, handlers = {}) {
+  if (!parsed) return
+  const { event, data } = parsed
+  if (event === 'status' && typeof handlers.onStatus === 'function') handlers.onStatus(data)
+  if (event === 'chunk' && typeof handlers.onChunk === 'function') handlers.onChunk(data)
+  if (event === 'sources' && typeof handlers.onSources === 'function') handlers.onSources(data)
+  if (event === 'done' && typeof handlers.onDone === 'function') handlers.onDone(data)
+  if (event === 'error' && typeof handlers.onError === 'function') handlers.onError(data)
+  if (typeof handlers.onEvent === 'function') handlers.onEvent(event, data)
+}
+
+async function consumeSseResponse(res, handlers = {}) {
+  if (!res.body) {
+    throw new Error('SSE stream body is empty')
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const { completeBlocks, remainder } = parseSseBlocks(buffer)
+    buffer = remainder
+    for (const block of completeBlocks) {
+      const parsed = parseSseEventBlock(block)
+      dispatchSseEvent(parsed, handlers)
+    }
+  }
+
+  buffer += decoder.decode()
+  const tailBlock = parseSseEventBlock(buffer)
+  dispatchSseEvent(tailBlock, handlers)
+}
+
+export async function apiSsePost(path, body, handlers = {}, options = {}) {
+  const fullUrl = `${API_BASE}${path}`
+  const { headers } = buildAuthHeaders(path, options.headers)
+  headers.set('Accept', 'text/event-stream')
+  headers.set('Content-Type', 'application/json')
+
+  try {
+    const res = await fetch(fullUrl, {
+      method: 'POST',
+      ...options,
+      headers,
+      body: JSON.stringify(body)
+    })
+    if (!res.ok) {
+      await parseErrorResponse(res)
+    }
+    await consumeSseResponse(res, handlers)
+  } catch (err) {
+    maybeShowGlobalErrorToast(err)
+    throw err
+  }
+}
+
+export async function apiSseGet(path, handlers = {}, options = {}) {
+  const fullUrl = `${API_BASE}${path}`
+  const { headers } = buildAuthHeaders(path, options.headers)
+  headers.set('Accept', 'text/event-stream')
+  try {
+    const res = await fetch(fullUrl, {
+      method: 'GET',
+      ...options,
+      headers
+    })
+    if (!res.ok) {
+      await parseErrorResponse(res)
+    }
+    await consumeSseResponse(res, handlers)
+  } catch (err) {
+    maybeShowGlobalErrorToast(err)
     throw err
   }
 }
