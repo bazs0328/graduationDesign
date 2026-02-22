@@ -268,14 +268,16 @@
           </div>
         </div>
 
-        <div v-else class="bg-card border border-border rounded-xl p-20 flex flex-col items-center justify-center text-center space-y-6">
-          <div class="w-24 h-24 bg-accent rounded-full flex items-center justify-center">
-            <PenTool class="w-12 h-12 text-primary opacity-50" />
-          </div>
-          <div class="space-y-2">
-            <h2 class="text-2xl font-bold">准备好检验掌握程度了吗？</h2>
-            <p class="text-muted-foreground max-w-sm mx-auto">选择知识库并设置偏好，即可生成专属测验。</p>
-          </div>
+        <div v-else class="bg-card border border-border rounded-xl p-8 min-h-[420px] flex items-center justify-center">
+          <EmptyState
+            :icon="PenTool"
+            :title="quizEmptyTitle"
+            :description="quizEmptyDescription"
+            :hint="quizEmptyHint"
+            size="lg"
+            :primary-action="quizEmptyPrimaryAction"
+            @primary="handleQuizEmptyPrimary"
+          />
         </div>
       </section>
     </div>
@@ -284,13 +286,14 @@
 
 <script setup>
 import { ref, onMounted, onActivated, computed, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { PenTool, Sparkles, CheckCircle2, XCircle } from 'lucide-vue-next'
 import { apiPost } from '../api'
 import AnimatedNumber from '../components/ui/AnimatedNumber.vue'
 import { useToast } from '../composables/useToast'
 import { useAppContextStore } from '../stores/appContext'
 import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingOverlay from '../components/ui/LoadingOverlay.vue'
 import { masteryLabel, masteryPercent, masteryBadgeClass, masteryBorderClass } from '../utils/mastery'
 import { renderMarkdown, renderMarkdownInline } from '../utils/markdown'
@@ -299,6 +302,7 @@ import { normalizeDifficulty, parseRouteContext } from '../utils/routeContext'
 const { showToast } = useToast()
 const appContext = useAppContextStore()
 appContext.hydrate()
+const router = useRouter()
 const route = useRoute()
 
 const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
@@ -333,6 +337,40 @@ const entryKbContextName = computed(() => {
   if (kb?.name) return kb.name
   return `${entryKbContextId.value.slice(0, 8)}...`
 })
+const hasAnyKb = computed(() => kbs.value.length > 0)
+const quizEmptyTitle = computed(() => {
+  if (!hasAnyKb.value) return '先上传文档再开始测验'
+  if (!selectedKbId.value) return '先选择知识库'
+  return '准备好检验掌握程度了吗？'
+})
+const quizEmptyDescription = computed(() => {
+  if (!hasAnyKb.value) return '当前还没有知识库，上传并解析文档后才能生成测验。'
+  if (!selectedKbId.value) return '在左侧选择目标知识库，并按需设置题量与难度。'
+  return '已选知识库后可直接生成专属测验，系统会根据配置生成题目。'
+})
+const quizEmptyHint = computed(() => {
+  if (!hasAnyKb.value) return '上传完成后返回本页即可一键生成题目。'
+  if (!selectedKbId.value) return '开启自适应模式后，系统会自动调整题目难度。'
+  return '生成后可提交批改，并查看错题归类与能力变化。'
+})
+const quizEmptyPrimaryAction = computed(() => {
+  if (!hasAnyKb.value) return { label: '去上传文档' }
+  if (!selectedKbId.value) return null
+  return { label: '生成新测验', loading: busy.value.quiz }
+})
+
+function goToUpload() {
+  router.push({ path: '/upload' })
+}
+
+function handleQuizEmptyPrimary() {
+  if (!hasAnyKb.value) {
+    goToUpload()
+    return
+  }
+  if (!selectedKbId.value) return
+  generateQuiz()
+}
 
 async function generateQuiz(options = {}) {
   if (!selectedKbId.value) return

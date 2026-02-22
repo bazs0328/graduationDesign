@@ -22,6 +22,7 @@
               <input
                 type="text"
                 v-model="kbNameInput"
+                ref="kbNameInputRef"
                 placeholder="新知识库名称"
                 class="flex-1 min-w-[160px] bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary"
               />
@@ -66,13 +67,13 @@
             <label class="text-sm font-medium text-muted-foreground uppercase tracking-wider">选择文件</label>
             <div
               class="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-primary/50 transition-colors cursor-pointer"
-              @click="$refs.fileInput.click()"
+              @click="triggerFilePicker"
               @dragover.prevent="dragActive = true"
               @dragleave.prevent="dragActive = false"
               @drop.prevent="onDrop"
               :class="{ 'border-primary bg-primary/5': dragActive }"
             >
-              <input type="file" ref="fileInput" class="hidden" @change="onFileChange" />
+              <input type="file" ref="fileInputRef" class="hidden" @change="onFileChange" />
               <div v-if="!uploadFile" class="space-y-2">
                 <UploadIcon class="w-10 h-10 mx-auto text-muted-foreground" />
                 <p class="text-sm text-muted-foreground">点击或拖拽 PDF/文本文件到此处</p>
@@ -168,10 +169,18 @@
           <div v-if="busy.init" class="space-y-4">
             <SkeletonBlock type="list" :lines="5" />
           </div>
-          <div v-else-if="docs.length === 0" class="h-full flex flex-col items-center justify-center text-muted-foreground space-y-2">
-            <Database class="w-12 h-12 opacity-20" />
-            <p>暂无文档</p>
-          </div>
+          <EmptyState
+            v-else-if="docs.length === 0"
+            :icon="Database"
+            title="还没有文档，先开始上传"
+            :description="uploadDocsEmptyDescription"
+            :hint="uploadDocsEmptyHint"
+            size="md"
+            :primary-action="uploadDocsEmptyPrimaryAction"
+            :secondary-action="uploadDocsEmptySecondaryAction"
+            @primary="handleUploadDocsEmptyPrimary"
+            @secondary="handleUploadDocsEmptySecondary"
+          />
           <div v-for="doc in docs" :key="doc.id" class="p-4 bg-background border border-border rounded-lg hover:border-primary/30 transition-colors group">
             <div class="flex justify-between items-start mb-2">
               <strong class="text-sm font-semibold truncate max-w-[200px]">{{ doc.filename }}</strong>
@@ -320,6 +329,7 @@ import { apiDelete, apiGet, apiPatch, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
 import { useAppContextStore } from '../stores/appContext'
 import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 
 const { showToast } = useToast()
@@ -335,6 +345,7 @@ const selectedKbId = computed({
 })
 const kbNameInput = ref('')
 const kbRenameInput = ref('')
+const kbNameInputRef = ref(null)
 const docFilters = ref({
   keyword: '',
   fileType: '',
@@ -343,6 +354,7 @@ const docFilters = ref({
   sortOrder: 'desc'
 })
 const uploadFile = ref(null)
+const fileInputRef = ref(null)
 const dragActive = ref(false)
 const docBusyMap = ref({})
 const taskCenter = ref({
@@ -365,6 +377,47 @@ const pollingIntervals = ref(new Map()) // 存储每个文档的轮询定时器
 let taskCenterInterval = null
 let docsFilterDebounce = null
 const selectedKb = computed(() => kbs.value.find((item) => item.id === selectedKbId.value) || null)
+const hasAnyKb = computed(() => kbs.value.length > 0)
+const isDocFilterActive = computed(() => {
+  return Boolean(
+    (docFilters.value.keyword && docFilters.value.keyword.trim())
+    || docFilters.value.fileType
+    || docFilters.value.status
+  )
+})
+const uploadDocsEmptyDescription = computed(() => {
+  if (!hasAnyKb.value) {
+    return '先创建一个知识库，再上传 PDF/TXT/MD 文档进行解析。'
+  }
+  if (isDocFilterActive.value) {
+    return '当前筛选条件下没有匹配文档，可以清空筛选后查看全部结果。'
+  }
+  return '选择文件后上传到当前知识库，系统会自动解析并建立索引。'
+})
+const uploadDocsEmptyHint = computed(() => {
+  if (!hasAnyKb.value) {
+    return '创建完成后即可在左侧选择文件并上传。'
+  }
+  if (isDocFilterActive.value) {
+    return '清空筛选不会影响已上传文档。'
+  }
+  return '支持拖拽上传，处理中的文档会自动刷新状态。'
+})
+const uploadDocsEmptyPrimaryAction = computed(() => {
+  if (!hasAnyKb.value) {
+    return { label: '创建知识库' }
+  }
+  if (isDocFilterActive.value) {
+    return { label: '清空筛选', variant: 'secondary' }
+  }
+  return { label: '选择文件上传' }
+})
+const uploadDocsEmptySecondaryAction = computed(() => {
+  if (hasAnyKb.value && isDocFilterActive.value) {
+    return { label: '选择文件上传', variant: 'outline' }
+  }
+  return null
+})
 
 function onFileChange(event) {
   uploadFile.value = event.target.files[0]
@@ -373,6 +426,47 @@ function onFileChange(event) {
 function onDrop(event) {
   dragActive.value = false
   uploadFile.value = event.dataTransfer.files[0]
+}
+
+function triggerFilePicker() {
+  fileInputRef.value?.click()
+}
+
+function focusKbNameInput() {
+  kbNameInputRef.value?.focus?.()
+  kbNameInputRef.value?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+}
+
+function resetDocFilters() {
+  docFilters.value = {
+    keyword: '',
+    fileType: '',
+    status: '',
+    sortBy: 'created_at',
+    sortOrder: 'desc',
+  }
+}
+
+function handleUploadDocsEmptyPrimary() {
+  if (!hasAnyKb.value) {
+    if (kbNameInput.value && kbNameInput.value.trim()) {
+      createKb()
+      return
+    }
+    focusKbNameInput()
+    return
+  }
+  if (isDocFilterActive.value) {
+    resetDocFilters()
+    return
+  }
+  triggerFilePicker()
+}
+
+function handleUploadDocsEmptySecondary() {
+  if (hasAnyKb.value && isDocFilterActive.value) {
+    triggerFilePicker()
+  }
 }
 
 async function refreshKbs(force = false) {

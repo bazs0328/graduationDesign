@@ -29,12 +29,17 @@
 
         <!-- Messages -->
         <div class="flex-1 overflow-y-auto p-6 space-y-6" ref="scrollContainer">
-          <div v-if="qaMessages.length === 0" class="h-full flex flex-col items-center justify-center text-muted-foreground space-y-4 text-center max-w-sm mx-auto">
-            <div class="w-16 h-16 bg-primary/10 text-primary rounded-full flex items-center justify-center">
-              <Sparkles class="w-8 h-8" />
-            </div>
-            <p>在右侧选择知识库后，即可针对该知识库提问。</p>
-          </div>
+          <EmptyState
+            v-if="qaMessages.length === 0"
+            class="h-full max-w-md mx-auto"
+            :icon="Sparkles"
+            :title="qaEmptyTitle"
+            :description="qaEmptyDescription"
+            :hint="qaEmptyHint"
+            size="lg"
+            :primary-action="qaEmptyPrimaryAction"
+            @primary="handleQaEmptyPrimary"
+          />
           
           <div v-for="(msg, index) in qaMessages" :key="index" class="flex flex-col" :class="msg.role === 'question' ? 'items-end' : 'items-start'">
             <div 
@@ -258,10 +263,14 @@
               </p>
             </div>
           </div>
-          <div v-else class="flex-1 flex flex-col items-center justify-center text-muted-foreground text-xs text-center opacity-50">
-            <FileText class="w-12 h-12 mb-2" />
-            <p>选择知识库以开始提问</p>
-          </div>
+          <EmptyState
+            v-else
+            :icon="FileText"
+            title="选择知识库后查看统计"
+            description="右侧会展示当前问答上下文、文档状态和会话规模。"
+            hint="先选择知识库，再开始提问或切换会话。"
+            size="sm"
+          />
         </div>
 
         <div class="bg-card border border-border rounded-xl p-4 shadow-sm">
@@ -292,11 +301,12 @@
 
 <script setup>
 import { ref, onMounted, onActivated, computed, watch, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { MessageSquare, Send, Trash2, Database, FileText, Sparkles, User, Bot } from 'lucide-vue-next'
 import { apiDelete, apiGet, apiPatch, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
 import { useAppContextStore } from '../stores/appContext'
+import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import SourcePreviewModal from '../components/ui/SourcePreviewModal.vue'
@@ -306,6 +316,7 @@ import { parseRouteContext } from '../utils/routeContext'
 const { showToast } = useToast()
 const appContext = useAppContextStore()
 appContext.hydrate()
+const router = useRouter()
 const route = useRoute()
 
 const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
@@ -388,6 +399,29 @@ const docsProcessingCount = computed(() =>
 const docsErrorCount = computed(() =>
   docsInKb.value.filter((doc) => doc.status === 'error').length
 )
+const hasAnyKb = computed(() => kbs.value.length > 0)
+const qaEmptyTitle = computed(() => {
+  if (!hasAnyKb.value) return '先上传文档再开始问答'
+  if (!selectedKbId.value) return '先选择一个知识库'
+  return '开始你的第一次提问'
+})
+const qaEmptyDescription = computed(() => {
+  if (!hasAnyKb.value) return '当前还没有知识库，上传文档后即可基于知识库进行 RAG 问答。'
+  if (!selectedKbId.value) return '在右侧上下文面板选择知识库后，输入框会自动解锁。'
+  return '可以提问概念解释、公式推导、对比分析，AI 会结合知识库内容回答。'
+})
+const qaEmptyHint = computed(() => {
+  if (!hasAnyKb.value) return '上传并解析完成后，可按知识库或文档范围提问。'
+  if (!selectedKbId.value) return '如需限定范围，可继续选择某个文档进行问答。'
+  return entryFocusContext.value
+    ? `已带入学习目标「${entryFocusContext.value}」，可直接围绕该知识点提问。`
+    : '点击下方按钮可自动填入一个示例问题。'
+})
+const qaEmptyPrimaryAction = computed(() => {
+  if (!hasAnyKb.value) return { label: '去上传文档' }
+  if (!selectedKbId.value) return null
+  return { label: '填入示例问题', variant: 'secondary' }
+})
 
 const currentLevelMeta = computed(() => getLevelMeta(qaAbilityLevel.value))
 const entryFocusContext = computed(() => appContext.routeContext.focus)
@@ -403,6 +437,27 @@ function normalizeAbilityLevel(level) {
 
 function getLevelMeta(level) {
   return LEVEL_LABELS[normalizeAbilityLevel(level)] || LEVEL_LABELS.intermediate
+}
+
+function goToUpload() {
+  router.push({ path: '/upload' })
+}
+
+function fillSampleQuestion() {
+  if (entryFocusContext.value) {
+    qaInput.value = `请用通俗的方式讲解「${entryFocusContext.value}」，并给出一个简单例子。`
+    return
+  }
+  qaInput.value = '请先概括这个知识库中最重要的3个概念，并说明它们之间的关系。'
+}
+
+function handleQaEmptyPrimary() {
+  if (!hasAnyKb.value) {
+    goToUpload()
+    return
+  }
+  if (!selectedKbId.value) return
+  fillSampleQuestion()
 }
 
 async function refreshDocsInKb() {

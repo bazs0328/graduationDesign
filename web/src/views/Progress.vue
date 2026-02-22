@@ -47,9 +47,15 @@
               <p class="text-xl font-bold">{{ s.value }}</p>
             </div>
           </div>
-          <div v-else class="py-12 text-center text-muted-foreground border-2 border-dashed border-border rounded-xl">
-            <p>选择知识库以查看详细统计</p>
-          </div>
+          <EmptyState
+            v-else
+            :icon="Database"
+            :title="kbs.length === 0 ? '先上传文档再查看统计' : '选择知识库查看详细统计'"
+            :description="kbs.length === 0 ? '当前还没有知识库，上传并解析文档后会显示知识库维度的统计数据。' : '右上角选择知识库后，可查看文档数、测验次数、问答次数和平均分。'"
+            :hint="kbs.length === 0 ? '上传完成后返回本页即可自动汇总。' : '统计会随问答、摘要、测验等行为持续更新。'"
+            :primary-action="kbs.length === 0 ? { label: '去上传文档' } : null"
+            @primary="goToUpload"
+          />
         </section>
 
         <!-- Recommendations -->
@@ -158,9 +164,17 @@
                 </div>
               </div>
             </div>
-            <div v-else class="py-12 text-center text-muted-foreground bg-accent/20 rounded-xl">
-              <p>该知识库暂无推荐。</p>
-            </div>
+            <EmptyState
+              v-else
+              :icon="Sparkles"
+              :title="selectedKbId ? '该知识库暂时没有推荐' : (kbs.length === 0 ? '先上传文档获取推荐' : '先选择知识库查看推荐')"
+              :description="selectedKbId ? '通常在生成摘要、提取要点、完成测验或问答后，系统会给出下一步学习建议。' : (kbs.length === 0 ? '系统需要基于知识库内容与学习行为生成个性化推荐。' : '选择一个知识库后，系统会展示该知识库的下一步学习动作。')"
+              :hint="selectedKbId ? '你可以先去测验或问答，积累学习记录后再查看推荐。' : (kbs.length === 0 ? '上传并解析文档后即可开始生成推荐。' : '推荐会附带建议原因和可执行动作。')"
+              :primary-action="selectedKbId ? { label: '去测验' } : (kbs.length === 0 ? { label: '去上传文档' } : null)"
+              :secondary-action="selectedKbId ? { label: '去问答', variant: 'outline' } : null"
+              @primary="handleRecommendationsEmptyPrimary"
+              @secondary="goToQaFromProgressContext"
+            />
           </template>
         </section>
 
@@ -333,11 +347,17 @@
           </div>
 
           <!-- Empty state -->
-          <div v-else-if="!busy.pathLoad && !busy.pathBuild" class="py-12 text-center text-muted-foreground bg-accent/20 rounded-xl space-y-2">
-            <GitBranch class="w-10 h-10 mx-auto opacity-30" />
-            <p>请先为知识库内的文档生成知识点</p>
-            <p class="text-xs">生成知识点后，系统将自动分析知识点间的依赖关系并规划学习路径</p>
-          </div>
+          <EmptyState
+            v-else-if="!busy.pathLoad && !busy.pathBuild"
+            :icon="GitBranch"
+            title="先生成知识点，再构建学习路径"
+            description="学习路径依赖知识点数据与掌握度信息。为文档提取要点后，系统才能分析依赖关系并规划学习顺序。"
+            hint="建议先进入摘要页面提取要点，然后返回此页查看路径。"
+            :primary-action="{ label: '去摘要/提取要点' }"
+            :secondary-action="{ label: '去上传文档', variant: 'outline' }"
+            @primary="goToSummaryFromProgress"
+            @secondary="goToUpload"
+          />
         </section>
       </div>
 
@@ -352,10 +372,17 @@
           <div v-if="busy.init" class="space-y-4">
             <SkeletonBlock type="list" :lines="6" />
           </div>
-          <div v-else-if="activity.length === 0" class="h-full flex flex-col items-center justify-center text-muted-foreground opacity-30">
-            <Clock class="w-12 h-12 mb-2" />
-            <p>暂无最近动态</p>
-          </div>
+          <EmptyState
+            v-else-if="activity.length === 0"
+            class="h-full"
+            :icon="Clock"
+            :title="selectedKbId ? '还没有最近动态' : (kbs.length === 0 ? '先上传文档开始学习记录' : '选择知识库后开始积累动态')"
+            :description="selectedKbId ? '完成摘要、问答或测验后，这里会记录最近学习行为。' : (kbs.length === 0 ? '上传文档、提取要点、问答和测验都会写入活动流。' : '选择知识库后进行问答或测验，动态会自动更新。')"
+            :hint="selectedKbId ? '可以先发起一次测验，快速产生首条学习记录。' : '活动流可用于展示学习节奏与近期进展。'"
+            size="sm"
+            :primary-action="selectedKbId ? { label: '去测验' } : (kbs.length === 0 ? { label: '去上传文档' } : null)"
+            @primary="handleActivityEmptyPrimary"
+          />
           <div v-for="(item, idx) in activity" :key="idx" class="relative pl-6 border-l-2 border-border pb-6 last:pb-0">
             <div class="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-background border-2 border-primary"></div>
             <div class="space-y-1">
@@ -404,6 +431,7 @@ import { apiGet, getProfile, buildLearningPath } from '../api'
 import { useToast } from '../composables/useToast'
 import { useAppContextStore } from '../stores/appContext'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
 import { MASTERY_MASTERED, masteryPercent } from '../utils/mastery'
 import { renderMarkdown } from '../utils/markdown'
 import { buildRouteContextQuery, normalizeDifficulty } from '../utils/routeContext'
@@ -766,6 +794,59 @@ function recommendationActionBtnLabel(action) {
     case 'review': return '去复习'
     case 'challenge': return '去挑战'
     default: return '去执行'
+  }
+}
+
+function goToUpload() {
+  router.push({ path: '/upload' })
+}
+
+function goToQuizFromProgressContext() {
+  if (!selectedKbId.value) return
+  router.push({
+    path: '/quiz',
+    query: buildRouteContextQuery({
+      kbId: selectedKbId.value,
+    }),
+  })
+}
+
+function goToQaFromProgressContext() {
+  if (!selectedKbId.value) return
+  router.push({
+    path: '/qa',
+    query: buildRouteContextQuery({
+      kbId: selectedKbId.value,
+    }),
+  })
+}
+
+function goToSummaryFromProgress() {
+  router.push({
+    path: '/summary',
+    query: buildRouteContextQuery({
+      kbId: selectedKbId.value,
+    }),
+  })
+}
+
+function handleRecommendationsEmptyPrimary() {
+  if (selectedKbId.value) {
+    goToQuizFromProgressContext()
+    return
+  }
+  if (!kbs.value.length) {
+    goToUpload()
+  }
+}
+
+function handleActivityEmptyPrimary() {
+  if (selectedKbId.value) {
+    goToQuizFromProgressContext()
+    return
+  }
+  if (!kbs.value.length) {
+    goToUpload()
   }
 }
 

@@ -94,10 +94,18 @@
             class="summary-markdown markdown-content max-w-none"
             v-html="renderedSummary"
           ></div>
-          <div v-else class="flex flex-col items-center justify-center py-20 text-muted-foreground space-y-4">
-            <FileText class="w-16 h-16 opacity-10" />
-            <p>选择文档并点击「生成摘要」开始。</p>
-          </div>
+          <EmptyState
+            v-else
+            :icon="FileText"
+            title="开始生成文档摘要"
+            :description="summaryEmptyDescription"
+            :hint="summaryEmptyHint"
+            size="lg"
+            :primary-action="summaryEmptyPrimaryAction"
+            :secondary-action="summaryEmptySecondaryAction"
+            @primary="handleSummaryEmptyPrimary"
+            @secondary="goToUpload"
+          />
         </section>
 
         <!-- Keypoints Card -->
@@ -200,10 +208,17 @@
               </div>
             </div>
           </div>
-          <div v-else class="flex flex-col items-center justify-center py-12 text-muted-foreground space-y-4">
-            <Layers class="w-12 h-12 opacity-10" />
-            <p>尚未提取要点。</p>
-          </div>
+          <EmptyState
+            v-else
+            :icon="Layers"
+            title="提取核心知识点"
+            :description="keypointsEmptyDescription"
+            :hint="keypointsEmptyHint"
+            :primary-action="keypointsEmptyPrimaryAction"
+            :secondary-action="keypointsEmptySecondaryAction"
+            @primary="handleKeypointsEmptyPrimary"
+            @secondary="goToUpload"
+          />
         </section>
       </div>
     </div>
@@ -229,6 +244,7 @@ import { apiGet, apiPost } from '../api'
 import { useToast } from '../composables/useToast'
 import { useAppContextStore } from '../stores/appContext'
 import Button from '../components/ui/Button.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import SourcePreviewModal from '../components/ui/SourcePreviewModal.vue'
@@ -280,6 +296,7 @@ const busy = ref({
 const renderedSummary = computed(() => {
   return renderMarkdown(summary.value)
 })
+const hasDocs = computed(() => docs.value.length > 0)
 
 const selectedKbName = computed(() => {
   const doc = docs.value.find(d => d.id === selectedDocId.value)
@@ -295,11 +312,90 @@ const entryDocContextName = computed(() => {
   if (doc?.filename) return doc.filename
   return `${entryDocContextId.value.slice(0, 8)}...`
 })
+const hasSelectedDoc = computed(() => Boolean(selectedDocId.value))
+const summaryEmptyDescription = computed(() => {
+  if (!hasDocs.value) {
+    return '还没有可分析的文档，请先上传并完成解析。'
+  }
+  if (!hasSelectedDoc.value) {
+    return '左侧文档列表已有内容，请先选择一个目标文档。'
+  }
+  return '系统会基于当前文档生成结构化内容摘要。'
+})
+const summaryEmptyHint = computed(() => {
+  if (!hasDocs.value) {
+    return '上传后返回本页即可生成摘要与要点。'
+  }
+  if (!hasSelectedDoc.value) {
+    return '选择文档后可直接点击生成摘要，支持强制刷新缓存。'
+  }
+  return '生成结果会缓存，重复查看更快。'
+})
+const summaryEmptyPrimaryAction = computed(() => {
+  if (!hasDocs.value) return { label: '去上传文档' }
+  if (!hasSelectedDoc.value) return null
+  return { label: '生成摘要', loading: busy.value.summary }
+})
+const summaryEmptySecondaryAction = computed(() => {
+  if (!hasDocs.value) return null
+  if (!hasSelectedDoc.value) return { label: '去上传页', variant: 'outline' }
+  return null
+})
+const keypointsEmptyDescription = computed(() => {
+  if (!hasDocs.value) {
+    return '当前还没有文档，无法提取知识点。'
+  }
+  if (!hasSelectedDoc.value) {
+    return '先在左侧选择文档，再提取核心知识点。'
+  }
+  return '提取后会展示知识点、讲解与来源定位信息。'
+})
+const keypointsEmptyHint = computed(() => {
+  if (!hasDocs.value) {
+    return '建议先上传课程讲义、笔记或教材片段。'
+  }
+  if (!hasSelectedDoc.value) {
+    return '提取结果可用于后续学习路径与测验推荐。'
+  }
+  return '生成完成后可直接跳转到学习路径查看后续建议。'
+})
+const keypointsEmptyPrimaryAction = computed(() => {
+  if (!hasDocs.value) return { label: '去上传文档' }
+  if (!hasSelectedDoc.value) return null
+  return { label: '提取要点', variant: 'secondary', loading: busy.value.keypoints }
+})
+const keypointsEmptySecondaryAction = computed(() => {
+  if (!hasDocs.value) return null
+  if (!hasSelectedDoc.value) return { label: '去上传页', variant: 'outline' }
+  return null
+})
 
 function isTargetKeypoint(point) {
   if (!entryKeypointText.value) return false
   const pointText = typeof point === 'string' ? point : point.text || ''
   return pointText.trim() === entryKeypointText.value.trim()
+}
+
+function goToUpload() {
+  router.push({ path: '/upload' })
+}
+
+function handleSummaryEmptyPrimary() {
+  if (!hasDocs.value) {
+    goToUpload()
+    return
+  }
+  if (!hasSelectedDoc.value) return
+  generateSummary(forceRefresh.value)
+}
+
+function handleKeypointsEmptyPrimary() {
+  if (!hasDocs.value) {
+    goToUpload()
+    return
+  }
+  if (!hasSelectedDoc.value) return
+  generateKeypoints(forceRefresh.value)
 }
 
 function scrollToTargetKeypoint() {
