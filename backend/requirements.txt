@@ -14,6 +14,9 @@ pdfplumber
 pytesseract
 pdf2image
 Pillow
+rapidocr-onnxruntime
+opencv-python-headless
+numpy
 python-docx
 python-pptx
 charset-normalizer

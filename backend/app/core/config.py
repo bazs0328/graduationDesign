@@ -35,8 +35,16 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 150
     ocr_enabled: bool = True
+    ocr_engine: str = "rapidocr"
+    ocr_fallback_engines: str = "rapidocr"
     ocr_language: str = "chi_sim+eng"
+    ocr_tesseract_language: str | None = None
     ocr_min_text_length: int = 10
+    ocr_render_dpi: int = 360
+    ocr_check_pages: int = 3
+    ocr_preprocess_enabled: bool = True
+    ocr_deskew_enabled: bool = True
+    ocr_low_confidence_threshold: float = 0.78
 
     qa_top_k: int = 4
     qa_fetch_k: int = 12
