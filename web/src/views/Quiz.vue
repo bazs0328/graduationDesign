@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-8 max-w-6xl mx-auto">
+  <div class="space-y-6 md:space-y-8 max-w-6xl mx-auto">
     <section
       v-if="hasPathContext"
       class="bg-primary/5 border border-primary/20 rounded-xl px-4 py-3 space-y-1"
@@ -15,13 +15,13 @@
         </span>
       </p>
     </section>
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-8">
       <!-- Left: Quiz Generation -->
-      <aside class="space-y-6">
-        <section class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-6">
+      <aside class="space-y-4 md:space-y-6">
+        <section class="bg-card border border-border rounded-xl p-4 sm:p-6 shadow-sm space-y-6">
           <div class="flex items-center gap-3">
             <PenTool class="w-6 h-6 text-primary" />
-            <h2 class="text-xl font-bold">测验生成</h2>
+            <h2 class="text-lg sm:text-xl font-bold">测验生成</h2>
           </div>
 
           <div class="space-y-4">
@@ -75,7 +75,7 @@
           </div>
         </section>
 
-        <div v-if="quizResult" class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4 text-center">
+        <div v-if="quizResult" class="bg-card border border-border rounded-xl p-4 sm:p-6 shadow-sm space-y-4 text-center">
           <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground">上次结果</h3>
           <div class="relative inline-flex items-center justify-center">
             <svg class="w-24 h-24">
@@ -138,10 +138,10 @@
       </aside>
 
       <!-- Right: Quiz Content -->
-      <section class="lg:col-span-2 space-y-6 relative">
+      <section class="lg:col-span-2 space-y-4 md:space-y-6 relative">
         <LoadingOverlay :show="busy.quiz" message="正在根据知识库生成题目…" />
         <div v-if="quiz" class="space-y-6">
-          <div v-for="(q, idx) in quiz.questions" :id="`question-${idx + 1}`" :key="idx" class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4 transition-all" :class="{ 'border-primary/50 ring-1 ring-primary/20': quizResult }">
+          <div v-for="(q, idx) in quiz.questions" :id="`question-${idx + 1}`" :key="idx" class="bg-card border border-border rounded-xl p-4 sm:p-6 shadow-sm space-y-4 transition-all" :class="{ 'border-primary/50 ring-1 ring-primary/20': quizResult }">
             <div class="flex items-start gap-4">
               <div class="flex-shrink-0 w-8 h-8 bg-accent text-accent-foreground rounded-lg flex items-center justify-center font-bold">
                 {{ idx + 1 }}
@@ -153,7 +153,7 @@
                   <label 
                     v-for="(opt, optIdx) in q.options" 
                     :key="optIdx"
-                    class="flex items-center gap-3 p-3 rounded-lg border border-border cursor-pointer transition-all hover:bg-accent/50"
+                    class="flex items-start sm:items-center gap-3 p-3 rounded-lg border border-border cursor-pointer transition-all hover:bg-accent/50"
                     :class="{ 
                       'bg-primary/10 border-primary/30': quizAnswers[idx] === optIdx && !quizResult,
                       'bg-green-500/10 border-green-500/30': quizResult && q.answer_index === optIdx,
@@ -173,7 +173,7 @@
                       <div v-if="quizAnswers[idx] === optIdx" class="w-2.5 h-2.5 bg-primary rounded-full"></div>
                     </div>
                     <span
-                      class="quiz-option-markdown"
+                      class="quiz-option-markdown min-w-0 flex-1"
                       v-html="renderMarkdownInline(opt)"
                     ></span>
                     <CheckCircle2 v-if="quizResult && q.answer_index === optIdx" class="w-5 h-5 text-green-500 ml-auto" />
@@ -204,7 +204,7 @@
             <Button
               v-if="!quizResult"
               size="lg"
-              class="px-12 text-lg font-black shadow-lg hover:scale-105"
+              class="w-full sm:w-auto px-6 sm:px-12 text-base sm:text-lg font-black shadow-lg hover:scale-105"
               @click="submitQuiz"
               :loading="busy.submit"
               :disabled="busy.submit || Object.keys(quizAnswers).length < quiz.questions.length"
@@ -213,7 +213,7 @@
             </Button>
             <button
               v-else
-              class="px-12 py-4 bg-secondary text-secondary-foreground rounded-xl font-black text-lg shadow-lg hover:scale-105 active:scale-95 transition-all"
+              class="w-full sm:w-auto px-6 sm:px-12 py-4 bg-secondary text-secondary-foreground rounded-xl font-black text-base sm:text-lg shadow-lg hover:scale-105 active:scale-95 transition-all"
               @click="generateQuiz"
             >
               再测一次
@@ -276,7 +276,7 @@
           </div>
         </div>
 
-        <div v-else class="bg-card border border-border rounded-xl p-8 min-h-[420px] flex items-center justify-center">
+        <div v-else class="bg-card border border-border rounded-xl p-4 sm:p-6 lg:p-8 min-h-[420px] flex items-center justify-center">
           <EmptyState
             :icon="PenTool"
             :title="quizEmptyTitle"

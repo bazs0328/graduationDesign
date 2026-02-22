@@ -22,6 +22,10 @@ function buildAuthHeaders(path, headersLike) {
 
 async function parseErrorResponse(res) {
   const text = await res.text()
+  throw createErrorFromResponseText(text, res.status)
+}
+
+function createErrorFromResponseText(text, status) {
   try {
     const data = JSON.parse(text)
     if (data && data.detail) {
@@ -36,19 +40,17 @@ async function parseErrorResponse(res) {
             return loc ? `${loc}: ${msg}` : msg
           })
           .join('; ')
-        throw new Error(message)
+        return new Error(message)
       }
       if (typeof data.detail === 'string') {
-        throw new Error(data.detail)
+        return new Error(data.detail)
       }
-      throw new Error(JSON.stringify(data.detail))
+      return new Error(JSON.stringify(data.detail))
     }
-  } catch (err) {
-    if (err instanceof Error && err.message) {
-      throw err
-    }
+  } catch {
+    // fall through to raw text message
   }
-  throw new Error(text || `Request failed: ${res.status}`)
+  return new Error(text || `Request failed: ${status}`)
 }
 
 function maybeShowGlobalErrorToast(err) {
@@ -242,6 +244,101 @@ export async function apiPost(path, body, isForm = false) {
     body: isForm ? body : JSON.stringify(body)
   }
   return request(path, options)
+}
+
+export async function apiUploadWithProgress(path, formData, options = {}) {
+  const fullUrl = `${API_BASE}${path}`
+  const { headers } = buildAuthHeaders(path, options.headers)
+  const { onProgress, signal } = options
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    let aborted = false
+
+    const cleanupAbortListener = () => {
+      if (signal) {
+        signal.removeEventListener('abort', handleAbort)
+      }
+    }
+
+    const rejectWithToast = (err) => {
+      maybeShowGlobalErrorToast(err)
+      reject(err)
+    }
+
+    function handleAbort() {
+      aborted = true
+      try {
+        xhr.abort()
+      } catch {
+        // no-op
+      }
+    }
+
+    if (signal?.aborted) {
+      const abortErr = new DOMException('The operation was aborted.', 'AbortError')
+      rejectWithToast(abortErr)
+      return
+    }
+
+    xhr.open('POST', fullUrl)
+
+    headers.forEach((value, key) => {
+      // Let the browser set multipart boundary automatically.
+      if (key.toLowerCase() !== 'content-type') {
+        xhr.setRequestHeader(key, value)
+      }
+    })
+
+    if (typeof onProgress === 'function' && xhr.upload) {
+      xhr.upload.onprogress = (event) => {
+        const total = event.lengthComputable ? event.total : 0
+        const loaded = event.loaded || 0
+        const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0
+        onProgress({ percent, loaded, total, lengthComputable: !!event.lengthComputable })
+      }
+    }
+
+    xhr.onload = () => {
+      cleanupAbortListener()
+      const responseText = xhr.responseText || ''
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(responseText ? JSON.parse(responseText) : null)
+        } catch {
+          rejectWithToast(new Error('Invalid JSON response'))
+        }
+        return
+      }
+      rejectWithToast(createErrorFromResponseText(responseText, xhr.status))
+    }
+
+    xhr.onerror = () => {
+      cleanupAbortListener()
+      rejectWithToast(new Error('Failed to fetch'))
+    }
+
+    xhr.onabort = () => {
+      cleanupAbortListener()
+      const abortErr = new DOMException('The operation was aborted.', 'AbortError')
+      if (aborted) {
+        rejectWithToast(abortErr)
+      } else {
+        rejectWithToast(abortErr)
+      }
+    }
+
+    if (signal) {
+      signal.addEventListener('abort', handleAbort, { once: true })
+    }
+
+    try {
+      xhr.send(formData)
+    } catch (err) {
+      cleanupAbortListener()
+      rejectWithToast(err)
+    }
+  })
 }
 
 export async function apiPatch(path, body) {

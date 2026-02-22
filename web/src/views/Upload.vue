@@ -81,7 +81,7 @@
               <div v-else class="flex items-center justify-center gap-2 text-primary font-medium">
                 <FileText class="w-5 h-5" />
                 <span>{{ uploadFile.name }}</span>
-                <button @click.stop="uploadFile = null" class="text-muted-foreground hover:text-destructive">
+                <button @click.stop="clearSelectedUploadFile()" class="text-muted-foreground hover:text-destructive">
                   <X class="w-4 h-4" />
                 </button>
               </div>
@@ -112,6 +112,36 @@
               </template>
               <span>刷新列表</span>
             </Button>
+          </div>
+
+          <div
+            v-if="uploadProgressVisible"
+            class="rounded-xl border border-border bg-background/70 px-4 py-3 space-y-2"
+          >
+            <div class="flex items-center justify-between gap-3 text-sm">
+              <div class="min-w-0">
+                <p class="font-semibold truncate">{{ uploadProgressTitle }}</p>
+                <p v-if="uploadProgress.filename" class="text-xs text-muted-foreground truncate">
+                  {{ uploadProgress.filename }}
+                </p>
+              </div>
+              <span
+                class="text-xs font-bold px-2 py-1 rounded-full"
+                :class="uploadProgress.phase === 'uploading' ? 'bg-primary/10 text-primary' : 'bg-blue-500/10 text-blue-600 animate-pulse'"
+              >
+                {{ uploadProgress.phase === 'uploading' ? `${uploadProgress.percent}%` : '解析中' }}
+              </span>
+            </div>
+            <div class="h-2 rounded-full bg-accent overflow-hidden">
+              <div
+                class="h-full rounded-full transition-all duration-300"
+                :class="uploadProgress.phase === 'uploading' ? 'bg-primary' : 'bg-blue-500 animate-pulse'"
+                :style="{ width: uploadProgressWidth }"
+              ></div>
+            </div>
+            <p class="text-xs text-muted-foreground">
+              {{ uploadProgressDetail }}
+            </p>
           </div>
         </div>
       </section>
@@ -190,9 +220,9 @@
                 <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded" :class="statusClass(doc.status)">
                   {{ statusLabel(doc.status) }}
                 </span>
-                <RefreshCw 
-                  v-if="doc.status === 'processing' && pollingIntervals.has(doc.id)" 
-                  class="w-3 h-3 text-blue-500 animate-spin" 
+                <RefreshCw
+                  v-if="doc.status === 'processing' && pollingIntervals.has(doc.id)"
+                  class="w-3 h-3 text-blue-500 animate-spin"
                 />
               </div>
             </div>
@@ -327,7 +357,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { Upload, FileText, Database, X, RefreshCw } from 'lucide-vue-next'
-import { apiDelete, apiGet, apiPatch, apiPost } from '../api'
+import { apiDelete, apiGet, apiPatch, apiPost, apiUploadWithProgress } from '../api'
 import { useToast } from '../composables/useToast'
 import { useAppContextStore } from '../stores/appContext'
 import Button from '../components/ui/Button.vue'
@@ -337,6 +367,9 @@ import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 const { showToast } = useToast()
 const appContext = useAppContextStore()
 appContext.hydrate()
+
+const UPLOAD_ALLOWED_EXTENSIONS = new Set(['.pdf', '.txt', '.md', '.docx', '.pptx'])
+const UPLOAD_MAX_FILE_BYTES = 50 * 1024 * 1024
 
 const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
 const docs = ref([])
@@ -358,6 +391,14 @@ const docFilters = ref({
 const uploadFile = ref(null)
 const fileInputRef = ref(null)
 const dragActive = ref(false)
+const uploadProgress = ref({
+  phase: 'idle',
+  percent: 0,
+  loaded: 0,
+  total: 0,
+  filename: '',
+  docId: null,
+})
 const docBusyMap = ref({})
 const taskCenter = ref({
   processing: [],
@@ -378,6 +419,7 @@ const busy = ref({
 const pollingIntervals = ref(new Map()) // 存储每个文档的轮询定时器
 let taskCenterInterval = null
 let docsFilterDebounce = null
+let uploadProgressResetTimer = null
 const selectedKb = computed(() => kbs.value.find((item) => item.id === selectedKbId.value) || null)
 const hasAnyKb = computed(() => kbs.value.length > 0)
 const isDocFilterActive = computed(() => {
@@ -420,14 +462,99 @@ const uploadDocsEmptySecondaryAction = computed(() => {
   }
   return null
 })
+const uploadProgressVisible = computed(() => uploadProgress.value.phase !== 'idle')
+const uploadProgressTitle = computed(() => {
+  if (uploadProgress.value.phase === 'uploading') return '正在上传文件'
+  if (uploadProgress.value.phase === 'processing') return '上传完成，正在解析'
+  return ''
+})
+const uploadProgressDetail = computed(() => {
+  if (!uploadProgressVisible.value) return ''
+  if (uploadProgress.value.phase === 'uploading') {
+    const loaded = formatFileSize(uploadProgress.value.loaded)
+    const total = uploadProgress.value.total > 0 ? formatFileSize(uploadProgress.value.total) : '未知大小'
+    return `${loaded} / ${total}`
+  }
+  return '文档已提交到后端，正在建立索引，可在右侧任务中心查看状态。'
+})
+const uploadProgressWidth = computed(() => {
+  if (uploadProgress.value.phase === 'processing') return '100%'
+  return `${Math.max(0, Math.min(100, uploadProgress.value.percent || 0))}%`
+})
+
+function normalizeUploadFileSelection(file) {
+  if (!file) return null
+  const filename = (file.name || '').trim()
+  const dotIndex = filename.lastIndexOf('.')
+  const ext = dotIndex >= 0 ? filename.slice(dotIndex).toLowerCase() : ''
+  if (!UPLOAD_ALLOWED_EXTENSIONS.has(ext)) {
+    showToast(`不支持的文件类型：${ext || '无扩展名'}`, 'error')
+    return null
+  }
+  if (file.size > UPLOAD_MAX_FILE_BYTES) {
+    showToast('文件过大，单个文件请控制在 50MB 以内', 'error')
+    return null
+  }
+  return file
+}
+
+function clearSelectedUploadFile() {
+  uploadFile.value = null
+  if (fileInputRef.value) {
+    fileInputRef.value.value = ''
+  }
+}
 
 function onFileChange(event) {
-  uploadFile.value = event.target.files[0]
+  const selected = normalizeUploadFileSelection(event.target.files?.[0] || null)
+  if (!selected) {
+    if (event.target) {
+      event.target.value = ''
+    }
+    return
+  }
+  uploadFile.value = selected
 }
 
 function onDrop(event) {
   dragActive.value = false
-  uploadFile.value = event.dataTransfer.files[0]
+  const selected = normalizeUploadFileSelection(event.dataTransfer.files?.[0] || null)
+  if (!selected) return
+  uploadFile.value = selected
+}
+
+function clearUploadProgress(delayMs = 0) {
+  if (uploadProgressResetTimer) {
+    clearTimeout(uploadProgressResetTimer)
+    uploadProgressResetTimer = null
+  }
+  const reset = () => {
+    uploadProgressResetTimer = null
+    uploadProgress.value = {
+      phase: 'idle',
+      percent: 0,
+      loaded: 0,
+      total: 0,
+      filename: '',
+      docId: null,
+    }
+  }
+  if (delayMs > 0) {
+    uploadProgressResetTimer = setTimeout(reset, delayMs)
+    return
+  }
+  reset()
+}
+
+function setUploadProgress(next) {
+  uploadProgress.value = { ...uploadProgress.value, ...next }
+}
+
+function formatFileSize(bytes) {
+  const value = Number(bytes) || 0
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function triggerFilePicker() {
@@ -536,7 +663,7 @@ async function refreshDocs() {
     const result = await apiGet(`/api/docs?${query}`)
     docs.value = result
     await refreshTaskCenter()
-    
+
     // 刷新后检查是否有处理中的文档需要轮询
     checkAndStartPolling()
   } catch {
@@ -548,24 +675,53 @@ async function refreshDocs() {
 
 async function uploadDoc() {
   if (!uploadFile.value) return
+  const file = uploadFile.value
   busy.value.upload = true
+  clearUploadProgress()
+  setUploadProgress({
+    phase: 'uploading',
+    percent: 0,
+    loaded: 0,
+    total: file.size || 0,
+    filename: file.name || '',
+    docId: null,
+  })
   try {
     const form = new FormData()
-    form.append('file', uploadFile.value)
+    form.append('file', file)
     form.append('user_id', resolvedUserId.value)
     if (selectedKbId.value) {
       form.append('kb_id', selectedKbId.value)
     }
-    const uploadedDoc = await apiPost('/api/docs/upload', form, true)
+    const uploadedDoc = await apiUploadWithProgress('/api/docs/upload', form, {
+      onProgress({ percent, loaded, total }) {
+        setUploadProgress({
+          phase: 'uploading',
+          percent,
+          loaded,
+          total: total || file.size || 0,
+        })
+      }
+    })
+    setUploadProgress({
+      phase: 'processing',
+      percent: 100,
+      loaded: file.size || uploadProgress.value.loaded,
+      total: file.size || uploadProgress.value.total,
+      docId: uploadedDoc?.id || null,
+    })
     showToast('文档上传成功，正在处理中...', 'success')
-    uploadFile.value = null
+    clearSelectedUploadFile()
     await refreshDocs()
-    
+
     // 如果文档状态是 processing，开始轮询
     if (uploadedDoc.status === 'processing') {
       startPolling(uploadedDoc.id)
+    } else {
+      clearUploadProgress(1200)
     }
   } catch {
+    clearUploadProgress()
     // error toast handled globally
   } finally {
     busy.value.upload = false
@@ -577,15 +733,15 @@ function startPolling(docId) {
   if (pollingIntervals.value.has(docId)) {
     clearInterval(pollingIntervals.value.get(docId))
   }
-  
+
   // 立即检查一次
   checkDocStatus(docId)
-  
+
   // 每 2 秒轮询一次
   const interval = setInterval(() => {
     checkDocStatus(docId)
   }, 2000)
-  
+
   pollingIntervals.value.set(docId, interval)
 }
 
@@ -593,20 +749,26 @@ async function checkDocStatus(docId) {
   try {
     const query = buildDocsQueryParams()
     const result = await apiGet(`/api/docs?${query}`)
-    
+
     // 更新文档列表
     docs.value = result
-    
+
     // 查找当前文档
     const doc = result.find(d => d.id === docId)
     if (!doc) {
       // 文档不存在，停止轮询
+      if (uploadProgress.value.docId === docId) {
+        clearUploadProgress(800)
+      }
       stopPolling(docId)
       return
     }
-    
+
     // 如果状态不再是 processing，停止轮询
     if (doc.status !== 'processing') {
+      if (uploadProgress.value.docId === docId) {
+        clearUploadProgress(800)
+      }
       stopPolling(docId)
       await refreshTaskCenter()
       if (doc.status === 'ready') {
@@ -909,6 +1071,10 @@ onUnmounted(() => {
   if (docsFilterDebounce) {
     clearTimeout(docsFilterDebounce)
     docsFilterDebounce = null
+  }
+  if (uploadProgressResetTimer) {
+    clearTimeout(uploadProgressResetTimer)
+    uploadProgressResetTimer = null
   }
 })
 </script>

@@ -1,24 +1,24 @@
 <template>
-  <div class="space-y-8 max-w-6xl mx-auto">
+  <div class="space-y-6 md:space-y-8 max-w-6xl mx-auto">
     <!-- Top Stats Bar -->
-    <section v-if="!busy.init && progress" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-      <div v-for="stat in topStats" :key="stat.label" class="bg-card border border-border rounded-xl p-6 shadow-sm flex items-center gap-4">
+    <section v-if="!busy.init && progress" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+      <div v-for="stat in topStats" :key="stat.label" class="bg-card border border-border rounded-xl p-4 sm:p-6 shadow-sm flex items-center gap-4">
         <div class="w-12 h-12 rounded-lg flex items-center justify-center" :class="stat.color">
           <component :is="stat.icon" class="w-6 h-6" />
         </div>
         <div>
           <p class="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{{ stat.label }}</p>
-          <p class="text-2xl font-black">{{ stat.value }}</p>
+          <p class="text-xl sm:text-2xl font-black">{{ stat.value }}</p>
         </div>
       </div>
     </section>
-    <section v-else-if="busy.init" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-      <div v-for="index in 4" :key="`top-skeleton-${index}`" class="bg-card border border-border rounded-xl p-6 shadow-sm">
+    <section v-else-if="busy.init" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+      <div v-for="index in 4" :key="`top-skeleton-${index}`" class="bg-card border border-border rounded-xl p-4 sm:p-6 shadow-sm">
         <SkeletonBlock type="card" :lines="3" />
       </div>
     </section>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-8">
       <!-- Left: KB Breakdown & Recommendations -->
       <div class="lg:col-span-2 space-y-8">
         <section v-if="busy.init" class="bg-card border border-border rounded-xl p-6 shadow-sm">
@@ -26,11 +26,11 @@
         </section>
         <LearnerProfileCard v-else :profile="profile" :kb-id="profileContextKbId" />
         <!-- KB Selector & Stats -->
-        <section class="bg-card border border-border rounded-xl p-8 shadow-sm space-y-8">
+        <section class="bg-card border border-border rounded-xl p-4 sm:p-6 lg:p-8 shadow-sm space-y-6 lg:space-y-8">
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div class="flex items-center gap-3">
               <Database class="w-6 h-6 text-primary" />
-              <h2 class="text-2xl font-bold">知识库统计</h2>
+              <h2 class="text-xl md:text-2xl font-bold">知识库统计</h2>
             </div>
             <select v-model="selectedKbId" class="bg-background border border-input rounded-lg px-4 py-2 outline-none focus:ring-2 focus:ring-primary text-sm min-w-[200px]">
               <option disabled value="">选择知识库…</option>
@@ -59,11 +59,11 @@
         </section>
 
         <!-- Recommendations -->
-        <section class="bg-card border border-border rounded-xl p-8 shadow-sm space-y-6">
+        <section class="bg-card border border-border rounded-xl p-4 sm:p-6 lg:p-8 shadow-sm space-y-6">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-3">
               <Sparkles class="w-6 h-6 text-primary" />
-              <h2 class="text-2xl font-bold">智能推荐</h2>
+              <h2 class="text-xl md:text-2xl font-bold">智能推荐</h2>
               <span v-if="recommendationsUpdatedLabel && !busy.init" class="text-xs text-muted-foreground">
                 更新于 {{ recommendationsUpdatedLabel }}
               </span>
@@ -179,11 +179,11 @@
         </section>
 
         <!-- Learning Path -->
-        <section class="bg-card border border-border rounded-xl p-8 shadow-sm space-y-6">
+        <section class="bg-card border border-border rounded-xl p-4 sm:p-6 lg:p-8 shadow-sm space-y-6">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-3">
               <GitBranch class="w-6 h-6 text-primary" />
-              <h2 class="text-2xl font-bold">学习路径</h2>
+              <h2 class="text-xl md:text-2xl font-bold">学习路径</h2>
               <span v-if="busy.pathLoad && !busy.init" class="text-sm text-muted-foreground flex items-center gap-2">
                 <RefreshCw class="w-4 h-4 animate-spin" />
                 <span>正在加载学习路径...</span>

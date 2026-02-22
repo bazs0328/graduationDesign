@@ -1,5 +1,15 @@
 <template>
   <div class="min-h-screen flex items-center justify-center bg-background p-4">
+    <button
+      type="button"
+      class="fixed top-4 right-4 z-10 inline-flex items-center gap-2 px-3 py-2 rounded-full border border-border bg-card/80 backdrop-blur text-sm font-medium hover:bg-accent transition-colors"
+      @click="toggleTheme"
+      :title="isDark ? '切换为浅色主题' : '切换为深色主题'"
+      aria-label="切换主题"
+    >
+      <component :is="isDark ? 'Sun' : 'Moon'" class="w-4 h-4" />
+      <span>{{ isDark ? '浅色' : '深色' }}</span>
+    </button>
     <div class="w-full max-w-md space-y-8">
       <div class="text-center">
         <div class="inline-flex w-12 h-12 bg-primary rounded-xl items-center justify-center text-primary-foreground font-bold text-xl mb-4">G</div>
@@ -32,6 +42,7 @@
             <label class="block text-sm font-medium text-foreground mb-1">用户名</label>
             <input
               v-model="username"
+              @blur="touched.username = true"
               type="text"
               class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
               placeholder="3–32 个字符"
@@ -44,6 +55,7 @@
             <label class="block text-sm font-medium text-foreground mb-1">密码</label>
             <input
               v-model="password"
+              @blur="touched.password = true"
               type="password"
               class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
               placeholder="至少 6 个字符"
@@ -56,6 +68,7 @@
             <label class="block text-sm font-medium text-foreground mb-1">确认密码</label>
             <input
               v-model="passwordConfirm"
+              @blur="touched.passwordConfirm = true"
               type="password"
               class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary outline-none"
               placeholder="再次输入密码"
@@ -80,10 +93,15 @@
             type="submit"
             size="lg"
             class="w-full"
+            :disabled="!canSubmit"
             :loading="loading"
+            :title="!canSubmit && submitDisabledReason ? submitDisabledReason : ''"
           >
             {{ loading ? '处理中…' : (isLogin ? '登录' : '注册') }}
           </Button>
+          <p v-if="!loading && submitDisabledReason" class="text-xs text-muted-foreground text-center">
+            {{ submitDisabledReason }}
+          </p>
         </form>
       </div>
     </div>
@@ -91,7 +109,8 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
+import { Sun, Moon } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useAppContextStore } from '../stores/appContext'
 import { authRegister, authLogin } from '../api'
@@ -99,7 +118,9 @@ import Button from '../components/ui/Button.vue'
 
 const router = useRouter()
 const appContext = useAppContextStore()
+const THEME_STORAGE_KEY = 'gradtutor_theme'
 const isLogin = ref(true)
+const isDark = ref(readThemeFromDom())
 const username = ref('')
 const password = ref('')
 const passwordConfirm = ref('')
@@ -107,29 +128,116 @@ const name = ref('')
 const loading = ref(false)
 const errorMessage = ref('')
 const errors = reactive({ username: '', password: '', passwordConfirm: '' })
+const touched = reactive({ username: false, password: false, passwordConfirm: false })
+const hasTriedSubmit = ref(false)
+
+function readThemeFromDom() {
+  if (typeof document === 'undefined') return false
+  return document.documentElement.classList.contains('dark')
+}
+
+function applyTheme(theme) {
+  if (typeof document === 'undefined') return
+  const resolved = theme === 'dark' ? 'dark' : 'light'
+  const root = document.documentElement
+  root.classList.toggle('dark', resolved === 'dark')
+  root.classList.toggle('light', resolved === 'light')
+}
+
+function toggleTheme() {
+  const nextTheme = isDark.value ? 'light' : 'dark'
+  isDark.value = nextTheme === 'dark'
+  applyTheme(nextTheme)
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, nextTheme)
+  } catch {
+    // ignore localStorage access errors
+  }
+}
+
+function buildValidationState({ forceVisible = false } = {}) {
+  const nextErrors = { username: '', password: '', passwordConfirm: '' }
+  const u = username.value.trim()
+  const showUsernameError = forceVisible || touched.username || !!username.value
+  const showPasswordError = forceVisible || touched.password || !!password.value
+  const showPasswordConfirmError = forceVisible || touched.passwordConfirm || !!passwordConfirm.value
+
+  if (!u) {
+    if (showUsernameError) nextErrors.username = '请输入用户名'
+  } else if (u.length < 3 || u.length > 32) {
+    nextErrors.username = '用户名需 3–32 个字符'
+  }
+
+  if (!password.value) {
+    if (showPasswordError) nextErrors.password = '请输入密码'
+  } else if (password.value.length < 6) {
+    nextErrors.password = '密码至少 6 个字符'
+  }
+
+  if (!isLogin.value) {
+    if (!passwordConfirm.value) {
+      if (showPasswordConfirmError) nextErrors.passwordConfirm = '请再次输入密码'
+    } else if (password.value !== passwordConfirm.value) {
+      nextErrors.passwordConfirm = '两次密码不一致'
+    }
+  }
+
+  const blockingErrors = []
+  if (!u) blockingErrors.push('请输入用户名')
+  else if (u.length < 3 || u.length > 32) blockingErrors.push('用户名需 3–32 个字符')
+  if (!password.value) blockingErrors.push('请输入密码')
+  else if (password.value.length < 6) blockingErrors.push('密码至少 6 个字符')
+  if (!isLogin.value) {
+    if (!passwordConfirm.value) blockingErrors.push('请确认密码')
+    else if (password.value !== passwordConfirm.value) blockingErrors.push('两次密码不一致')
+  }
+
+  return {
+    ok: blockingErrors.length === 0,
+    errors: nextErrors,
+    firstError: blockingErrors[0] || '',
+  }
+}
+
+function syncErrors(options = {}) {
+  const state = buildValidationState(options)
+  errors.username = state.errors.username
+  errors.password = state.errors.password
+  errors.passwordConfirm = isLogin.value ? '' : state.errors.passwordConfirm
+  return state.ok
+}
+
+const canSubmit = computed(() => buildValidationState().ok)
+const submitDisabledReason = computed(() => {
+  if (loading.value) return ''
+  const state = buildValidationState()
+  return state.ok ? '' : state.firstError
+})
+
+watch([username, password, passwordConfirm, isLogin], () => {
+  if (isLogin.value) {
+    errors.passwordConfirm = ''
+  }
+  if (hasTriedSubmit.value || touched.username || touched.password || touched.passwordConfirm) {
+    syncErrors()
+  }
+})
+
+watch(isLogin, (nextIsLogin) => {
+  if (nextIsLogin) {
+    touched.passwordConfirm = false
+    errors.passwordConfirm = ''
+  }
+})
 
 function validate() {
-  errors.username = ''
-  errors.password = ''
-  errors.passwordConfirm = ''
-  const u = username.value.trim()
-  if (!u) {
-    errors.username = '请输入用户名'
-    return false
+  hasTriedSubmit.value = true
+  touched.username = true
+  touched.password = true
+  if (!isLogin.value) {
+    touched.passwordConfirm = true
   }
-  if (u.length < 3 || u.length > 32) {
-    errors.username = '用户名需 3–32 个字符'
-    return false
-  }
-  if (password.value.length < 6) {
-    errors.password = '密码至少 6 个字符'
-    return false
-  }
-  if (!isLogin.value && password.value !== passwordConfirm.value) {
-    errors.passwordConfirm = '两次密码不一致'
-    return false
-  }
-  return true
+  return syncErrors({ forceVisible: true })
 }
 
 async function submit() {

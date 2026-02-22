@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full flex flex-col max-w-6xl mx-auto">
+  <div class="h-full flex flex-col max-w-6xl mx-auto space-y-0">
     <!-- Learning Path Context Banner -->
     <section
       v-if="entryFocusContext"
@@ -13,18 +13,26 @@
         你可以针对这个知识点提问，AI 会为你详细讲解。
       </p>
     </section>
-    <div class="flex-1 flex gap-8 overflow-hidden min-h-0">
+    <div class="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-8 overflow-hidden min-h-0">
       <!-- Left: Chat Interface -->
       <section class="flex-1 flex flex-col bg-card border border-border rounded-xl shadow-sm overflow-hidden">
         <!-- Header -->
-        <div class="p-4 border-b border-border flex items-center justify-between bg-card/50">
+        <div class="p-3 sm:p-4 border-b border-border flex items-center justify-between gap-3 bg-card/50">
           <div class="flex items-center gap-3">
             <MessageSquare class="w-6 h-6 text-primary" />
-            <h2 class="text-xl font-bold">AI 辅导对话</h2>
+            <h2 class="text-lg sm:text-xl font-bold">AI 辅导对话</h2>
           </div>
-          <button @click="clearLocalMessages" class="p-2 hover:bg-accent rounded-lg transition-colors text-muted-foreground" title="仅清空本地显示">
-            <Trash2 class="w-5 h-5" />
-          </button>
+          <div class="flex items-center gap-1 sm:gap-2">
+            <button
+              class="lg:hidden px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-border hover:bg-accent transition-colors"
+              @click="qaSidebarOpen = !qaSidebarOpen"
+            >
+              {{ qaSidebarOpen ? '收起面板' : '上下文面板' }}
+            </button>
+            <button @click="clearLocalMessages" class="p-2 hover:bg-accent rounded-lg transition-colors text-muted-foreground" title="仅清空本地显示">
+              <Trash2 class="w-5 h-5" />
+            </button>
+          </div>
         </div>
         <div class="px-4 py-3 border-b border-border/80 bg-gradient-to-r from-accent/40 via-background to-background">
           <div class="flex flex-wrap items-center gap-2">
@@ -57,7 +65,7 @@
         </div>
 
         <!-- Messages -->
-        <div class="flex-1 overflow-y-auto p-6 space-y-6" ref="scrollContainer">
+        <div class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6" ref="scrollContainer">
           <EmptyState
             v-if="qaMessages.length === 0"
             class="h-full max-w-md mx-auto"
@@ -72,7 +80,7 @@
           
           <div v-for="(msg, index) in qaMessages" :key="index" class="flex flex-col" :class="msg.role === 'question' ? 'items-end' : 'items-start'">
             <div 
-              class="max-w-[85%] p-4 rounded-2xl shadow-sm"
+              class="max-w-[92%] sm:max-w-[85%] p-3 sm:p-4 rounded-2xl shadow-sm"
               :class="msg.role === 'question' ? 'bg-primary text-primary-foreground rounded-tr-none' : 'bg-accent text-accent-foreground rounded-tl-none'"
             >
               <div class="flex items-center gap-2 mb-1 opacity-70 text-[10px] font-bold uppercase tracking-wider">
@@ -177,7 +185,7 @@
         </div>
 
         <!-- Input -->
-        <div class="p-4 border-t border-border bg-card/50">
+        <div class="p-3 sm:p-4 border-t border-border bg-card/50">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
               <Sparkles class="w-3.5 h-3.5 text-primary" />
@@ -202,17 +210,17 @@
               </button>
             </div>
           </div>
-          <div class="flex gap-2">
+          <div class="flex flex-col sm:flex-row gap-2">
             <textarea
               v-model="qaInput"
               @keydown.enter.prevent="askQuestion"
               :placeholder="entryFocusContext ? `关于「${entryFocusContext}」，你想了解什么？` : '在此输入你的问题…'"
-              class="flex-1 bg-background border border-input rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary resize-none h-[52px]"
+              class="flex-1 bg-background border border-input rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary resize-none h-[88px] sm:h-[52px]"
               :disabled="!selectedKbId || busy.qa"
             ></textarea>
             <button
               @click="askQuestion"
-              class="bg-primary text-primary-foreground p-3 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center"
+              class="bg-primary text-primary-foreground p-3 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center sm:w-auto w-full"
               :disabled="!selectedKbId || !qaInput.trim() || busy.qa"
             >
               <Send class="w-6 h-6" />
@@ -225,7 +233,10 @@
       </section>
 
       <!-- Right: Knowledge Base Selection -->
-      <aside class="w-72 space-y-6 flex flex-col">
+      <aside
+        class="w-full lg:w-72 space-y-4 lg:space-y-6 flex-col"
+        :class="qaSidebarOpen ? 'flex' : 'hidden lg:flex'"
+      >
         <div class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
           <div class="flex items-center gap-3">
             <Database class="w-6 h-6 text-primary" />
@@ -516,6 +527,7 @@ const qaInput = ref('')
 const qaMessages = ref([])
 const qaAbilityLevel = ref('intermediate')
 const qaMode = ref('normal')
+const qaSidebarOpen = ref(false)
 const qaFlow = ref(createQaFlowState())
 const syncingFromSession = ref(false)
 const preserveQaFlowOnNextSessionLoad = ref(false)
@@ -539,6 +551,8 @@ const busy = ref({
   sessionAction: false
 })
 const scrollContainer = ref(null)
+const lastQaSubmitFingerprint = ref('')
+const lastQaSubmitAt = ref(0)
 
 const QA_FLOW_STAGES = [
   { key: 'retrieving', label: '检索中' },
@@ -550,6 +564,7 @@ const QA_FLOW_STAGES = [
 
 const STREAM_NON_FALLBACK_CODES = new Set(['validation_error', 'not_found', 'no_results'])
 const QA_EXPLAIN_DISPLAY_THRESHOLD = 3
+const QA_SUBMIT_DEDUPE_WINDOW_MS = 1200
 
 const LEVEL_LABELS = {
   beginner: {
@@ -843,6 +858,32 @@ function buildQaPayload(question, activeSessionId) {
     payload.focus = entryFocusContext.value
   }
   return payload
+}
+
+function buildQaSubmitFingerprint(question) {
+  const normalizedQuestion = (question || '').trim()
+  if (!normalizedQuestion) return ''
+  return [
+    selectedKbId.value || '',
+    selectedDocId.value || '',
+    selectedSessionId.value || '',
+    normalizeQaMode(qaMode.value),
+    normalizedQuestion,
+  ].join('::')
+}
+
+function isDuplicateQaSubmit(fingerprint) {
+  if (!fingerprint) return false
+  const now = Date.now()
+  const isDuplicate = (
+    lastQaSubmitFingerprint.value === fingerprint
+    && (now - lastQaSubmitAt.value) < QA_SUBMIT_DEDUPE_WINDOW_MS
+  )
+  if (!isDuplicate) {
+    lastQaSubmitFingerprint.value = fingerprint
+    lastQaSubmitAt.value = now
+  }
+  return isDuplicate
 }
 
 function goToUpload() {
@@ -1177,6 +1218,8 @@ async function askQuestion() {
   if (!selectedKbId.value || !qaInput.value.trim() || busy.value.qa) return
   
   const question = qaInput.value.trim()
+  const submitFingerprint = buildQaSubmitFingerprint(question)
+  if (isDuplicateQaSubmit(submitFingerprint)) return
   qaInput.value = ''
   qaMessages.value.push({ role: 'question', content: question })
   const placeholderIndex = qaMessages.value.push(makeAssistantPlaceholder()) - 1
