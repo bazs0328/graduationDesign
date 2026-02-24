@@ -10,6 +10,23 @@ from app.services.mastery import is_weak_mastery
 
 ABILITY_LEVELS = ("beginner", "intermediate", "advanced")
 WEAK_CONCEPT_LIMIT = 10
+THETA_MIN = -2.0
+THETA_MAX = 2.0
+THETA_DELTA_LIMIT = 0.25
+
+
+def _clamp(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, value))
+
+
+def _difficulty_weight(label: str | None) -> float:
+    normalized = str(label or "medium").strip().lower()
+    return {
+        "easy": 0.8,
+        "medium": 1.0,
+        "adaptive": 1.0,
+        "hard": 1.2,
+    }.get(normalized, 1.0)
 
 
 def get_or_create_profile(db: Session, user_id: str) -> LearnerProfile:
@@ -140,10 +157,11 @@ def update_profile_after_quiz(
     user_id: str,
     accuracy: float,
     wrong_concepts: List[str] | None = None,
+    quiz_difficulty: str | None = None,
 ) -> Tuple[LearnerProfile, ProfileDelta]:
     """Update learner profile based on quiz results."""
     profile = get_or_create_profile(db, user_id)
-    before_theta = profile.theta
+    before_theta = float(profile.theta or 0.0)
     before_ability_level = profile.ability_level
     before_frustration = profile.frustration_score
     before_recent_accuracy = profile.recent_accuracy
@@ -168,6 +186,16 @@ def update_profile_after_quiz(
         profile.consecutive_low_scores = 0
         profile.frustration_score = max(0.0, profile.frustration_score - 0.05)
 
+    difficulty_weight = _difficulty_weight(quiz_difficulty)
+    performance = (float(accuracy) - 0.6) * difficulty_weight
+    penalty = 0.15 * float(profile.frustration_score or 0.0)
+    raw_theta_delta = performance - penalty
+    theta_delta = _clamp(raw_theta_delta, -THETA_DELTA_LIMIT, THETA_DELTA_LIMIT)
+    profile.theta = round(
+        _clamp(before_theta + theta_delta, THETA_MIN, THETA_MAX),
+        4,
+    )
+
     # Keep storage field for backward compatibility but derive content from mastery-level.
     weak_by_mastery = get_weak_concepts_by_mastery(db, user_id, limit=WEAK_CONCEPT_LIMIT)
     if weak_by_mastery:
@@ -187,7 +215,7 @@ def update_profile_after_quiz(
     db.refresh(profile)
 
     delta = ProfileDelta(
-        theta_delta=profile.theta - before_theta,
+        theta_delta=float(profile.theta or 0.0) - before_theta,
         frustration_delta=profile.frustration_score - before_frustration,
         recent_accuracy_delta=profile.recent_accuracy - before_recent_accuracy,
         ability_level_changed=profile.ability_level != before_ability_level,

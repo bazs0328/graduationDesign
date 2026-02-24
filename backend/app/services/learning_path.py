@@ -1,7 +1,10 @@
 """Cross-document learning path with stages, modules and milestones."""
 
 import logging
+import time
 from collections import defaultdict, deque
+from copy import deepcopy
+from threading import Lock
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -26,6 +29,11 @@ from app.utils.json_tools import safe_json_loads
 
 logger = logging.getLogger(__name__)
 
+_LEARNING_PATH_RESULT_CACHE_TTL_SECONDS = 300
+_LEARNING_PATH_RESULT_CACHE_MAX_ENTRIES = 64
+_learning_path_result_cache: dict[tuple[str, str, int], tuple[float, Any]] = {}
+_learning_path_result_cache_lock = Lock()
+
 STAGE_ORDER = ["foundation", "intermediate", "advanced", "application"]
 STAGE_META = {
     "foundation": ("基础阶段", "先建立核心概念与术语理解。"),
@@ -33,6 +41,61 @@ STAGE_META = {
     "advanced": ("高级阶段", "攻克复杂推理与综合分析问题。"),
     "application": ("应用阶段", "迁移到实战场景并完成综合应用。"),
 }
+
+
+def _learning_path_cache_key(user_id: str, kb_id: str, limit: int) -> tuple[str, str, int]:
+    return (str(user_id), str(kb_id), int(limit or 0))
+
+
+def _prune_learning_path_result_cache(now: float) -> None:
+    expired = [key for key, (expires_at, _) in _learning_path_result_cache.items() if expires_at <= now]
+    for key in expired:
+        _learning_path_result_cache.pop(key, None)
+
+    overflow = len(_learning_path_result_cache) - _LEARNING_PATH_RESULT_CACHE_MAX_ENTRIES
+    if overflow <= 0:
+        return
+    oldest = sorted(
+        _learning_path_result_cache.items(),
+        key=lambda item: item[1][0],
+    )[:overflow]
+    for key, _ in oldest:
+        _learning_path_result_cache.pop(key, None)
+
+
+def _get_cached_learning_path_result(
+    user_id: str,
+    kb_id: str,
+    limit: int,
+) -> Optional[tuple[list[Any], list[Any], list[Any], list[Any], dict[str, Any]]]:
+    key = _learning_path_cache_key(user_id, kb_id, limit)
+    now = time.monotonic()
+    with _learning_path_result_cache_lock:
+        entry = _learning_path_result_cache.get(key)
+        if not entry:
+            return None
+        expires_at, payload = entry
+        if expires_at <= now:
+            _learning_path_result_cache.pop(key, None)
+            return None
+        return deepcopy(payload)
+
+
+def _set_cached_learning_path_result(
+    user_id: str,
+    kb_id: str,
+    limit: int,
+    payload: tuple[list[Any], list[Any], list[Any], list[Any], dict[str, Any]],
+) -> None:
+    key = _learning_path_cache_key(user_id, kb_id, limit)
+    now = time.monotonic()
+    with _learning_path_result_cache_lock:
+        _prune_learning_path_result_cache(now)
+        _learning_path_result_cache[key] = (
+            now + _LEARNING_PATH_RESULT_CACHE_TTL_SECONDS,
+            deepcopy(payload),
+        )
+        _prune_learning_path_result_cache(now)
 
 
 # ---------------------------------------------------------------------------
@@ -859,6 +922,11 @@ def generate_learning_path(
     dict[str, Any],
 ]:
     """Generate personalized learning path with stages/modules/milestones."""
+    if not force:
+        cached = _get_cached_learning_path_result(user_id, kb_id, limit)
+        if cached is not None:
+            return cached
+
     keypoints = (
         db.query(Keypoint)
         .filter(Keypoint.user_id == user_id, Keypoint.kb_id == kb_id)
@@ -866,7 +934,9 @@ def generate_learning_path(
         .all()
     )
     if not keypoints:
-        return [], [], [], [], {}
+        empty_result = ([], [], [], [], {})
+        _set_cached_learning_path_result(user_id, kb_id, limit, empty_result)
+        return empty_result
 
     profile = db.query(LearnerProfile).filter(LearnerProfile.user_id == user_id).first()
     ability_level = profile.ability_level if profile and profile.ability_level else "intermediate"
@@ -987,7 +1057,9 @@ def generate_learning_path(
         LearningPathEdge(from_id=from_id, to_id=to_id, relation="prerequisite")
         for from_id, to_id in edge_tuples
     ]
-    return items, edges, stages, modules, path_summary
+    result_payload = (items, edges, stages, modules, path_summary)
+    _set_cached_learning_path_result(user_id, kb_id, limit, result_payload)
+    return result_payload
 
 
 # ---------------------------------------------------------------------------
@@ -1005,4 +1077,20 @@ def invalidate_dependency_cache(db: Session, kb_id: Optional[str]) -> int:
         .delete()
     )
     db.commit()
+    invalidate_learning_path_result_cache(db, kb_id)
     return count
+
+
+def invalidate_learning_path_result_cache(db: Session | None, kb_id: Optional[str]) -> int:
+    """Delete in-process cached learning-path results for a KB. Returns removed entry count."""
+    if not kb_id:
+        return 0
+    removed = 0
+    with _learning_path_result_cache_lock:
+        for key in list(_learning_path_result_cache.keys()):
+            _, cached_kb_id, _ = key
+            if cached_kb_id != kb_id:
+                continue
+            _learning_path_result_cache.pop(key, None)
+            removed += 1
+    return removed

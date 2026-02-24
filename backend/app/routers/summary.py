@@ -24,7 +24,7 @@ async def generate_summary(payload: SummaryRequest, db: Session = Depends(get_db
     doc = db.query(Document).filter(Document.id == payload.doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    if payload.user_id and doc.user_id != resolved_user_id:
+    if doc.user_id != resolved_user_id:
         raise HTTPException(status_code=404, detail="Document not found")
     if doc.status != "ready":
         raise HTTPException(status_code=409, detail="Document is still processing")

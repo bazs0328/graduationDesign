@@ -1,3 +1,5 @@
+import logging
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
@@ -9,6 +11,57 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
+logger = logging.getLogger(__name__)
+
+
+def _create_sqlite_index(conn, statement: str, *, optional: bool = False) -> None:
+    try:
+        conn.execute(text(statement))
+        conn.commit()
+    except Exception:
+        if optional:
+            logger.warning("Failed to create optional SQLite index: %s", statement, exc_info=True)
+            conn.rollback()
+            return
+        raise
+
+
+def _ensure_sqlite_indexes(conn) -> None:
+    # Hot-path lookup indexes used by activity/progress/recommendations/quiz.
+    statements = [
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_bases_user_id ON knowledge_bases(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_documents_user_kb_id ON documents(user_id, kb_id)",
+        "CREATE INDEX IF NOT EXISTS idx_documents_user_created_at ON documents(user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_summaries_user_id ON summaries(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_summaries_doc_id ON summaries(doc_id)",
+        "CREATE INDEX IF NOT EXISTS idx_summaries_user_doc_id ON summaries(user_id, doc_id)",
+        "CREATE INDEX IF NOT EXISTS idx_keypoints_user_id ON keypoints(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_keypoints_doc_id ON keypoints(doc_id)",
+        "CREATE INDEX IF NOT EXISTS idx_keypoints_user_doc_id ON keypoints(user_id, doc_id)",
+        "CREATE INDEX IF NOT EXISTS idx_qa_records_user_id ON qa_records(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_qa_records_doc_id ON qa_records(doc_id)",
+        "CREATE INDEX IF NOT EXISTS idx_qa_records_user_doc_id ON qa_records(user_id, doc_id)",
+        "CREATE INDEX IF NOT EXISTS idx_qa_records_user_kb_id ON qa_records(user_id, kb_id)",
+        "CREATE INDEX IF NOT EXISTS idx_quizzes_user_id ON quizzes(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_quizzes_doc_id ON quizzes(doc_id)",
+        "CREATE INDEX IF NOT EXISTS idx_quizzes_user_doc_id ON quizzes(user_id, doc_id)",
+        "CREATE INDEX IF NOT EXISTS idx_quiz_attempts_user_id ON quiz_attempts(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_quiz_attempts_quiz_id ON quiz_attempts(quiz_id)",
+        "CREATE INDEX IF NOT EXISTS idx_quiz_attempts_user_created_at ON quiz_attempts(user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_keypoint_dependencies_from_id ON keypoint_dependencies(from_keypoint_id)",
+        "CREATE INDEX IF NOT EXISTS idx_keypoint_dependencies_to_id ON keypoint_dependencies(to_keypoint_id)",
+    ]
+    for stmt in statements:
+        _create_sqlite_index(conn, stmt)
+
+    # Optional because legacy duplicates may exist in older databases.
+    _create_sqlite_index(
+        conn,
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_quiz_attempts_user_quiz ON quiz_attempts(user_id, quiz_id)",
+        optional=True,
+    )
 
 
 def ensure_schema():
@@ -231,6 +284,8 @@ def ensure_schema():
                 )
             )
             conn.commit()
+
+        _ensure_sqlite_indexes(conn)
 
 
 def get_db():

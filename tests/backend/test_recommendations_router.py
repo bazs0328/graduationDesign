@@ -289,3 +289,66 @@ def test_recommendations_ready_for_challenge_prioritizes_challenge(client, db_se
     assert item["primary_action"]["type"] == "challenge"
     challenge = next(action for action in item["actions"] if action["type"] == "challenge")
     assert challenge["params"]["difficulty"] in ("medium", "hard")
+
+
+def test_recommendations_learning_path_cache_invalidates_after_build_force(client, db_session):
+    user_id = "rec_user_cache"
+    kb_id = "rec_kb_cache"
+    doc_id = "rec_doc_cache"
+    _seed_user_kb_doc(
+        db_session,
+        user_id=user_id,
+        kb_id=kb_id,
+        doc_id=doc_id,
+        filename="cache.txt",
+    )
+    db_session.add(
+        Keypoint(
+            id="kp-cache-1",
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            text="概念一",
+            explanation="e1",
+            mastery_level=0.2,
+            attempt_count=0,
+            correct_count=0,
+        )
+    )
+    db_session.add(
+        Keypoint(
+            id="kp-cache-2",
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            text="概念二",
+            explanation="e2",
+            mastery_level=0.4,
+            attempt_count=1,
+            correct_count=1,
+        )
+    )
+    db_session.commit()
+
+    stage_calls = {"count": 0}
+
+    def fake_stage_hints(*args, **kwargs):
+        stage_calls["count"] += 1
+        return {}
+
+    with (
+        patch("app.services.learning_path._infer_stage_hints", side_effect=fake_stage_hints),
+        patch("app.services.learning_path._infer_milestones", return_value=set()),
+    ):
+        first = client.get(f"/api/recommendations?user_id={user_id}&kb_id={kb_id}&limit=5")
+        second = client.get(f"/api/recommendations?user_id={user_id}&kb_id={kb_id}&limit=5")
+        build = client.post(
+            f"/api/learning-path/build?user_id={user_id}&kb_id={kb_id}&force=true"
+        )
+        third = client.get(f"/api/recommendations?user_id={user_id}&kb_id={kb_id}&limit=5")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert build.status_code == 200
+    assert third.status_code == 200
+    assert stage_calls["count"] == 2

@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from app.services.quiz import _apply_quality_guardrails, generate_quiz
+from app.services.quiz import _apply_quality_guardrails, _build_context, generate_quiz
 
 
 def test_quality_guardrails_filter_invalid_duplicates_and_concept_overload():
@@ -136,4 +136,38 @@ def test_generate_quiz_resamples_once_when_guardrails_reduce_count():
     assert llm.invoke.call_count == 2
     stems = [q["question"] for q in questions]
     assert stems == ["题目1", "题目2", "题目3"]
-    assert all(q.get("keypoint_ids") == ["kp-1"] for q in questions)
+    assert all("keypoint_ids" not in q for q in questions)
+
+
+def test_build_context_scales_k_with_question_count_and_caps_context_length():
+    docs = [
+        SimpleNamespace(
+            page_content=(f"chunk-{idx} " + ("x" * 3000)),
+            metadata={"keypoint_id": f"kp-{idx}"},
+        )
+        for idx in range(40)
+    ]
+
+    vectorstore = Mock()
+
+    def _similarity_search(query, k, filter):
+        assert filter == {"kb_id": "kb-1"}
+        return docs[:k]
+
+    vectorstore.similarity_search.side_effect = _similarity_search
+
+    with patch("app.services.quiz.get_vectorstore", return_value=vectorstore):
+        context, keypoint_ids = _build_context(
+            user_id="u1",
+            doc_id=None,
+            kb_id="kb-1",
+            reference_questions=None,
+            focus_concepts=["概念A", "概念B"],
+            target_count=10,
+        )
+
+    call_kwargs = vectorstore.similarity_search.call_args.kwargs
+    assert call_kwargs["k"] > 6
+    assert call_kwargs["k"] <= 24
+    assert len(keypoint_ids) == call_kwargs["k"]
+    assert len(context) <= 16000

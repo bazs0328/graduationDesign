@@ -13,7 +13,11 @@ from app.schemas import (
     LearningPathModule,
     LearningPathStage,
 )
-from app.services.learning_path import build_dependency_graph, generate_learning_path
+from app.services.learning_path import (
+    build_dependency_graph,
+    generate_learning_path,
+    invalidate_learning_path_result_cache,
+)
 
 router = APIRouter()
 
@@ -48,6 +52,7 @@ def build_path(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     deps = build_dependency_graph(db, resolved_user_id, kb.id, force=force)
+    invalidate_learning_path_result_cache(db, kb.id)
     return LearningPathBuildResponse(
         kb_id=kb.id,
         edges_count=len(deps),

@@ -17,6 +17,7 @@ from app.db import get_db
 from app.models import ChatMessage, ChatSession, Document, QARecord
 from app.schemas import QARequest, QAResponse, SourceSnippet
 from app.services.learner_profile import get_or_create_profile, get_weak_concepts_by_mastery
+from app.services.learning_path import invalidate_learning_path_result_cache
 from app.services.mastery import record_study_interaction
 from app.services.qa import (
     NO_RESULTS_ANSWER,
@@ -31,6 +32,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 HISTORY_LIMIT = 6
+HISTORY_FETCH_LIMIT = 24
+QA_HISTORY_TOTAL_CHAR_BUDGET = 2400
+QA_HISTORY_RECENT_CHAR_BUDGET = 1600
+QA_HISTORY_SUMMARY_CHAR_BUDGET = 700
+QA_HISTORY_LINE_PREVIEW_CHARS = 220
 
 
 @dataclass
@@ -42,6 +48,72 @@ class QAResolvedContext:
     session: ChatSession | None
     profile: Any
     weak_concepts: list[str]
+
+
+def _truncate_history_text(value: str, limit: int) -> str:
+    text = " ".join((value or "").replace("\r", "\n").split())
+    if limit <= 0:
+        return ""
+    if len(text) <= limit:
+        return text
+    if limit <= 3:
+        return text[:limit]
+    return text[: limit - 3].rstrip() + "..."
+
+
+def _render_history_line(role: str, content: str, preview_chars: int = QA_HISTORY_LINE_PREVIEW_CHARS) -> str:
+    return f"{role}: {_truncate_history_text(content, preview_chars)}"
+
+
+def _fit_history_block(lines: list[str], max_chars: int) -> str:
+    if max_chars <= 0:
+        return ""
+    output: list[str] = []
+    for line in lines:
+        candidate = line.strip()
+        if not candidate:
+            continue
+        joined = "\n".join(output + [candidate])
+        if len(joined) <= max_chars:
+            output.append(candidate)
+            continue
+        remaining = max_chars - len("\n".join(output))
+        if output:
+            remaining -= 1  # newline
+        if remaining > 6:
+            output.append(_truncate_history_text(candidate, remaining))
+        break
+    return "\n".join(output)
+
+
+def _build_history_text(history_rows: list[ChatMessage]) -> str | None:
+    if not history_rows:
+        return None
+    ordered = list(reversed(history_rows))
+    recent_rows = ordered[-HISTORY_LIMIT:] if HISTORY_LIMIT > 0 else ordered
+    older_rows = ordered[:-HISTORY_LIMIT] if HISTORY_LIMIT > 0 else []
+
+    recent_lines = [_render_history_line(row.role, row.content) for row in recent_rows]
+    recent_block = _fit_history_block(recent_lines, QA_HISTORY_RECENT_CHAR_BUDGET)
+    if recent_block:
+        recent_block = "[Recent messages]\n" + recent_block
+
+    summary_block = ""
+    if older_rows:
+        user_count = sum(1 for row in older_rows if row.role == "user")
+        assistant_count = sum(1 for row in older_rows if row.role == "assistant")
+        summary_lines = [
+            f"[Earlier conversation summary] messages={len(older_rows)}, user={user_count}, assistant={assistant_count}",
+        ]
+        # Keep the latest older messages as a concise bridge into the recent window.
+        for row in older_rows[-4:]:
+            summary_lines.append(_render_history_line(row.role, row.content, preview_chars=90))
+        summary_block = _fit_history_block(summary_lines, QA_HISTORY_SUMMARY_CHAR_BUDGET)
+
+    combined = "\n".join([block for block in [summary_block, recent_block] if block]).strip()
+    if not combined:
+        return None
+    return _truncate_history_text(combined, QA_HISTORY_TOTAL_CHAR_BUDGET)
 
 
 def _serialize_sources(sources: list[dict]) -> list[dict]:
@@ -118,12 +190,11 @@ def _resolve_qa_request_context(payload: QARequest, db: Session) -> QAResolvedCo
             db.query(ChatMessage)
             .filter(ChatMessage.session_id == session.id)
             .order_by(ChatMessage.created_at.desc())
-            .limit(HISTORY_LIMIT)
+            .limit(HISTORY_FETCH_LIMIT)
             .all()
         )
         if history_rows:
-            history_rows = list(reversed(history_rows))
-            history = "\n".join(f"{row.role}: {row.content}" for row in history_rows)
+            history = _build_history_text(history_rows)
 
     profile = get_or_create_profile(db, resolved_user_id)
     weak_concepts = get_weak_concepts_by_mastery(db, resolved_user_id)
@@ -188,6 +259,7 @@ def _persist_qa_result(
         payload.focus,
     )
     db.commit()
+    invalidate_learning_path_result_cache(db, ctx.kb_id)
 
 
 def _sse_event(event: str, data: dict) -> str:

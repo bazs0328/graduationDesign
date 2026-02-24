@@ -1,10 +1,12 @@
 """Tests for QA router."""
 
 import json
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.models import ChatMessage
+from app.routers.qa import QA_HISTORY_TOTAL_CHAR_BUDGET
 
 
 MOCK_SOURCES = [{"source": "doc p.1 c.0", "snippet": "snippet text", "doc_id": "doc-1"}]
@@ -213,6 +215,51 @@ def test_qa_with_session_persists_sources(client, seeded_session, db_session):
     assert len(assistant_in_response) >= 1
     assert assistant_in_response[-1].get("sources") is not None
     assert len(assistant_in_response[-1]["sources"]) > 0
+
+
+def test_qa_session_history_is_budgeted_and_keeps_recent_messages(client, seeded_session, db_session):
+    session_id = seeded_session["session_id"]
+    user_id = seeded_session["user_id"]
+    doc_id = seeded_session["doc_id"]
+    base_time = datetime.utcnow() - timedelta(minutes=20)
+
+    for idx in range(14):
+        role = "user" if idx % 2 == 0 else "assistant"
+        content = f"msg-{idx}-" + ("very long content " * 30)
+        db_session.add(
+            ChatMessage(
+                id=f"history-budget-{idx}",
+                session_id=session_id,
+                role=role,
+                content=content,
+                created_at=base_time + timedelta(minutes=idx),
+            )
+        )
+    db_session.commit()
+
+    with (
+        patch("app.routers.qa.prepare_qa_answer", side_effect=_mock_prepare) as mocked_prepare,
+        patch("app.routers.qa.get_llm", return_value=object()),
+        patch("app.routers.qa.generate_qa_answer", return_value="mock answer from LLM"),
+        patch("app.routers.qa._update_mastery_from_qa"),
+    ):
+        resp = client.post(
+            "/api/qa",
+            json={
+                "doc_id": doc_id,
+                "user_id": user_id,
+                "session_id": session_id,
+                "question": "Summarize context",
+            },
+        )
+
+    assert resp.status_code == 200
+    history = mocked_prepare.call_args.kwargs["history"]
+    assert history is not None
+    assert len(history) <= QA_HISTORY_TOTAL_CHAR_BUDGET
+    assert "[Recent messages]" in history
+    assert "[Earlier conversation summary]" in history
+    assert "msg-13-" in history
 
 
 def test_qa_stream_post_success_sends_ordered_events(client, seeded_session):

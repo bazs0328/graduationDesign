@@ -19,7 +19,7 @@ class KnowledgeBase(Base):
     __tablename__ = "knowledge_bases"
 
     id = Column(String, primary_key=True, index=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -29,7 +29,7 @@ class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
     id = Column(String, primary_key=True, index=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=True, index=True)
     doc_id = Column(String, ForeignKey("documents.id"), nullable=True, index=True)
     title = Column(String, nullable=True)
@@ -51,7 +51,7 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(String, primary_key=True, index=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=True, index=True)
     filename = Column(String, nullable=False)
     file_type = Column(String, nullable=False)
@@ -73,8 +73,8 @@ class SummaryRecord(Base):
     __tablename__ = "summaries"
 
     id = Column(String, primary_key=True, index=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
-    doc_id = Column(String, ForeignKey("documents.id"))
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    doc_id = Column(String, ForeignKey("documents.id"), index=True)
     summary_text = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -83,8 +83,8 @@ class KeypointRecord(Base):
     __tablename__ = "keypoints"
 
     id = Column(String, primary_key=True, index=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
-    doc_id = Column(String, ForeignKey("documents.id"))
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    doc_id = Column(String, ForeignKey("documents.id"), index=True)
     points_json = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -112,9 +112,9 @@ class QARecord(Base):
     __tablename__ = "qa_records"
 
     id = Column(String, primary_key=True, index=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=True, index=True)
-    doc_id = Column(String, ForeignKey("documents.id"))
+    doc_id = Column(String, ForeignKey("documents.id"), index=True)
     question = Column(Text, nullable=False)
     answer = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -124,9 +124,9 @@ class Quiz(Base):
     __tablename__ = "quizzes"
 
     id = Column(String, primary_key=True, index=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=True, index=True)
-    doc_id = Column(String, ForeignKey("documents.id"), nullable=True)
+    doc_id = Column(String, ForeignKey("documents.id"), nullable=True, index=True)
     difficulty = Column(String, default="medium")
     question_type = Column(String, default="mcq")
     questions_json = Column(Text, nullable=False)
@@ -137,8 +137,8 @@ class QuizAttempt(Base):
     __tablename__ = "quiz_attempts"
 
     id = Column(String, primary_key=True, index=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
-    quiz_id = Column(String, ForeignKey("quizzes.id"))
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    quiz_id = Column(String, ForeignKey("quizzes.id"), index=True)
     answers_json = Column(Text, nullable=False)
     score = Column(Float, nullable=False)
     total = Column(Integer, nullable=False)
@@ -165,8 +165,8 @@ class KeypointDependency(Base):
 
     id = Column(String, primary_key=True, index=True)
     kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=False, index=True)
-    from_keypoint_id = Column(String, ForeignKey("keypoints_v2.id"), nullable=False)
-    to_keypoint_id = Column(String, ForeignKey("keypoints_v2.id"), nullable=False)
+    from_keypoint_id = Column(String, ForeignKey("keypoints_v2.id"), nullable=False, index=True)
+    to_keypoint_id = Column(String, ForeignKey("keypoints_v2.id"), nullable=False, index=True)
     relation = Column(String, default="prerequisite")
     confidence = Column(Float, default=1.0)
     created_at = Column(DateTime, default=datetime.utcnow)

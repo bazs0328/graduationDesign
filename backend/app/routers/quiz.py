@@ -6,6 +6,7 @@ from collections import defaultdict
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.knowledge_bases import ensure_kb
@@ -35,6 +36,7 @@ from app.services.keypoints import (
     match_keypoints_by_concepts,
     match_keypoints_by_kb,
 )
+from app.services.learning_path import invalidate_learning_path_result_cache
 from app.services.mastery import record_quiz_result
 from app.services.quiz import filter_quiz_questions_quality, generate_quiz
 from app.services.text_extraction import extract_text
@@ -110,7 +112,7 @@ def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
         doc = db.query(Document).filter(Document.id == payload.doc_id).first()
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
-        if payload.user_id and doc.user_id != resolved_user_id:
+        if doc.user_id != resolved_user_id:
             raise HTTPException(status_code=404, detail="Document not found")
         if doc.status != "ready":
             raise HTTPException(status_code=409, detail="Document is still processing")
@@ -284,8 +286,18 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
     quiz = db.query(Quiz).filter(Quiz.id == payload.quiz_id).first()
     if not quiz:
         raise HTTPException(status_code=404, detail="Quiz not found")
-    if payload.user_id and quiz.user_id != resolved_user_id:
+    if quiz.user_id != resolved_user_id:
         raise HTTPException(status_code=404, detail="Quiz not found")
+    existing_attempt = (
+        db.query(QuizAttempt)
+        .filter(
+            QuizAttempt.quiz_id == payload.quiz_id,
+            QuizAttempt.user_id == resolved_user_id,
+        )
+        .first()
+    )
+    if existing_attempt:
+        raise HTTPException(status_code=409, detail="Quiz already submitted")
 
     questions = json.loads(quiz.questions_json)
     total = len(questions)
@@ -341,7 +353,11 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
     first_five_wrong = sum(1 for item in results[:5] if not item)
     weak_concepts = extract_weak_concepts(questions, results)
     _, profile_delta = update_profile_after_quiz(
-        db, resolved_user_id, score, weak_concepts
+        db,
+        resolved_user_id,
+        score,
+        weak_concepts,
+        quiz_difficulty=quiz.difficulty,
     )
     weak_concepts_by_mastery = get_weak_concepts_by_mastery(db, resolved_user_id)
     wrong_questions_by_concept = _group_wrong_questions_by_concept(questions, results)
@@ -367,7 +383,15 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
         total=total,
     )
     db.add(attempt)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        msg = str(getattr(exc, "orig", exc)).lower()
+        if "quiz_attempts" in msg and ("user_id" in msg and "quiz_id" in msg):
+            raise HTTPException(status_code=409, detail="Quiz already submitted") from exc
+        raise
+    invalidate_learning_path_result_cache(db, quiz.kb_id)
 
     return QuizSubmitResponse(
         score=score,

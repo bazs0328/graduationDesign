@@ -274,7 +274,7 @@
 
             <!-- ECharts graph -->
             <div class="border border-border rounded-lg bg-background p-2" style="height: 396px">
-              <VChart ref="pathChartRef" class="w-full" style="height: 380px; display: block;" :option="pathChartOption" autoresize />
+              <LearningPathGraph :option="pathChartOption" :height="380" />
             </div>
 
             <!-- Legend -->
@@ -421,7 +421,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onActivated, computed, watch } from 'vue'
+import { ref, onMounted, onActivated, computed, watch, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   FileText,
@@ -436,12 +436,6 @@ import {
   GitBranch,
   ChevronDown,
 } from 'lucide-vue-next'
-import { use } from 'echarts/core'
-import { CanvasRenderer } from 'echarts/renderers'
-import { GraphChart } from 'echarts/charts'
-import { TooltipComponent, LegendComponent, GraphicComponent } from 'echarts/components'
-import VChart from 'vue-echarts'
-import LearnerProfileCard from '../components/LearnerProfileCard.vue'
 import { apiGet, getProfile, buildLearningPath } from '../api'
 import { useToast } from '../composables/useToast'
 import { useAppContextStore } from '../stores/appContext'
@@ -452,8 +446,18 @@ import { renderMarkdown } from '../utils/markdown'
 import { buildRouteContextQuery, normalizeDifficulty } from '../utils/routeContext'
 
 const { showToast } = useToast()
-
-use([CanvasRenderer, GraphChart, TooltipComponent, LegendComponent, GraphicComponent])
+const LearnerProfileCard = defineAsyncComponent({
+  loader: () => import('../components/LearnerProfileCard.vue'),
+  loadingComponent: SkeletonBlock,
+  delay: 0,
+  suspensible: false,
+})
+const LearningPathGraph = defineAsyncComponent({
+  loader: () => import('../components/progress/LearningPathGraph.vue'),
+  loadingComponent: SkeletonBlock,
+  delay: 0,
+  suspensible: false,
+})
 
 const STAGE_ORDER = ['foundation', 'intermediate', 'advanced', 'application']
 const STAGE_META = {
@@ -468,6 +472,8 @@ const STAGE_COLOR_MAP = {
   advanced: '#f59e0b',
   application: '#ef4444',
 }
+const PROGRESS_REC_CACHE_TTL_MS = 5 * 60 * 1000
+const PROGRESS_REC_CACHE_PREFIX = 'gradtutor_progress_rec_v1:'
 
 const router = useRouter()
 const route = useRoute()
@@ -493,7 +499,6 @@ const selectedKbId = computed({
   get: () => appContext.selectedKbId,
   set: (value) => appContext.setSelectedKbId(value),
 })
-const pathChartRef = ref(null)
 const busy = ref({
   init: false,
   recommendations: false,
@@ -720,34 +725,138 @@ async function loadMoreActivity() {
   await fetchActivity({ reset: false, append: true, offset: activity.value.length })
 }
 
-async function fetchRecommendations() {
-  if (!selectedKbId.value) return
+function resetLearningPathState() {
+  learningPath.value = []
+  learningPathEdges.value = []
+  learningPathStages.value = []
+  learningPathModules.value = []
+  learningPathSummary.value = {}
+}
+
+function recommendationCacheKey(kbId) {
+  if (!kbId) return ''
+  return `${PROGRESS_REC_CACHE_PREFIX}${resolvedUserId.value || 'default'}:${kbId}`
+}
+
+function readRecommendationCache(kbId) {
+  const key = recommendationCacheKey(kbId)
+  if (!key) return null
+  try {
+    const raw = sessionStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+    const savedAt = Number(parsed.saved_at || 0)
+    if (!savedAt || (Date.now() - savedAt) > PROGRESS_REC_CACHE_TTL_MS) {
+      sessionStorage.removeItem(key)
+      return null
+    }
+    return parsed.payload || null
+  } catch {
+    return null
+  }
+}
+
+function writeRecommendationCache(kbId) {
+  const key = recommendationCacheKey(kbId)
+  if (!key) return
+  try {
+    sessionStorage.setItem(key, JSON.stringify({
+      saved_at: Date.now(),
+      payload: {
+        items: recommendations.value || [],
+        next_step: nextRecommendation.value || null,
+        generated_at: recommendationsUpdatedAt.value || '',
+        learning_path: learningPath.value || [],
+        learning_path_edges: learningPathEdges.value || [],
+        learning_path_stages: learningPathStages.value || [],
+        learning_path_modules: learningPathModules.value || [],
+        learning_path_summary: learningPathSummary.value || {},
+      },
+    }))
+  } catch {
+    // ignore cache write failures
+  }
+}
+
+function applyRecommendationsPayload(payload = {}, options = {}) {
+  const { hydrateLearningPath = true } = options
+  recommendations.value = normalizeRecommendationItems(payload?.items || [])
+  nextRecommendation.value = payload?.next_step || null
+  recommendationsUpdatedAt.value = payload?.generated_at || ''
+  if (hydrateLearningPath) {
+    applyLearningPathPayload(payload)
+  }
+}
+
+function hydrateRecommendationsFromCache(kbId, options = {}) {
+  const payload = readRecommendationCache(kbId)
+  if (!payload) return false
+  applyRecommendationsPayload(payload, options)
+  return true
+}
+
+function applyLearningPathPayload(payload = {}) {
+  learningPath.value = Array.isArray(payload?.learning_path)
+    ? payload.learning_path
+    : (payload?.items || [])
+  learningPathEdges.value = Array.isArray(payload?.learning_path_edges)
+    ? payload.learning_path_edges
+    : (payload?.edges || [])
+  learningPathStages.value = Array.isArray(payload?.learning_path_stages)
+    ? payload.learning_path_stages
+    : (payload?.stages || [])
+  learningPathModules.value = Array.isArray(payload?.learning_path_modules)
+    ? payload.learning_path_modules
+    : (payload?.modules || [])
+  learningPathSummary.value = payload?.learning_path_summary || payload?.path_summary || {}
+}
+
+async function fetchRecommendations(options = {}) {
+  const { hydrateLearningPath = true, preferCache = false } = options
+  if (!selectedKbId.value) {
+    if (hydrateLearningPath) resetLearningPathState()
+    return
+  }
+  const requestKbId = selectedKbId.value
+  if (preferCache && hydrateRecommendationsFromCache(requestKbId, { hydrateLearningPath })) {
+    return
+  }
   busy.value.recommendations = true
+  if (hydrateLearningPath) {
+    busy.value.pathLoad = true
+    resetLearningPathState()
+  }
   nextRecommendation.value = null
   recommendationsUpdatedAt.value = ''
   try {
-    const res = await apiGet(`/api/recommendations?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(selectedKbId.value)}&limit=6`)
-    recommendations.value = normalizeRecommendationItems(res.items || [])
-    nextRecommendation.value = res.next_step || null
-    recommendationsUpdatedAt.value = res.generated_at || ''
+    const res = await apiGet(`/api/recommendations?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(requestKbId)}&limit=6`)
+    if (selectedKbId.value !== requestKbId) return
+    applyRecommendationsPayload(res, { hydrateLearningPath })
+    writeRecommendationCache(requestKbId)
   } catch {
-    recommendations.value = []
+    if (selectedKbId.value === requestKbId) {
+      recommendations.value = []
+      if (hydrateLearningPath) resetLearningPathState()
+    }
     // error toast handled globally
   } finally {
     busy.value.recommendations = false
+    if (hydrateLearningPath) {
+      busy.value.pathLoad = false
+    }
   }
 }
 
 async function fetchLearningPath() {
   if (!selectedKbId.value) return
+  const requestKbId = selectedKbId.value
   busy.value.pathLoad = true
   try {
-    const res = await apiGet(`/api/learning-path?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(selectedKbId.value)}&limit=20`)
-    learningPath.value = res.items || []
-    learningPathEdges.value = res.edges || []
-    learningPathStages.value = res.stages || []
-    learningPathModules.value = res.modules || []
-    learningPathSummary.value = res.path_summary || {}
+    const res = await apiGet(`/api/learning-path?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(requestKbId)}&limit=20`)
+    if (selectedKbId.value !== requestKbId) return
+    applyLearningPathPayload(res)
+    writeRecommendationCache(requestKbId)
   } catch {
     // error toast handled globally
   } finally {
@@ -1179,7 +1288,14 @@ onMounted(async () => {
       // error toast handled globally
     }
     await syncFromRoute({ ensureKbs: false })
-    await Promise.all([fetchProfile(), fetchProgress(), fetchActivity()])
+    await Promise.all([
+      fetchProfile(),
+      fetchProgress(),
+      fetchActivity(),
+      selectedKbId.value
+        ? fetchRecommendations({ hydrateLearningPath: true, preferCache: true })
+        : Promise.resolve(),
+    ])
   } finally {
     busy.value.init = false
   }
@@ -1189,12 +1305,24 @@ onActivated(async () => {
   await syncFromRoute({
     ensureKbs: !appContext.kbs.length,
   })
+  if (selectedKbId.value && !busy.value.recommendations) {
+    const hasRec = Array.isArray(recommendations.value) && recommendations.value.length > 0
+    const hasPath = Array.isArray(learningPath.value) && learningPath.value.length > 0
+    if (!hasRec || !hasPath) {
+      fetchRecommendations({ hydrateLearningPath: true, preferCache: true })
+    }
+  }
 })
 
 watch(selectedKbId, () => {
+  if (busy.value.init) return
   if (selectedKbId.value) {
-    fetchRecommendations()
-    fetchLearningPath()
+    fetchRecommendations({ hydrateLearningPath: true, preferCache: true })
+  } else {
+    recommendations.value = []
+    nextRecommendation.value = null
+    recommendationsUpdatedAt.value = ''
+    resetLearningPathState()
   }
 })
 

@@ -11,7 +11,10 @@ from app.db import get_db
 from app.models import Document, Keypoint, KeypointRecord
 from app.schemas import KeypointItemV2, KeypointsRequest, KeypointsResponse
 from app.services.keypoints import extract_keypoints, save_keypoints_to_db
-from app.services.learning_path import invalidate_dependency_cache
+from app.services.learning_path import (
+    invalidate_dependency_cache,
+    invalidate_learning_path_result_cache,
+)
 from app.services.mastery import record_study_interaction
 from app.utils.json_tools import safe_json_loads
 
@@ -67,7 +70,7 @@ async def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(ge
     doc = db.query(Document).filter(Document.id == payload.doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    if payload.user_id and doc.user_id != resolved_user_id:
+    if doc.user_id != resolved_user_id:
         raise HTTPException(status_code=404, detail="Document not found")
     if doc.status != "ready":
         raise HTTPException(status_code=409, detail="Document is still processing")
@@ -83,6 +86,7 @@ async def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(ge
         )
         if existing:
             # Record study interaction if study_keypoint_text is provided
+            mastery_changed = False
             if payload.study_keypoint_text:
                 study_text = payload.study_keypoint_text.strip()
                 for kp in existing:
@@ -90,9 +94,12 @@ async def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(ge
                         result = record_study_interaction(db, kp.id)
                         if result:
                             # Update the keypoint object with new mastery_level
-                            _, new_level = result
+                            old_level, new_level = result
                             kp.mastery_level = new_level
+                            mastery_changed = new_level != old_level
                         break
+            if mastery_changed:
+                invalidate_learning_path_result_cache(db, doc.kb_id)
             return KeypointsResponse(
                 doc_id=doc.id,
                 keypoints=_to_keypoint_items(existing),
@@ -118,7 +125,9 @@ async def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(ge
                 kb_id=doc.kb_id,
                 overwrite=False,
             )
+            invalidate_dependency_cache(db, doc.kb_id)
             # Record study interaction if study_keypoint_text is provided
+            mastery_changed = False
             if payload.study_keypoint_text:
                 study_text = payload.study_keypoint_text.strip()
                 for kp in keypoints:
@@ -126,9 +135,12 @@ async def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(ge
                         result = record_study_interaction(db, kp.id)
                         if result:
                             # Update the keypoint object with new mastery_level
-                            _, new_level = result
+                            old_level, new_level = result
                             kp.mastery_level = new_level
+                            mastery_changed = new_level != old_level
                         break
+            if mastery_changed:
+                invalidate_learning_path_result_cache(db, doc.kb_id)
             return KeypointsResponse(
                 doc_id=doc.id,
                 keypoints=_to_keypoint_items(keypoints),
@@ -209,7 +221,7 @@ def get_keypoints(
     doc = db.query(Document).filter(Document.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    if user_id and doc.user_id != resolved_user_id:
+    if doc.user_id != resolved_user_id:
         raise HTTPException(status_code=404, detail="Document not found")
 
     keypoints = (

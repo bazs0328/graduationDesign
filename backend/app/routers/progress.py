@@ -23,6 +23,14 @@ def _max_datetime(values):
     return max([v for v in values if v is not None], default=None)
 
 
+def _count_and_last(query, id_col, ts_col):
+    count_value, last_value = query.with_entities(
+        func.count(id_col),
+        func.max(ts_col),
+    ).one()
+    return int(count_value or 0), last_value
+
+
 @router.get("/progress", response_model=ProgressResponse)
 def get_progress(
     user_id: str | None = None,
@@ -30,101 +38,84 @@ def get_progress(
     db: Session = Depends(get_db),
 ):
     resolved_user_id = ensure_user(db, user_id)
-    filter_user = user_id is not None
 
     if kb_id:
-        filter_user = True
         try:
             kb = ensure_kb(db, resolved_user_id, kb_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-        doc_query = db.query(Document).filter(Document.kb_id == kb.id)
-        if filter_user:
-            doc_query = doc_query.filter(Document.user_id == resolved_user_id)
-
-        doc_ids = [row[0] for row in doc_query.with_entities(Document.id).all()]
-        total_docs = doc_query.count()
-        last_doc = doc_query.with_entities(func.max(Document.created_at)).scalar()
-
-        if doc_ids:
-            summary_query = db.query(SummaryRecord).filter(
-                SummaryRecord.doc_id.in_(doc_ids)
-            )
-            keypoint_query = db.query(KeypointRecord).filter(
-                KeypointRecord.doc_id.in_(doc_ids)
-            )
-            quiz_query = db.query(Quiz).filter(Quiz.doc_id.in_(doc_ids))
-        else:
-            summary_query = None
-            keypoint_query = None
-            quiz_query = None
-
-        if summary_query is not None and filter_user:
-            summary_query = summary_query.filter(
-                SummaryRecord.user_id == resolved_user_id
-            )
-        if keypoint_query is not None and filter_user:
-            keypoint_query = keypoint_query.filter(
-                KeypointRecord.user_id == resolved_user_id
-            )
-        if quiz_query is not None and filter_user:
-            quiz_query = quiz_query.filter(Quiz.user_id == resolved_user_id)
-
-        total_summaries = summary_query.count() if summary_query is not None else 0
-        total_keypoints = keypoint_query.count() if keypoint_query is not None else 0
-        total_quizzes = quiz_query.count() if quiz_query is not None else 0
-
-        last_summary = (
-            summary_query.with_entities(func.max(SummaryRecord.created_at)).scalar()
-            if summary_query is not None
-            else None
+        doc_query = db.query(Document).filter(
+            Document.kb_id == kb.id,
+            Document.user_id == resolved_user_id,
         )
-        last_keypoint = (
-            keypoint_query.with_entities(func.max(KeypointRecord.created_at)).scalar()
-            if keypoint_query is not None
-            else None
+        total_docs, last_doc = _count_and_last(doc_query, Document.id, Document.created_at)
+
+        summary_query = (
+            db.query(SummaryRecord)
+            .join(Document, SummaryRecord.doc_id == Document.id)
+            .filter(
+                SummaryRecord.user_id == resolved_user_id,
+                Document.user_id == resolved_user_id,
+                Document.kb_id == kb.id,
+            )
         )
-        last_quiz = (
-            quiz_query.with_entities(func.max(Quiz.created_at)).scalar()
-            if quiz_query is not None
-            else None
+        total_summaries, last_summary = _count_and_last(
+            summary_query, SummaryRecord.id, SummaryRecord.created_at
         )
 
-        qa_query = db.query(QARecord)
-        if filter_user:
-            qa_query = qa_query.filter(QARecord.user_id == resolved_user_id)
-        if doc_ids:
-            qa_query = qa_query.filter(
-                or_(QARecord.kb_id == kb.id, QARecord.doc_id.in_(doc_ids))
+        keypoint_query = (
+            db.query(KeypointRecord)
+            .join(Document, KeypointRecord.doc_id == Document.id)
+            .filter(
+                KeypointRecord.user_id == resolved_user_id,
+                Document.user_id == resolved_user_id,
+                Document.kb_id == kb.id,
             )
-        else:
-            qa_query = qa_query.filter(QARecord.kb_id == kb.id)
+        )
+        total_keypoints, last_keypoint = _count_and_last(
+            keypoint_query, KeypointRecord.id, KeypointRecord.created_at
+        )
 
-        total_questions = qa_query.count()
-        last_qa = qa_query.with_entities(func.max(QARecord.created_at)).scalar()
-
-        if doc_ids:
-            attempt_query = (
-                db.query(QuizAttempt)
-                .join(Quiz, QuizAttempt.quiz_id == Quiz.id)
-                .filter(Quiz.doc_id.in_(doc_ids))
+        quiz_query = (
+            db.query(Quiz)
+            .join(Document, Quiz.doc_id == Document.id)
+            .filter(
+                Quiz.user_id == resolved_user_id,
+                Document.user_id == resolved_user_id,
+                Document.kb_id == kb.id,
             )
-            if filter_user:
-                attempt_query = attempt_query.filter(
-                    QuizAttempt.user_id == resolved_user_id
-                )
-            total_attempts = attempt_query.count()
-            avg_score = attempt_query.with_entities(
-                func.avg(QuizAttempt.score)
-            ).scalar()
-            last_attempt = attempt_query.with_entities(
-                func.max(QuizAttempt.created_at)
-            ).scalar()
-        else:
-            total_attempts = 0
-            avg_score = 0.0
-            last_attempt = None
+        )
+        total_quizzes, last_quiz = _count_and_last(quiz_query, Quiz.id, Quiz.created_at)
+
+        qa_query = (
+            db.query(QARecord)
+            .outerjoin(Document, QARecord.doc_id == Document.id)
+            .filter(
+                QARecord.user_id == resolved_user_id,
+                or_(QARecord.kb_id == kb.id, Document.kb_id == kb.id),
+            )
+        )
+        total_questions, last_qa = _count_and_last(qa_query, QARecord.id, QARecord.created_at)
+
+        attempt_query = (
+            db.query(QuizAttempt)
+            .join(Quiz, QuizAttempt.quiz_id == Quiz.id)
+            .join(Document, Quiz.doc_id == Document.id)
+            .filter(
+                QuizAttempt.user_id == resolved_user_id,
+                Quiz.user_id == resolved_user_id,
+                Document.user_id == resolved_user_id,
+                Document.kb_id == kb.id,
+            )
+        )
+        total_attempts, avg_score, last_attempt = attempt_query.with_entities(
+            func.count(QuizAttempt.id),
+            func.avg(QuizAttempt.score),
+            func.max(QuizAttempt.created_at),
+        ).one()
+        total_attempts = int(total_attempts or 0)
+        avg_score = float(avg_score or 0.0)
 
         last_activity = _max_datetime(
             [
@@ -172,32 +163,29 @@ def get_progress(
     summary_query = db.query(SummaryRecord)
     keypoint_query = db.query(KeypointRecord)
 
-    if filter_user:
-        doc_query = doc_query.filter(Document.user_id == resolved_user_id)
-        quiz_query = quiz_query.filter(Quiz.user_id == resolved_user_id)
-        attempt_query = attempt_query.filter(QuizAttempt.user_id == resolved_user_id)
-        qa_query = qa_query.filter(QARecord.user_id == resolved_user_id)
-        summary_query = summary_query.filter(SummaryRecord.user_id == resolved_user_id)
-        keypoint_query = keypoint_query.filter(
-            KeypointRecord.user_id == resolved_user_id
-        )
+    doc_query = doc_query.filter(Document.user_id == resolved_user_id)
+    quiz_query = quiz_query.filter(Quiz.user_id == resolved_user_id)
+    attempt_query = attempt_query.filter(QuizAttempt.user_id == resolved_user_id)
+    qa_query = qa_query.filter(QARecord.user_id == resolved_user_id)
+    summary_query = summary_query.filter(SummaryRecord.user_id == resolved_user_id)
+    keypoint_query = keypoint_query.filter(KeypointRecord.user_id == resolved_user_id)
 
-    total_docs = doc_query.count()
-    total_quizzes = quiz_query.count()
-    total_attempts = attempt_query.count()
-    total_questions = qa_query.count()
-    total_summaries = summary_query.count()
-    total_keypoints = keypoint_query.count()
-    avg_score = attempt_query.with_entities(func.avg(QuizAttempt.score)).scalar() or 0.0
-
-    last_doc = doc_query.with_entities(func.max(Document.created_at)).scalar()
-    last_quiz = quiz_query.with_entities(func.max(Quiz.created_at)).scalar()
-    last_attempt = attempt_query.with_entities(func.max(QuizAttempt.created_at)).scalar()
-    last_qa = qa_query.with_entities(func.max(QARecord.created_at)).scalar()
-    last_summary = summary_query.with_entities(func.max(SummaryRecord.created_at)).scalar()
-    last_keypoint = keypoint_query.with_entities(
-        func.max(KeypointRecord.created_at)
-    ).scalar()
+    total_docs, last_doc = _count_and_last(doc_query, Document.id, Document.created_at)
+    total_quizzes, last_quiz = _count_and_last(quiz_query, Quiz.id, Quiz.created_at)
+    total_questions, last_qa = _count_and_last(qa_query, QARecord.id, QARecord.created_at)
+    total_summaries, last_summary = _count_and_last(
+        summary_query, SummaryRecord.id, SummaryRecord.created_at
+    )
+    total_keypoints, last_keypoint = _count_and_last(
+        keypoint_query, KeypointRecord.id, KeypointRecord.created_at
+    )
+    total_attempts, avg_score, last_attempt = attempt_query.with_entities(
+        func.count(QuizAttempt.id),
+        func.avg(QuizAttempt.score),
+        func.max(QuizAttempt.created_at),
+    ).one()
+    total_attempts = int(total_attempts or 0)
+    avg_score = float(avg_score or 0.0)
 
     last_activity = _max_datetime(
         [
@@ -211,8 +199,7 @@ def get_progress(
     )
 
     kb_query = db.query(KnowledgeBase)
-    if filter_user:
-        kb_query = kb_query.filter(KnowledgeBase.user_id == resolved_user_id)
+    kb_query = kb_query.filter(KnowledgeBase.user_id == resolved_user_id)
     kbs = kb_query.order_by(KnowledgeBase.created_at.asc()).all()
 
     doc_rows = db.query(
@@ -220,8 +207,7 @@ def get_progress(
         func.count(Document.id),
         func.max(Document.created_at),
     )
-    if filter_user:
-        doc_rows = doc_rows.filter(Document.user_id == resolved_user_id)
+    doc_rows = doc_rows.filter(Document.user_id == resolved_user_id)
     doc_rows = doc_rows.group_by(Document.kb_id).all()
     doc_counts = {row[0]: row[1] for row in doc_rows if row[0]}
     doc_last = {row[0]: row[2] for row in doc_rows if row[0]}
@@ -231,8 +217,7 @@ def get_progress(
         func.count(SummaryRecord.id),
         func.max(SummaryRecord.created_at),
     ).join(Document, SummaryRecord.doc_id == Document.id)
-    if filter_user:
-        summary_rows = summary_rows.filter(SummaryRecord.user_id == resolved_user_id)
+    summary_rows = summary_rows.filter(SummaryRecord.user_id == resolved_user_id)
     summary_rows = summary_rows.group_by(Document.kb_id).all()
     summary_counts = {row[0]: row[1] for row in summary_rows if row[0]}
     summary_last = {row[0]: row[2] for row in summary_rows if row[0]}
@@ -242,8 +227,7 @@ def get_progress(
         func.count(KeypointRecord.id),
         func.max(KeypointRecord.created_at),
     ).join(Document, KeypointRecord.doc_id == Document.id)
-    if filter_user:
-        keypoint_rows = keypoint_rows.filter(KeypointRecord.user_id == resolved_user_id)
+    keypoint_rows = keypoint_rows.filter(KeypointRecord.user_id == resolved_user_id)
     keypoint_rows = keypoint_rows.group_by(Document.kb_id).all()
     keypoint_counts = {row[0]: row[1] for row in keypoint_rows if row[0]}
     keypoint_last = {row[0]: row[2] for row in keypoint_rows if row[0]}
@@ -253,8 +237,7 @@ def get_progress(
         func.count(Quiz.id),
         func.max(Quiz.created_at),
     ).join(Document, Quiz.doc_id == Document.id)
-    if filter_user:
-        quiz_rows = quiz_rows.filter(Quiz.user_id == resolved_user_id)
+    quiz_rows = quiz_rows.filter(Quiz.user_id == resolved_user_id)
     quiz_rows = quiz_rows.group_by(Document.kb_id).all()
     quiz_counts = {row[0]: row[1] for row in quiz_rows if row[0]}
     quiz_last = {row[0]: row[2] for row in quiz_rows if row[0]}
@@ -266,8 +249,7 @@ def get_progress(
         func.max(QuizAttempt.created_at),
     ).join(Quiz, QuizAttempt.quiz_id == Quiz.id)
     attempt_rows = attempt_rows.join(Document, Quiz.doc_id == Document.id)
-    if filter_user:
-        attempt_rows = attempt_rows.filter(QuizAttempt.user_id == resolved_user_id)
+    attempt_rows = attempt_rows.filter(QuizAttempt.user_id == resolved_user_id)
     attempt_rows = attempt_rows.group_by(Document.kb_id).all()
     attempt_counts = {row[0]: row[1] for row in attempt_rows if row[0]}
     attempt_avg = {row[0]: row[2] for row in attempt_rows if row[0]}
@@ -279,8 +261,7 @@ def get_progress(
         func.count(QARecord.id),
         func.max(QARecord.created_at),
     ).outerjoin(Document, QARecord.doc_id == Document.id)
-    if filter_user:
-        qa_rows = qa_rows.filter(QARecord.user_id == resolved_user_id)
+    qa_rows = qa_rows.filter(QARecord.user_id == resolved_user_id)
     qa_rows = qa_rows.group_by(qa_kb).all()
     qa_counts = {row[0]: row[1] for row in qa_rows if row[0]}
     qa_last = {row[0]: row[2] for row in qa_rows if row[0]}

@@ -207,7 +207,7 @@
               class="w-full sm:w-auto px-6 sm:px-12 text-base sm:text-lg font-black shadow-lg hover:scale-105"
               @click="submitQuiz"
               :loading="busy.submit"
-              :disabled="busy.submit || Object.keys(quizAnswers).length < quiz.questions.length"
+              :disabled="busy.submit || !!quizResult || Object.keys(quizAnswers).length < quiz.questions.length"
             >
               {{ busy.submit ? '正在批改…' : '提交全部答案' }}
             </Button>
@@ -411,7 +411,7 @@ async function generateQuiz(options = {}) {
 }
 
 async function submitQuiz() {
-  if (!quiz.value) return
+  if (!quiz.value || quizResult.value) return
   busy.value.submit = true
   try {
     const answers = quiz.value.questions.map((_, idx) => quizAnswers.value[idx] ?? null)

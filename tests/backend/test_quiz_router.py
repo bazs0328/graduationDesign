@@ -4,8 +4,10 @@ import json
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm.session import Session as OrmSession
 
-from app.models import Keypoint, Quiz
+from app.models import Keypoint, LearnerProfile, Quiz, QuizAttempt
 from app.services.text_extraction import ExtractionResult
 
 
@@ -320,6 +322,322 @@ def test_quiz_submit_next_recommendation_focus_uses_mastery_concepts(
     focuses = data["next_quiz_recommendation"]["focus_concepts"]
     assert "矩阵求导" in focuses
     assert "错题概念X" not in focuses
+
+
+def test_quiz_submit_duplicate_submission_returns_409_without_side_effects(
+    client, db_session, seeded_session
+):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    keypoint_id = "kp-quiz-dup-1"
+    quiz_id = "quiz-dup-1"
+
+    db_session.add(
+        Keypoint(
+            id=keypoint_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            text="极限定义",
+            mastery_level=0.1,
+            attempt_count=0,
+            correct_count=0,
+        )
+    )
+    db_session.add(
+        Quiz(
+            id=quiz_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            difficulty="medium",
+            question_type="mcq",
+            questions_json=json.dumps(
+                [
+                    {
+                        "question": "q1",
+                        "options": ["A", "B", "C", "D"],
+                        "answer_index": 0,
+                        "explanation": "e1",
+                        "concepts": ["极限定义"],
+                    }
+                ]
+            ),
+        )
+    )
+    db_session.commit()
+
+    with patch("app.routers.quiz._resolve_keypoints_for_question", return_value=[keypoint_id]):
+        first = client.post(
+            "/api/quiz/submit",
+            json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},
+        )
+    assert first.status_code == 200
+
+    db_session.expire_all()
+    kp_after_first = db_session.query(Keypoint).filter(Keypoint.id == keypoint_id).first()
+    profile_after_first = (
+        db_session.query(LearnerProfile)
+        .filter(LearnerProfile.user_id == user_id)
+        .first()
+    )
+    attempts_after_first = (
+        db_session.query(QuizAttempt)
+        .filter(QuizAttempt.quiz_id == quiz_id, QuizAttempt.user_id == user_id)
+        .count()
+    )
+    assert kp_after_first is not None
+    assert profile_after_first is not None
+
+    kp_attempt_count = int(kp_after_first.attempt_count or 0)
+    kp_mastery = float(kp_after_first.mastery_level or 0.0)
+    profile_total_attempts = int(profile_after_first.total_attempts or 0)
+    profile_recent_accuracy = float(profile_after_first.recent_accuracy or 0.0)
+    profile_theta = float(profile_after_first.theta or 0.0)
+
+    second = client.post(
+        "/api/quiz/submit",
+        json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},
+    )
+    assert second.status_code == 409
+    assert second.json()["detail"] == "Quiz already submitted"
+
+    db_session.expire_all()
+    kp_after_second = db_session.query(Keypoint).filter(Keypoint.id == keypoint_id).first()
+    profile_after_second = (
+        db_session.query(LearnerProfile)
+        .filter(LearnerProfile.user_id == user_id)
+        .first()
+    )
+    attempts_after_second = (
+        db_session.query(QuizAttempt)
+        .filter(QuizAttempt.quiz_id == quiz_id, QuizAttempt.user_id == user_id)
+        .count()
+    )
+
+    assert attempts_after_first == 1
+    assert attempts_after_second == 1
+    assert int(kp_after_second.attempt_count or 0) == kp_attempt_count
+    assert float(kp_after_second.mastery_level or 0.0) == pytest.approx(kp_mastery)
+    assert int(profile_after_second.total_attempts or 0) == profile_total_attempts
+    assert float(profile_after_second.recent_accuracy or 0.0) == pytest.approx(
+        profile_recent_accuracy
+    )
+    assert float(profile_after_second.theta or 0.0) == pytest.approx(profile_theta)
+
+
+def test_quiz_submit_maps_quiz_attempt_unique_constraint_to_409(
+    client, db_session, seeded_session
+):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    quiz_id = "quiz-dup-race-1"
+
+    db_session.add(
+        Quiz(
+            id=quiz_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            difficulty="medium",
+            question_type="mcq",
+            questions_json=json.dumps(
+                [
+                    {
+                        "question": "q1",
+                        "options": ["A", "B", "C", "D"],
+                        "answer_index": 0,
+                        "explanation": "e1",
+                        "concepts": ["概念A"],
+                    }
+                ]
+            ),
+        )
+    )
+    db_session.commit()
+
+    real_commit = OrmSession.commit
+    raised = {"done": False}
+
+    def flaky_commit(self, *args, **kwargs):
+        if not raised["done"] and any(
+            isinstance(obj, QuizAttempt) and obj.quiz_id == quiz_id
+            for obj in list(getattr(self, "new", []))
+        ):
+            raised["done"] = True
+            raise IntegrityError(
+                "INSERT INTO quiz_attempts ...",
+                params=None,
+                orig=Exception(
+                    "UNIQUE constraint failed: quiz_attempts.user_id, quiz_attempts.quiz_id"
+                ),
+            )
+        return real_commit(self, *args, **kwargs)
+
+    with patch("app.routers.quiz._resolve_keypoints_for_question", return_value=[]):
+        with patch("sqlalchemy.orm.session.Session.commit", new=flaky_commit):
+            resp = client.post(
+                "/api/quiz/submit",
+                json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},
+            )
+
+    assert raised["done"] is True
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Quiz already submitted"
+
+
+def test_quiz_submit_updates_theta_and_returns_nonzero_theta_delta(
+    client, db_session, seeded_session
+):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    quiz_id = "quiz-theta-1"
+
+    profile = (
+        db_session.query(LearnerProfile)
+        .filter(LearnerProfile.user_id == user_id)
+        .first()
+    )
+    if profile is None:
+        profile = LearnerProfile(
+            id=user_id,
+            user_id=user_id,
+            ability_level="intermediate",
+            theta=0.0,
+            frustration_score=0.0,
+            weak_concepts="[]",
+            recent_accuracy=0.5,
+            total_attempts=0,
+            consecutive_low_scores=0,
+        )
+        db_session.add(profile)
+    else:
+        profile.theta = 0.0
+        profile.frustration_score = 0.0
+        profile.recent_accuracy = 0.5
+        profile.total_attempts = 0
+        profile.consecutive_low_scores = 0
+        profile.weak_concepts = profile.weak_concepts or "[]"
+
+    db_session.add(
+        Quiz(
+            id=quiz_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            difficulty="hard",
+            question_type="mcq",
+            questions_json=json.dumps(
+                [
+                    {
+                        "question": "q1",
+                        "options": ["A", "B", "C", "D"],
+                        "answer_index": 0,
+                        "explanation": "e1",
+                        "concepts": ["概念A"],
+                    }
+                ]
+            ),
+        )
+    )
+    db_session.commit()
+
+    with patch("app.routers.quiz._resolve_keypoints_for_question", return_value=[]):
+        submit = client.post(
+            "/api/quiz/submit",
+            json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},
+        )
+
+    assert submit.status_code == 200
+    data = submit.json()
+    theta_delta = float(data["profile_delta"]["theta_delta"])
+    assert theta_delta != 0
+    assert theta_delta == pytest.approx(0.25, abs=1e-6)
+
+    db_session.expire_all()
+    profile = (
+        db_session.query(LearnerProfile)
+        .filter(LearnerProfile.user_id == user_id)
+        .first()
+    )
+    assert profile is not None
+    assert float(profile.theta or 0.0) == pytest.approx(theta_delta)
+
+
+def test_quiz_submit_theta_clamps_to_upper_bound(client, db_session, seeded_session):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    quiz_id = "quiz-theta-clamp-1"
+
+    profile = (
+        db_session.query(LearnerProfile)
+        .filter(LearnerProfile.user_id == user_id)
+        .first()
+    )
+    if profile is None:
+        profile = LearnerProfile(
+            id=user_id,
+            user_id=user_id,
+            ability_level="intermediate",
+            theta=1.95,
+            frustration_score=0.0,
+            weak_concepts="[]",
+            recent_accuracy=0.5,
+            total_attempts=5,
+            consecutive_low_scores=0,
+        )
+        db_session.add(profile)
+    else:
+        profile.theta = 1.95
+        profile.frustration_score = 0.0
+        profile.recent_accuracy = 0.5
+        profile.total_attempts = max(int(profile.total_attempts or 0), 5)
+        profile.weak_concepts = profile.weak_concepts or "[]"
+
+    db_session.add(
+        Quiz(
+            id=quiz_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            difficulty="hard",
+            question_type="mcq",
+            questions_json=json.dumps(
+                [
+                    {
+                        "question": "q1",
+                        "options": ["A", "B", "C", "D"],
+                        "answer_index": 0,
+                        "explanation": "e1",
+                        "concepts": ["概念A"],
+                    }
+                ]
+            ),
+        )
+    )
+    db_session.commit()
+
+    with patch("app.routers.quiz._resolve_keypoints_for_question", return_value=[]):
+        submit = client.post(
+            "/api/quiz/submit",
+            json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},
+        )
+
+    assert submit.status_code == 200
+    data = submit.json()
+    assert float(data["profile_delta"]["theta_delta"]) == pytest.approx(0.05, abs=1e-6)
+
+    db_session.expire_all()
+    profile_after = (
+        db_session.query(LearnerProfile)
+        .filter(LearnerProfile.user_id == user_id)
+        .first()
+    )
+    assert float(profile_after.theta or 0.0) == pytest.approx(2.0, abs=1e-6)
 
 
 def test_quiz_generate_with_nonexistent_doc_returns_404(client, seeded_session):

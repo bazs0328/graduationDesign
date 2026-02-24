@@ -20,6 +20,12 @@ REFERENCE_QUESTIONS_MAX_CHARS = 8000
 QUIZ_DUPLICATE_SIMILARITY_THRESHOLD = 0.92
 QUIZ_RESAMPLE_MAX_ROUNDS = 1
 MAX_AVOID_LIST_IN_PROMPT = 8
+QUIZ_CONTEXT_MIN_K = 6
+QUIZ_CONTEXT_MAX_K_DOC = 14
+QUIZ_CONTEXT_MAX_K_KB = 24
+QUIZ_CONTEXT_DOCS_PER_QUESTION_DOC = 2
+QUIZ_CONTEXT_DOCS_PER_QUESTION_KB = 3
+QUIZ_CONTEXT_MAX_CHARS = 16000
 
 QUIZ_SYSTEM = (
     "You are an exam writer. Generate multiple-choice questions strictly from the context. "
@@ -69,12 +75,60 @@ def _extract_keypoint_ids(docs) -> List[str]:
     return ids
 
 
+def _context_search_k(
+    target_count: int,
+    *,
+    kb_scope: bool,
+    focus_concepts: Optional[List[str]] = None,
+) -> int:
+    count = max(1, int(target_count or 1))
+    per_question = (
+        QUIZ_CONTEXT_DOCS_PER_QUESTION_KB if kb_scope else QUIZ_CONTEXT_DOCS_PER_QUESTION_DOC
+    )
+    k = max(QUIZ_CONTEXT_MIN_K, count * per_question)
+    focus_count = len([c for c in (focus_concepts or []) if str(c).strip()])
+    if focus_count > 1:
+        k += min(4, focus_count - 1)
+    return min(QUIZ_CONTEXT_MAX_K_KB if kb_scope else QUIZ_CONTEXT_MAX_K_DOC, k)
+
+
+def _context_char_budget(target_count: int, *, kb_scope: bool) -> int:
+    count = max(1, int(target_count or 1))
+    base = 7000 if kb_scope else 5000
+    per_question = 900 if kb_scope else 700
+    return max(5000, min(QUIZ_CONTEXT_MAX_CHARS, base + count * per_question))
+
+
+def _build_context_text(docs, *, max_chars: int) -> str:
+    blocks: list[str] = []
+    total_chars = 0
+    for doc in docs or []:
+        text = str(getattr(doc, "page_content", "") or "").strip()
+        if not text:
+            continue
+        sep_len = 2 if blocks else 0
+        remaining = max_chars - total_chars - sep_len
+        if remaining <= 0:
+            break
+        if len(text) > remaining:
+            if remaining > 20:
+                text = f"{text[: remaining - 16].rstrip()}\n[... truncated]"
+                blocks.append(text)
+            elif not blocks:
+                blocks.append(text[:remaining])
+            break
+        blocks.append(text)
+        total_chars += sep_len + len(text)
+    return "\n\n".join(blocks)
+
+
 def _build_context(
     user_id: str,
     doc_id: Optional[str],
     kb_id: Optional[str],
     reference_questions: Optional[str],
     focus_concepts: Optional[List[str]] = None,
+    target_count: int = 5,
 ) -> tuple[str, List[str]]:
     """Build context and collect related keypoint_ids from vector search metadata.
 
@@ -87,20 +141,30 @@ def _build_context(
             query = ", ".join(cleaned)
     if doc_id:
         vectorstore = get_vectorstore(user_id)
+        k = _context_search_k(target_count, kb_scope=False, focus_concepts=focus_concepts)
         docs = vectorstore.similarity_search(
-            query, k=6, filter={"doc_id": doc_id}
+            query, k=k, filter={"doc_id": doc_id}
         )
         if not docs:
             raise ValueError("No relevant context found for quiz generation")
-        return "\n\n".join(doc.page_content for doc in docs), _extract_keypoint_ids(docs)
+        context = _build_context_text(
+            docs,
+            max_chars=_context_char_budget(target_count, kb_scope=False),
+        )
+        return context, _extract_keypoint_ids(docs)
     if kb_id:
         vectorstore = get_vectorstore(user_id)
+        k = _context_search_k(target_count, kb_scope=True, focus_concepts=focus_concepts)
         docs = vectorstore.similarity_search(
-            query, k=6, filter={"kb_id": kb_id}
+            query, k=k, filter={"kb_id": kb_id}
         )
         if not docs:
             raise ValueError("No relevant context found for quiz generation")
-        return "\n\n".join(doc.page_content for doc in docs), _extract_keypoint_ids(docs)
+        context = _build_context_text(
+            docs,
+            max_chars=_context_char_budget(target_count, kb_scope=True),
+        )
+        return context, _extract_keypoint_ids(docs)
     if reference_questions:
         text = reference_questions.strip()
         if len(text) > REFERENCE_QUESTIONS_MAX_CHARS:
@@ -334,9 +398,6 @@ def _apply_quality_guardrails(
             report["dropped_concept_overload"] += 1
             continue
 
-        if keypoint_ids and "keypoint_ids" not in normalized:
-            normalized["keypoint_ids"] = keypoint_ids
-
         kept.append(normalized)
         seen_exact.add(stem)
         seen_stems.append(stem)
@@ -473,7 +534,12 @@ def generate_quiz(
     avoid_question_texts: Optional[List[str]] = None,
 ) -> List[dict]:
     context, keypoint_ids = _build_context(
-        user_id, doc_id, kb_id, reference_questions, focus_concepts
+        user_id,
+        doc_id,
+        kb_id,
+        reference_questions,
+        focus_concepts,
+        target_count=count,
     )
     context_is_from_reference = not doc_id and not kb_id and bool(
         reference_questions and reference_questions.strip()
