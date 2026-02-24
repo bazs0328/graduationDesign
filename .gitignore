@@ -2,9 +2,12 @@
 backend/.venv
 backend/data
 data/
-**/__pycache__
-backend/app/utils/__pycache__
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
 .pytest_cache
+.tmp_vite_check_out/
 web/node_modules
 web/dist
 web/playwright-report
