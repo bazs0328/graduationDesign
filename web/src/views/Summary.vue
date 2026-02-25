@@ -210,8 +210,6 @@
                               >
                                 <span class="font-medium text-foreground">{{ ref.doc_name || ref.doc_id }}</span>
                                 <span v-if="ref.source"> · {{ ref.source }}</span>
-                                <span v-if="ref.page !== undefined && ref.page !== null"> · p.{{ ref.page }}</span>
-                                <span v-if="ref.chunk !== undefined && ref.chunk !== null"> · c.{{ ref.chunk }}</span>
                               </div>
                             </div>
                           </details>
@@ -298,7 +296,7 @@
                 <div v-if="typeof point !== 'string' && (point.source || point.page || point.chunk)" class="flex items-center gap-2 pt-2 pl-11 border-t border-border/50">
                   <span class="text-[10px] font-bold uppercase text-primary/60">来源：</span>
                   <span class="text-[10px] bg-accent px-2 py-0.5 rounded-full text-accent-foreground">
-                    {{ [point.source, point.page ? `p.${point.page}` : '', point.chunk ? `c.${point.chunk}` : ''].filter(Boolean).join(' ') }}
+                    {{ point.source || '文档片段' }}
                   </span>
                   <button
                     class="text-[10px] font-semibold text-primary hover:underline"

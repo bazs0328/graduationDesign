@@ -1,6 +1,10 @@
 """Tests for adaptive QA prompt behavior."""
 
-from app.services.qa import build_adaptive_system_prompt, build_explain_system_prompt
+from app.services.qa import (
+    _strip_inline_source_markers,
+    build_adaptive_system_prompt,
+    build_explain_system_prompt,
+)
 
 
 def test_adaptive_system_prompt_differs_by_ability_level():
@@ -35,3 +39,12 @@ def test_explain_system_prompt_requires_fixed_sections():
     assert "分步解答" in prompt
     assert "易错点" in prompt
     assert "自测问题" in prompt
+
+
+def test_strip_inline_source_markers_removes_citations_and_page_chunk_markers():
+    raw = "答案如下[1][2]。见 p.19 c.177 与 p.3 c.12。"
+    cleaned = _strip_inline_source_markers(raw)
+    assert "[1]" not in cleaned and "[2]" not in cleaned
+    assert "p.19 c.177" not in cleaned
+    assert "p.3 c.12" not in cleaned
+    assert "答案如下" in cleaned

@@ -25,3 +25,5 @@ dashscope
 pytest
 pytest-asyncio
 httpx
+
+PyMuPDF

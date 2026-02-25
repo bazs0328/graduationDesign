@@ -9,10 +9,10 @@
         <header class="px-5 py-4 border-b border-border flex items-start justify-between gap-4">
           <div class="space-y-1">
             <h3 class="text-lg font-bold text-foreground">{{ title || '来源预览' }}</h3>
-            <p class="text-xs text-muted-foreground" v-if="sourceLabel || page || chunk">
+            <p class="text-xs text-muted-foreground" v-if="sourceLabel || (showLocation && (page || chunk))">
               <span v-if="sourceLabel">{{ sourceLabel }}</span>
-              <span v-if="page"> · p.{{ page }}</span>
-              <span v-if="chunk"> · c.{{ chunk }}</span>
+              <span v-if="showLocation && page"> · p.{{ page }}</span>
+              <span v-if="showLocation && chunk"> · c.{{ chunk }}</span>
             </p>
           </div>
           <button
@@ -42,6 +42,7 @@ defineProps({
   loading: { type: Boolean, default: false },
   title: { type: String, default: '' },
   sourceLabel: { type: String, default: '' },
+  showLocation: { type: Boolean, default: false },
   page: { type: Number, default: null },
   chunk: { type: Number, default: null },
   snippet: { type: String, default: '' },

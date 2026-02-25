@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 from typing import Any, Iterator, List, Tuple
@@ -6,6 +7,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.llm import get_llm
 from app.core.config import settings
+from app.core.image_vectorstore import query_image_documents
 from app.services.lexical import bm25_search
 from app.core.vectorstore import get_vectorstore
 
@@ -26,6 +28,9 @@ QA_EXPLAIN_SECTION_TITLES = [
 _QA_HUMAN_TEMPLATE = (
     "Conversation history:\n{history}\n\nQuestion: {question}\n\nContext:\n{context}\n\nAnswer:"
 )
+
+_QA_INLINE_SOURCE_MARKER_RE = re.compile(r"\[(\d{1,3})\]")
+_QA_PAGE_CHUNK_MARKER_RE = re.compile(r"\bp\.\d+\s*c\.\d+\b", re.IGNORECASE)
 
 ADAPTIVE_SYSTEM_PROMPTS = {
     "beginner": (
@@ -92,7 +97,8 @@ def build_adaptive_system_prompt(
             )
     prompt_parts.append(
         "仅根据提供的上下文回答问题。如果上下文中没有相关信息，请明确说明不知道。"
-        "使用 [1]、[2] 这种形式标注引用来源。"
+        "不要输出来源编号（如 [1]、[2]、[3]）或页块定位标记（如 p.19 c.177）。"
+        "来源信息会由系统单独展示。"
     )
     return "\n".join(prompt_parts)
 
@@ -112,7 +118,7 @@ def build_explain_system_prompt(
         "你当前处于“讲解模式（Solve-Lite）”。请严格按照以下 5 个二级标题输出，"
         f"并保持顺序不变：{titles}。\n"
         "格式要求：每段使用 `## 标题` 开头；若上下文不足，也必须保留标题并说明缺失信息。"
-        "回答中继续使用 [1]、[2] 形式引用来源。"
+        "不要输出 [1]、[2] 这类引用编号，也不要输出 p.19 c.177 这类页块定位标记。"
     )
     return f"{base_prompt}\n{explain_rules}"
 
@@ -237,7 +243,20 @@ def _coerce_text_content(content: Any) -> str:
 
 def generate_qa_answer(llm: Any, formatted_messages: Any) -> str:
     result = llm.invoke(formatted_messages)
-    return _coerce_text_content(getattr(result, "content", result)).strip()
+    return _strip_inline_source_markers(_coerce_text_content(getattr(result, "content", result))).strip()
+
+
+def _strip_inline_source_markers(text: str) -> str:
+    normalized = (text or "")
+    # Remove inline citation markers like [1][2][3]
+    normalized = _QA_INLINE_SOURCE_MARKER_RE.sub("", normalized)
+    # Remove page/chunk labels occasionally copied from source headers
+    normalized = _QA_PAGE_CHUNK_MARKER_RE.sub("", normalized)
+    # Cleanup extra spaces created by removals.
+    normalized = re.sub(r"[ \t]{2,}", " ", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    normalized = re.sub(r"\s+([，。！？；,.;!?])", r"\1", normalized)
+    return normalized
 
 
 def _pseudo_stream_chunks(text: str) -> Iterator[str]:
@@ -251,12 +270,35 @@ def _pseudo_stream_chunks(text: str) -> Iterator[str]:
             yield chunk
 
 
+def _sanitize_stream_deltas(deltas: Iterator[str]) -> Iterator[str]:
+    carry = ""
+    tail_keep = 24  # enough to cover split markers like `[123]` / `p.19 c.177`
+    for delta in deltas:
+        if not delta:
+            continue
+        merged = carry + delta
+        if len(merged) <= tail_keep:
+            carry = merged
+            continue
+        emit = merged[:-tail_keep]
+        carry = merged[-tail_keep:]
+        cleaned = _strip_inline_source_markers(emit)
+        if cleaned:
+            yield cleaned
+    if carry:
+        cleaned_tail = _strip_inline_source_markers(carry)
+        if cleaned_tail:
+            yield cleaned_tail
+
+
 def stream_qa_answer(llm: Any, formatted_messages: Any) -> Iterator[str]:
     try:
-        for chunk in llm.stream(formatted_messages):
-            delta = _coerce_text_content(getattr(chunk, "content", chunk))
-            if delta:
-                yield delta
+        raw_deltas = (
+            _coerce_text_content(getattr(chunk, "content", chunk))
+            for chunk in llm.stream(formatted_messages)
+        )
+        for cleaned in _sanitize_stream_deltas(raw_deltas):
+            yield cleaned
         return
     except Exception as exc:
         logger.debug("LLM native stream unavailable, fallback to pseudo-stream: %s", exc, exc_info=True)
@@ -298,22 +340,42 @@ def retrieve_documents(
             )
         except Exception:
             docs = vectorstore.similarity_search(question, k=k, filter=search_filter)
+        image_docs = [doc for doc, _ in query_image_documents(
+            user_id,
+            question,
+            top_k=k,
+            search_filter=search_filter,
+        )]
+        if image_docs:
+            docs.extend(image_docs)
+            # Preserve top-k-ish behavior while keeping image hits visible.
+            docs = docs[: max(k, min(len(docs), k + len(image_docs)))]
         return docs
 
-    dense_results = []
-    dense_is_similarity = True
+    dense_results: list[tuple[Any, float]] = []
     try:
-        dense_results = vectorstore.similarity_search_with_relevance_scores(
+        raw_dense_results = vectorstore.similarity_search_with_relevance_scores(
             question, k=fetch, filter=search_filter
         )
+        for doc, score in raw_dense_results:
+            dense_results.append((doc, float(score)))
     except Exception:
-        dense_is_similarity = False
         try:
-            dense_results = vectorstore.similarity_search_with_score(
+            raw_dense_results = vectorstore.similarity_search_with_score(
                 question, k=fetch, filter=search_filter
             )
+            for doc, score in raw_dense_results:
+                dense_results.append((doc, 1.0 / (1.0 + max(float(score), 0.0))))
         except Exception:
             dense_results = []
+
+    for doc, score in query_image_documents(
+        user_id,
+        question,
+        top_k=fetch,
+        search_filter=search_filter,
+    ):
+        dense_results.append((doc, float(score)))
 
     bm25_k = settings.qa_bm25_k
     if bm25_k < k:
@@ -335,16 +397,18 @@ def retrieve_documents(
             meta.get("doc_id"),
             meta.get("page"),
             meta.get("chunk"),
+            meta.get("modality"),
             doc.page_content[:80],
         )
         dense_score = float(score)
-        if not dense_is_similarity:
-            dense_score = 1.0 / (1.0 + max(dense_score, 0.0))
-        combined[key] = {
-            "doc": doc,
-            "dense": dense_score,
-            "bm25": 0.0,
-        }
+        if key not in combined:
+            combined[key] = {
+                "doc": doc,
+                "dense": dense_score,
+                "bm25": 0.0,
+            }
+        else:
+            combined[key]["dense"] = max(combined[key]["dense"], dense_score)
 
     for doc, score in lexical_results:
         meta = doc.metadata or {}
@@ -352,6 +416,7 @@ def retrieve_documents(
             meta.get("doc_id"),
             meta.get("page"),
             meta.get("chunk"),
+            meta.get("modality"),
             doc.page_content[:80],
         )
         if key not in combined:
@@ -406,13 +471,27 @@ def build_sources_and_context(docs: list) -> Tuple[List[dict], str]:
         chunk = metadata.get("chunk")
         doc_id_meta = metadata.get("doc_id")
         kb_id_meta = metadata.get("kb_id")
+        modality = (metadata.get("modality") or "text")
+        asset_path = metadata.get("asset_path") or None
+        caption = metadata.get("caption") or None
+        bbox = None
+        raw_bbox = metadata.get("bbox")
+        if isinstance(raw_bbox, str) and raw_bbox.strip():
+            try:
+                parsed = json.loads(raw_bbox)
+                if isinstance(parsed, list):
+                    bbox = parsed
+            except Exception:
+                bbox = None
+        elif isinstance(raw_bbox, list):
+            bbox = raw_bbox
 
-        label_parts = [source_name]
-        if page:
-            label_parts.append(f"p.{page}")
-        if chunk:
-            label_parts.append(f"c.{chunk}")
-        source_label = " ".join(label_parts)
+        source_label = str(source_name)
+        if modality == "image":
+            source_label = f"{source_label} (图片块)"
+        context_label = source_name
+        if modality == "image":
+            context_label = f"{source_name} (图片相关)"
 
         sources.append(
             {
@@ -422,9 +501,20 @@ def build_sources_and_context(docs: list) -> Tuple[List[dict], str]:
                 "kb_id": kb_id_meta,
                 "page": page,
                 "chunk": chunk,
+                "modality": modality,
+                "asset_path": asset_path,
+                "caption": caption,
+                "bbox": bbox,
             }
         )
-        context_blocks.append(f"[{idx}] Source: {source_label}\n{doc.page_content}")
+        if modality == "image":
+            image_lines = [f"[{idx}] Source: {context_label}"]
+            if caption:
+                image_lines.append(f"图注: {caption}")
+            image_lines.append(doc.page_content)
+            context_blocks.append("\n".join(image_lines))
+        else:
+            context_blocks.append(f"[{idx}] Source: {context_label}\n{doc.page_content}")
 
     context = "\n\n".join(context_blocks)
     return sources, context

@@ -181,8 +181,6 @@
                   >
                     <FileText class="w-3 h-3 text-primary" />
                     <span class="font-medium truncate max-w-[120px]">{{ source.source }}</span>
-                    <span v-if="source.page" class="opacity-50 px-1 py-0.5 rounded border border-accent-foreground/10">p.{{ source.page }}</span>
-                    <span v-if="source.chunk !== undefined && source.chunk !== null" class="opacity-50 px-1 py-0.5 rounded border border-accent-foreground/10">c.{{ source.chunk }}</span>
                   </button>
                 </div>
               </div>
@@ -394,20 +392,6 @@
                 <FileText class="w-4 h-4 text-primary mt-0.5 shrink-0" />
                 <div class="min-w-0 flex-1">
                   <p class="text-xs font-semibold truncate">{{ source.source || `来源 ${index + 1}` }}</p>
-                  <div class="mt-1 flex flex-wrap gap-1">
-                    <span
-                      v-if="source.page !== undefined && source.page !== null"
-                      class="text-[10px] px-1.5 py-0.5 rounded border border-border bg-background"
-                    >
-                      页码 p.{{ source.page }}
-                    </span>
-                    <span
-                      v-if="source.chunk !== undefined && source.chunk !== null"
-                      class="text-[10px] px-1.5 py-0.5 rounded border border-border bg-background"
-                    >
-                      Chunk c.{{ source.chunk }}
-                    </span>
-                  </div>
                   <p class="mt-1 text-[11px] text-muted-foreground line-clamp-2">{{ source.snippet || '点击查看原文片段' }}</p>
                 </div>
               </div>
@@ -510,8 +494,8 @@
       :loading="sourcePreview.loading"
       :title="sourcePreview.title"
       :source-label="sourcePreview.sourceLabel"
-      :page="sourcePreview.page"
-      :chunk="sourcePreview.chunk"
+      :page="null"
+      :chunk="null"
       :snippet="sourcePreview.snippet"
       :error="sourcePreview.error"
       @close="closeSourcePreview"
@@ -825,7 +809,13 @@ function qaMessageStatusBadgeClass(msg) {
 function normalizeQaSource(raw) {
   if (!raw || typeof raw !== 'object') return null
   const rawSource = typeof raw.source === 'string' ? raw.source.trim() : ''
-  let friendlySource = rawSource
+  const cleanedSource = rawSource
+    .replace(/\s+p\.\d+\s+c\.\d+/ig, '')
+    .replace(/\s+p\.\d+/ig, '')
+    .replace(/\s+c\.\d+/ig, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+  let friendlySource = cleanedSource || rawSource
   if (!friendlySource) {
     friendlySource = raw.doc_id ? `文档片段 (${String(raw.doc_id).slice(0, 8)})` : '文档片段'
   } else if (/^document(\b|[\s._-])/i.test(friendlySource) || /^document$/i.test(friendlySource)) {

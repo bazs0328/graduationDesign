@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     ocr_preprocess_enabled: bool = True
     ocr_deskew_enabled: bool = True
     ocr_low_confidence_threshold: float = 0.78
+    pdf_parser_mode: str = "auto"
+    pdf_layout_engine: str = "pymupdf"
+    pdf_garbled_ocr_enabled: bool = True
+    pdf_garbled_single_char_line_ratio: float = 0.45
+    pdf_garbled_short_line_ratio: float = 0.65
+    pdf_extract_images: bool = True
+    pdf_image_min_area_ratio: float = 0.01
+    pdf_image_max_per_page: int = 12
+    mm_image_index_enabled: bool = True
+    mm_image_collection_name: str = "documents_images"
 
     qa_top_k: int = 4
     qa_fetch_k: int = 12

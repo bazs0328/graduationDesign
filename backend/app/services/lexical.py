@@ -80,6 +80,8 @@ def update_doc_chunks_metadata(
     doc_id: str,
     *,
     source: Optional[str] = None,
+    asset_path_from: Optional[str] = None,
+    asset_path_to: Optional[str] = None,
 ) -> int:
     entries = _load_chunks(user_id, kb_id)
     if not entries:
@@ -91,6 +93,10 @@ def update_doc_chunks_metadata(
             continue
         if source is not None:
             metadata["source"] = source
+        if asset_path_from and asset_path_to:
+            asset_path = metadata.get("asset_path")
+            if isinstance(asset_path, str) and asset_path.startswith(asset_path_from):
+                metadata["asset_path"] = asset_path_to + asset_path[len(asset_path_from):]
         entry["metadata"] = metadata
         updated += 1
     if updated:
@@ -105,6 +111,8 @@ def move_doc_chunks(
     doc_id: str,
     *,
     source: Optional[str] = None,
+    asset_path_from: Optional[str] = None,
+    asset_path_to: Optional[str] = None,
 ) -> int:
     if from_kb_id == to_kb_id:
         return update_doc_chunks_metadata(
@@ -112,6 +120,8 @@ def move_doc_chunks(
             from_kb_id,
             doc_id,
             source=source,
+            asset_path_from=asset_path_from,
+            asset_path_to=asset_path_to,
         )
 
     source_entries = _load_chunks(user_id, from_kb_id)
@@ -129,6 +139,10 @@ def move_doc_chunks(
         metadata["kb_id"] = to_kb_id
         if source is not None:
             metadata["source"] = source
+        if asset_path_from and asset_path_to:
+            asset_path = metadata.get("asset_path")
+            if isinstance(asset_path, str) and asset_path.startswith(asset_path_from):
+                metadata["asset_path"] = asset_path_to + asset_path[len(asset_path_from):]
         moved_entries.append(
             {
                 "text": entry.get("text", ""),

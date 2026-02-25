@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.embeddings import Embeddings
@@ -30,16 +31,39 @@ class DashScopeVLEmbeddings(Embeddings):
         self.model = model
         self.base_url = base_url
 
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+    def supports_image_embedding(self) -> bool:
+        return True
+
+    def _configure_client(self) -> None:
         import logging
         logger = logging.getLogger(__name__)
-        
+
         dashscope.api_key = self.api_key
-        # Configure base URL for international endpoint if provided
         if self.base_url:
             dashscope.base_http_api_url = self.base_url
             logger.debug(f"Using DashScope base URL: {self.base_url}")
-        
+
+    def _parse_response_vector(self, resp):
+        if not resp:
+            raise ValueError("DashScope embedding failed: empty response")
+        status_code = resp.get("status_code")
+        code = resp.get("code")
+        if status_code not in (200, "200") or code not in (None, "", 0, "0"):
+            raise ValueError(f"DashScope embedding failed: {resp}")
+        output = resp.get("output") or {}
+        items = output.get("embeddings") or output.get("data") or []
+        if not items:
+            raise ValueError(f"DashScope embedding empty: {resp}")
+        vector = items[0].get("embedding") or items[0].get("vector")
+        if not isinstance(vector, list):
+            raise ValueError(f"DashScope embedding invalid: {resp}")
+        return vector
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        import logging
+        logger = logging.getLogger(__name__)
+
+        self._configure_client()
         embeddings = []
         for text in texts:
             try:
@@ -56,25 +80,31 @@ class DashScopeVLEmbeddings(Embeddings):
                         f"or switch to EMBEDDING_PROVIDER=qwen. Error: {error_msg}"
                     ) from e
                 raise ValueError(f"DashScope embedding API call failed: {error_msg}") from e
-            
-            if not resp:
-                raise ValueError("DashScope embedding failed: empty response")
-            status_code = resp.get("status_code")
-            code = resp.get("code")
-            if status_code not in (200, "200") or code not in (None, "", 0, "0"):
-                raise ValueError(f"DashScope embedding failed: {resp}")
-            output = resp.get("output") or {}
-            items = output.get("embeddings") or output.get("data") or []
-            if not items:
-                raise ValueError(f"DashScope embedding empty: {resp}")
-            vector = items[0].get("embedding") or items[0].get("vector")
-            if not isinstance(vector, list):
-                raise ValueError(f"DashScope embedding invalid: {resp}")
-            embeddings.append(vector)
+
+            embeddings.append(self._parse_response_vector(resp))
         return embeddings
 
     def embed_query(self, text: str) -> list[float]:
         return self.embed_documents([text])[0]
+
+    def embed_image_paths(self, image_paths: list[str]) -> list[list[float]]:
+        self._configure_client()
+        embeddings: list[list[float]] = []
+        for image_path in image_paths:
+            if not image_path:
+                raise ValueError("Empty image path for multimodal embedding")
+            uri = image_path
+            if not (uri.startswith("http://") or uri.startswith("https://") or uri.startswith("file://")):
+                uri = f"file://{os.path.abspath(uri)}"
+            try:
+                resp = dashscope.MultiModalEmbedding.call(
+                    model=self.model,
+                    input=[{"image": uri}],
+                )
+            except Exception as e:
+                raise ValueError(f"DashScope image embedding API call failed: {e}") from e
+            embeddings.append(self._parse_response_vector(resp))
+        return embeddings
 
 
 def get_llm(temperature: float = 0.2):

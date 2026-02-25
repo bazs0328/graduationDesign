@@ -8,6 +8,11 @@ from typing import Any, List, Optional, Tuple
 import pdfplumber
 
 from app.core.config import settings
+from app.services.pdf_layout import (
+    ExtractedBlock,
+    PageLayoutResult,
+    extract_pdf_layout,
+)
 
 
 @dataclass
@@ -16,6 +21,9 @@ class ExtractionResult:
     page_count: int
     pages: List[str]
     encoding: Optional[str] = None
+    blocks: Optional[List[ExtractedBlock]] = None
+    page_blocks: Optional[List[PageLayoutResult]] = None
+    sidecar: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -241,15 +249,113 @@ def _is_scanned_pdf(pages: List[str], min_text_length: int) -> bool:
     return low_text_pages == sample_count
 
 
-def _parse_rapidocr_output(ocr_output: Any) -> tuple[list[str], list[float]]:
-    lines: list[str] = []
-    confidences: list[float] = []
-    if not ocr_output:
-        return lines, confidences
-    if not isinstance(ocr_output, (list, tuple)):
-        return lines, confidences
+def _visible_chars(text: str) -> str:
+    return "".join(ch for ch in (text or "") if not ch.isspace())
 
-    for row in ocr_output:
+
+def _page_text_quality_metrics(page_text: str) -> dict[str, float]:
+    lines = [line.strip() for line in (page_text or "").splitlines() if line.strip()]
+    visible = _visible_chars(page_text)
+    visible_len = len(visible)
+    if not lines or visible_len == 0:
+        return {
+            "visible_len": float(visible_len),
+            "line_count": float(len(lines)),
+            "avg_line_len": 0.0,
+            "single_char_line_ratio": 1.0 if lines else 0.0,
+            "short_line_ratio": 1.0 if lines else 0.0,
+            "symbol_ratio": 1.0 if visible_len else 0.0,
+            "latin_ratio": 0.0,
+        }
+
+    avg_line_len = sum(len(_visible_chars(line)) for line in lines) / max(1, len(lines))
+    single_char_lines = sum(1 for line in lines if len(_visible_chars(line)) <= 1)
+    short_lines = sum(1 for line in lines if len(_visible_chars(line)) <= 4)
+    symbol_count = sum(
+        1
+        for ch in visible
+        if not (ch.isalnum() or ("\u4e00" <= ch <= "\u9fff"))
+    )
+    latin_count = sum(1 for ch in visible if ("a" <= ch.lower() <= "z"))
+    return {
+        "visible_len": float(visible_len),
+        "line_count": float(len(lines)),
+        "avg_line_len": float(avg_line_len),
+        "single_char_line_ratio": single_char_lines / max(1, len(lines)),
+        "short_line_ratio": short_lines / max(1, len(lines)),
+        "symbol_ratio": symbol_count / max(1, visible_len),
+        "latin_ratio": latin_count / max(1, visible_len),
+    }
+
+
+def _score_page_text_quality(page_text: str) -> float:
+    m = _page_text_quality_metrics(page_text)
+    visible_len = m["visible_len"]
+    if visible_len <= 0:
+        return 0.0
+    length_bonus = min(1.0, visible_len / 300.0) * 0.25
+    avg_line_bonus = min(1.0, m["avg_line_len"] / 12.0) * 0.15
+    score = 0.4 + length_bonus + avg_line_bonus
+    score -= m["single_char_line_ratio"] * 0.35
+    score -= m["short_line_ratio"] * 0.2
+    score -= m["symbol_ratio"] * 0.2
+    # Penalize unusually high latin ratio in mixed/Chinese docs less aggressively.
+    if m["latin_ratio"] > 0.75 and m["avg_line_len"] < 5:
+        score -= 0.15
+    return max(0.0, min(1.0, score))
+
+
+def _is_garbled_text_page(page_text: str) -> bool:
+    if not bool(getattr(settings, "pdf_garbled_ocr_enabled", True)):
+        return False
+    m = _page_text_quality_metrics(page_text)
+    if m["visible_len"] <= 0:
+        return False
+    single_char_threshold = _safe_float(getattr(settings, "pdf_garbled_single_char_line_ratio", 0.45))
+    short_line_threshold = _safe_float(getattr(settings, "pdf_garbled_short_line_ratio", 0.65))
+    single_char_threshold = 0.45 if single_char_threshold is None else single_char_threshold
+    short_line_threshold = 0.65 if short_line_threshold is None else short_line_threshold
+    if m["single_char_line_ratio"] >= max(0.0, single_char_threshold):
+        return True
+    if m["short_line_ratio"] >= max(0.0, short_line_threshold) and m["avg_line_len"] < 4.0:
+        return True
+    if m["symbol_ratio"] > 0.35 and m["avg_line_len"] < 5.0:
+        return True
+    return _score_page_text_quality(page_text) < 0.35
+
+
+def _extract_rapidocr_bbox_sort_key(row: Any, fallback_index: int) -> tuple[float, float, int]:
+    if (
+        isinstance(row, (list, tuple))
+        and row
+        and isinstance(row[0], (list, tuple))
+        and row[0]
+        and isinstance(row[0][0], (list, tuple))
+    ):
+        xs: list[float] = []
+        ys: list[float] = []
+        for pt in row[0]:
+            if not isinstance(pt, (list, tuple)) or len(pt) < 2:
+                continue
+            x = _safe_float(pt[0])
+            y = _safe_float(pt[1])
+            if x is None or y is None:
+                continue
+            xs.append(x)
+            ys.append(y)
+        if xs and ys:
+            return min(ys), min(xs), fallback_index
+    return float(fallback_index), 0.0, fallback_index
+
+
+def _parse_rapidocr_output(ocr_output: Any) -> tuple[list[str], list[float]]:
+    entries: list[tuple[tuple[float, float, int], str, Optional[float]]] = []
+    if not ocr_output:
+        return [], []
+    if not isinstance(ocr_output, (list, tuple)):
+        return [], []
+
+    for row_index, row in enumerate(ocr_output):
         if not isinstance(row, (list, tuple)):
             continue
 
@@ -275,12 +381,15 @@ def _parse_rapidocr_output(ocr_output: Any) -> tuple[list[str], list[float]]:
         normalized_line = _normalize_text(text_value)
         if not normalized_line:
             continue
-        lines.append(normalized_line)
         if score_value is not None:
             if score_value > 1.0:
                 score_value = score_value / 100.0
-            confidences.append(min(1.0, max(0.0, score_value)))
+            score_value = min(1.0, max(0.0, score_value))
+        entries.append((_extract_rapidocr_bbox_sort_key(row, row_index), normalized_line, score_value))
 
+    entries.sort(key=lambda item: item[0])
+    lines = [item[1] for item in entries]
+    confidences = [item[2] for item in entries if item[2] is not None]
     return lines, confidences
 
 
@@ -582,7 +691,112 @@ def _merge_page_text_with_ocr(
     return f"{original_text}\n{ocr_text}".strip()
 
 
-def _extract_pdf(file_path: str) -> ExtractionResult:
+def _get_pdf_parser_mode() -> str:
+    mode = (getattr(settings, "pdf_parser_mode", "legacy") or "legacy").strip().lower()
+    if mode not in {"legacy", "layout", "auto"}:
+        return "legacy"
+    return mode
+
+
+def _pick_page_text_after_ocr(
+    original_text: str,
+    ocr_text: str,
+    *,
+    scanned_pdf: bool,
+    min_text_length: int,
+) -> tuple[str, str]:
+    """Return (chosen_text, reason)."""
+    if not ocr_text:
+        return original_text, "no_ocr_text"
+    if not original_text:
+        return ocr_text, "ocr_empty_text_layer"
+    if scanned_pdf or _is_low_text_page(original_text, min_text_length):
+        return ocr_text, "ocr_low_text_or_scanned"
+
+    original_score = _score_page_text_quality(original_text)
+    ocr_score = _score_page_text_quality(ocr_text)
+    if ocr_score >= original_score + 0.05:
+        return ocr_text, "ocr_quality_better"
+    if original_score >= ocr_score + 0.08:
+        return original_text, "text_layer_quality_better"
+
+    if ocr_text in original_text:
+        return original_text, "ocr_contained"
+    if original_text in ocr_text:
+        return ocr_text, "text_layer_contained"
+    if len(_visible_chars(ocr_text)) > len(_visible_chars(original_text)) * 1.2:
+        return ocr_text, "ocr_much_longer"
+    return original_text, "keep_text_layer"
+
+
+def _apply_pdf_ocr_repair(
+    file_path: str,
+    *,
+    pages: List[str],
+    page_blocks: Optional[List[PageLayoutResult]] = None,
+) -> tuple[List[str], bool]:
+    min_text_length = max(1, settings.ocr_min_text_length)
+    scanned_pdf = _is_scanned_pdf(pages, min_text_length)
+    if not settings.ocr_enabled:
+        if scanned_pdf:
+            logger.info("Scanned PDF detected but OCR is disabled")
+        return pages, scanned_pdf
+
+    ocr_pages: list[int] = []
+    page_reasons: dict[int, list[str]] = {}
+    for idx, page_text in enumerate(pages, start=1):
+        reasons: list[str] = []
+        if scanned_pdf:
+            reasons.append("scanned_pdf")
+        else:
+            if _is_low_text_page(page_text, min_text_length):
+                reasons.append("low_text")
+            if _is_garbled_text_page(page_text):
+                reasons.append("garbled_text")
+        if reasons:
+            ocr_pages.append(idx)
+            page_reasons[idx] = reasons
+
+    for page_num in ocr_pages:
+        try:
+            ocr_result = _ocr_page(file_path, page_num)
+        except RuntimeError:
+            if scanned_pdf:
+                raise
+            logger.exception("Skip OCR on page %s due to setup/runtime error", page_num)
+            continue
+
+        if not ocr_result.text:
+            continue
+
+        original_page_text = pages[page_num - 1]
+        chosen_text, choose_reason = _pick_page_text_after_ocr(
+            original_page_text,
+            ocr_result.text,
+            scanned_pdf=scanned_pdf,
+            min_text_length=min_text_length,
+        )
+        pages[page_num - 1] = chosen_text
+
+        if page_blocks and 0 <= page_num - 1 < len(page_blocks):
+            page_block = page_blocks[page_num - 1]
+            page_block.text_quality_score = _score_page_text_quality(chosen_text)
+            if chosen_text != original_page_text:
+                page_block.ocr_override_text = chosen_text
+
+        logger.info(
+            "PDF page=%s ocr_trigger=%s choose=%s reason=%s orig_q=%.3f ocr_q=%.3f",
+            page_num,
+            ",".join(page_reasons.get(page_num, [])) or "none",
+            "ocr" if chosen_text == ocr_result.text else "text_layer",
+            choose_reason,
+            _score_page_text_quality(original_page_text),
+            _score_page_text_quality(ocr_result.text),
+        )
+    return pages, scanned_pdf
+
+
+def _extract_pdf_legacy(file_path: str) -> ExtractionResult:
     pages: List[str] = []
     with pdfplumber.open(file_path) as pdf:
         page_count = len(pdf.pages)
@@ -593,42 +807,55 @@ def _extract_pdf(file_path: str) -> ExtractionResult:
                 page_text = ""
             pages.append(_normalize_text(page_text))
 
-    min_text_length = max(1, settings.ocr_min_text_length)
-    scanned_pdf = _is_scanned_pdf(pages, min_text_length)
-    if settings.ocr_enabled:
-        if scanned_pdf:
-            ocr_pages = list(range(1, page_count + 1))
-        else:
-            ocr_pages = [
-                idx
-                for idx, page_text in enumerate(pages, start=1)
-                if _is_low_text_page(page_text, min_text_length)
-            ]
-
-        for page_num in ocr_pages:
-            try:
-                ocr_result = _ocr_page(file_path, page_num)
-            except RuntimeError:
-                if scanned_pdf:
-                    raise
-                logger.exception("Skip OCR on page %s due to setup/runtime error", page_num)
-                continue
-
-            if not ocr_result.text:
-                continue
-
-            original_page_text = pages[page_num - 1]
-            pages[page_num - 1] = _merge_page_text_with_ocr(
-                original_page_text,
-                ocr_result.text,
-                scanned_pdf=scanned_pdf,
-                min_text_length=min_text_length,
-            )
-    elif scanned_pdf:
-        logger.info("Scanned PDF detected but OCR is disabled")
+    pages, _ = _apply_pdf_ocr_repair(file_path, pages=pages, page_blocks=None)
 
     combined = "\n\n".join([p for p in pages if p])
     return ExtractionResult(text=combined, page_count=page_count, pages=pages)
+
+
+def _extract_pdf_layout_mode(
+    file_path: str,
+    *,
+    user_id: str | None = None,
+    kb_id: str | None = None,
+    doc_id: str | None = None,
+) -> ExtractionResult:
+    parsed = extract_pdf_layout(file_path, user_id=user_id, kb_id=kb_id, doc_id=doc_id)
+    pages = [str(p or "") for p in parsed.pages]
+    page_blocks = list(parsed.page_blocks)
+    pages, _ = _apply_pdf_ocr_repair(file_path, pages=pages, page_blocks=page_blocks)
+    combined = "\n\n".join([p for p in pages if p])
+    return ExtractionResult(
+        text=combined,
+        page_count=parsed.page_count,
+        pages=pages,
+        blocks=list(parsed.blocks),
+        page_blocks=page_blocks,
+        sidecar=parsed.sidecar,
+    )
+
+
+def _extract_pdf(
+    file_path: str,
+    *,
+    user_id: str | None = None,
+    kb_id: str | None = None,
+    doc_id: str | None = None,
+) -> ExtractionResult:
+    mode = _get_pdf_parser_mode()
+    if mode in {"layout", "auto"}:
+        try:
+            return _extract_pdf_layout_mode(
+                file_path,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+            )
+        except Exception:
+            if mode == "layout":
+                raise
+            logger.exception("PDF layout parser failed, fallback to legacy parser")
+    return _extract_pdf_legacy(file_path)
 
 
 def _extract_text_file(file_path: str) -> ExtractionResult:
@@ -684,10 +911,17 @@ def _extract_pptx(file_path: str) -> ExtractionResult:
     return ExtractionResult(text=combined, page_count=len(pages), pages=pages)
 
 
-def extract_text(file_path: str, suffix: str) -> ExtractionResult:
+def extract_text(
+    file_path: str,
+    suffix: str,
+    *,
+    user_id: str | None = None,
+    kb_id: str | None = None,
+    doc_id: str | None = None,
+) -> ExtractionResult:
     normalized_suffix = (suffix or "").lower()
     if normalized_suffix == ".pdf":
-        return _extract_pdf(file_path)
+        return _extract_pdf(file_path, user_id=user_id, kb_id=kb_id, doc_id=doc_id)
     if normalized_suffix in {".txt", ".md"}:
         return _extract_text_file(file_path)
     if normalized_suffix == ".docx":
