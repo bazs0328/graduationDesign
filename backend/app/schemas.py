@@ -168,11 +168,14 @@ class QuizGenerateRequest(BaseModel):
 
 
 class QuizQuestion(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     question: str
     options: List[str]
     answer_index: int
     explanation: str
     concepts: List[str] = []
+    image: Optional[Dict[str, Any]] = None
 
 
 class QuizGenerateResponse(BaseModel):

@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     mm_image_index_enabled: bool = True
     mm_image_collection_name: str = "documents_images"
 
+    quiz_context_reconstruct_enabled: bool = True
+    quiz_context_seed_k_multiplier: float = 2.0
+    quiz_context_neighbor_window: int = 2
+    quiz_context_passage_target_chars: int = 900
+    quiz_context_fragment_filter_enabled: bool = True
+    quiz_image_figure_ref_rerank_enabled: bool = True
+    quiz_image_figure_ref_top_k: int = 5
+
     qa_top_k: int = 4
     qa_fetch_k: int = 12
     qa_bm25_k: int = 6

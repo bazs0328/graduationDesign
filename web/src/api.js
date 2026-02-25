@@ -200,6 +200,21 @@ export async function apiGet(path) {
   return request(path)
 }
 
+export async function apiGetBlob(path, options = {}) {
+  const fullUrl = `${API_BASE}${path}`
+  const { headers } = buildAuthHeaders(path, options.headers)
+  try {
+    const res = await fetch(fullUrl, { method: 'GET', ...options, headers })
+    if (!res.ok) {
+      await parseErrorResponse(res)
+    }
+    return res.blob()
+  } catch (err) {
+    maybeShowGlobalErrorToast(err)
+    throw err
+  }
+}
+
 export async function authRegister(username, password, name = null) {
   return apiPost('/api/auth/register', { username, password, name })
 }

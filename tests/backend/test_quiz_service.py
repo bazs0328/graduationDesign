@@ -73,6 +73,40 @@ def test_quality_guardrails_filter_invalid_duplicates_and_concept_overload():
     assert any(q["question"] == "特征值的定义是什么？" for q in kept)
 
 
+def test_quality_guardrails_filters_fragmented_stem_and_explanation():
+    raw_questions = [
+        {
+            "question": "图\n中\n矩\n阵\n变\n换",
+            "options": ["A", "B", "C", "D"],
+            "answer_index": 0,
+            "explanation": "正常解析",
+            "concepts": ["矩阵变换"],
+        },
+        {
+            "question": "矩阵的秩表示什么？",
+            "options": ["A", "B", "C", "D"],
+            "answer_index": 1,
+            "explanation": "秩\n是\n描\n述\n线\n性\n无\n关",
+            "concepts": ["矩阵秩"],
+        },
+        {
+            "question": "矩阵可逆的充要条件是什么？",
+            "options": ["A", "B", "C", "D"],
+            "answer_index": 2,
+            "explanation": "行列式不为零时矩阵可逆。",
+            "concepts": ["矩阵可逆性"],
+        },
+    ]
+
+    kept, report = _apply_quality_guardrails(raw_questions, target_count=5)
+
+    assert len(kept) == 1
+    assert kept[0]["question"] == "矩阵可逆的充要条件是什么？"
+    assert report["dropped_invalid"] >= 2
+    assert report["invalid_reasons"].get("fragmented_question", 0) >= 1
+    assert report["invalid_reasons"].get("fragmented_explanation", 0) >= 1
+
+
 def test_generate_quiz_resamples_once_when_guardrails_reduce_count():
     first_round = [
         {
@@ -171,3 +205,112 @@ def test_build_context_scales_k_with_question_count_and_caps_context_length():
     assert call_kwargs["k"] <= 24
     assert len(keypoint_ids) == call_kwargs["k"]
     assert len(context) <= 16000
+
+
+def test_generate_quiz_attaches_image_for_figure_question_when_image_hit_exists():
+    llm = Mock()
+    llm.invoke.return_value = SimpleNamespace(
+        content=json.dumps(
+            [
+                {
+                    "question": "如图所示，矩阵变换后的图形关于哪个轴对称？",
+                    "options": ["x轴", "y轴", "原点", "都不是"],
+                    "answer_index": 1,
+                    "explanation": "根据图形位置可判断关于 y 轴对称。",
+                    "concepts": ["矩阵变换"],
+                }
+            ],
+            ensure_ascii=False,
+        )
+    )
+    image_hit_doc = SimpleNamespace(
+        page_content="[图片块]\\n图注: 图1 变换示意图",
+        metadata={
+            "doc_id": "doc-1",
+            "kb_id": "kb-1",
+            "page": 2,
+            "chunk": 8,
+            "caption": "图1 变换示意图",
+            "bbox": "[0,0,100,100]",
+        },
+    )
+
+    with (
+        patch("app.services.quiz._build_context", return_value=("mock context", ["kp-1"])),
+        patch("app.services.quiz.get_llm", return_value=llm),
+        patch("app.services.quiz.query_image_documents", return_value=[(image_hit_doc, 0.9)]),
+    ):
+        questions = generate_quiz(
+            user_id="u1",
+            doc_id="doc-1",
+            kb_id=None,
+            count=1,
+            difficulty="medium",
+        )
+
+    assert len(questions) == 1
+    image = questions[0].get("image")
+    assert image
+    assert image["url"] == "/api/docs/doc-1/image?page=2&chunk=8"
+    assert image["caption"] == "图1 变换示意图"
+
+
+def test_generate_quiz_reranks_image_hits_by_figure_caption_match():
+    llm = Mock()
+    llm.invoke.return_value = SimpleNamespace(
+        content=json.dumps(
+            [
+                {
+                    "question": "根据图1判断，图形经过变换后关于哪个轴对称？",
+                    "options": ["x轴", "y轴", "原点", "都不是"],
+                    "answer_index": 1,
+                    "explanation": "图1中显示变换后的图形关于 y 轴对称。",
+                    "concepts": ["矩阵变换"],
+                }
+            ],
+            ensure_ascii=False,
+        )
+    )
+    wrong_high_score = SimpleNamespace(
+        page_content="[图片块]\n图注: 图2 错误示意图",
+        metadata={
+            "doc_id": "doc-1",
+            "kb_id": "kb-1",
+            "page": 2,
+            "chunk": 7,
+            "caption": "图2 错误示意图",
+            "bbox": "[0,0,100,100]",
+        },
+    )
+    right_lower_score = SimpleNamespace(
+        page_content="[图片块]\n图注: 图1 关于y轴对称示意图",
+        metadata={
+            "doc_id": "doc-1",
+            "kb_id": "kb-1",
+            "page": 2,
+            "chunk": 8,
+            "caption": "图1 关于y轴对称示意图",
+            "bbox": "[0,0,100,100]",
+        },
+    )
+
+    with (
+        patch("app.services.quiz._build_context", return_value=("mock context", ["kp-1"])),
+        patch("app.services.quiz.get_llm", return_value=llm),
+        patch(
+            "app.services.quiz.query_image_documents",
+            return_value=[(wrong_high_score, 0.92), (right_lower_score, 0.45)],
+        ) as image_query_mock,
+    ):
+        questions = generate_quiz(
+            user_id="u1",
+            doc_id="doc-1",
+            kb_id=None,
+            count=1,
+            difficulty="medium",
+        )
+
+    image = questions[0].get("image")
+    assert image
+    assert image["caption"] == "图1 关于y轴对称示意图"
+    assert image_query_mock.call_args.kwargs["top_k"] >= 2

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.documents import Document as LCDocument
@@ -27,6 +27,7 @@ class _BufferedTextSegment:
     pieces: list[str]
     block_ids: list[str]
     order_hint: int = 0
+    meta_extra: dict[str, Any] = field(default_factory=dict)
 
     def text(self) -> str:
         return "\n\n".join([p for p in self.pieces if p]).strip()
@@ -115,6 +116,8 @@ def _flush_text_segment(
     if not text:
         return None
     meta = _doc_base_metadata(doc_id, kb_id, filename, current.page)
+    if current.meta_extra:
+        meta.update(current.meta_extra)
     out.extend(
         _make_text_docs_from_segment(
             text,
@@ -146,8 +149,12 @@ def build_chunked_documents(
     if suffix == ".pdf" and getattr(extraction, "page_blocks", None):
         for page_layout in extraction.page_blocks or []:
             override_text = (getattr(page_layout, "ocr_override_text", None) or "").strip()
+            page_quality_score = getattr(page_layout, "text_quality_score", None)
             if override_text:
                 meta = _doc_base_metadata(doc_id, kb_id, filename, getattr(page_layout, "page", None))
+                if page_quality_score is not None:
+                    meta["page_text_quality_score"] = float(page_quality_score)
+                meta["ocr_override"] = True
                 text_docs.extend(
                     _make_text_docs_from_segment(
                         override_text,
@@ -194,6 +201,14 @@ def build_chunked_documents(
                             pieces=[],
                             block_ids=[],
                             order_hint=int(getattr(block, "order_index", 0) or 0),
+                            meta_extra={
+                                **(
+                                    {"page_text_quality_score": float(page_quality_score)}
+                                    if page_quality_score is not None
+                                    else {}
+                                ),
+                                "ocr_override": False,
+                            },
                         )
                     buffer.pieces.append(text)
                     block_id = getattr(block, "block_id", None)

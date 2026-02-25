@@ -8,6 +8,7 @@ from uuid import uuid4
 import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import asc, desc
 
@@ -382,6 +383,55 @@ def _build_source_preview(
     raise HTTPException(status_code=404, detail="No source preview available")
 
 
+def _build_image_preview_path(
+    doc: Document,
+    image_entries: list[dict],
+    *,
+    page: int | None = None,
+    chunk: int | None = None,
+) -> tuple[str, int | None, int | None]:
+    target_page = _normalize_int(page)
+    target_chunk = _normalize_int(chunk)
+    selected_entry: dict | None = None
+
+    if target_chunk is not None:
+        for entry in image_entries:
+            meta = entry.get("metadata") or {}
+            if _normalize_int(meta.get("chunk")) == target_chunk:
+                selected_entry = entry
+                break
+
+    if selected_entry is None and target_page is not None:
+        selected_entry = next(
+            (
+                entry
+                for entry in image_entries
+                if _normalize_int((entry.get("metadata") or {}).get("page")) == target_page
+            ),
+            None,
+        )
+
+    if selected_entry is None and image_entries:
+        selected_entry = image_entries[0]
+
+    if selected_entry is None:
+        raise HTTPException(status_code=404, detail="No source image available")
+
+    metadata = selected_entry.get("metadata") or {}
+    source_page = _normalize_int(metadata.get("page"))
+    source_chunk = _normalize_int(metadata.get("chunk"))
+    asset_path = metadata.get("asset_path")
+    if not isinstance(asset_path, str) or not asset_path.strip():
+        raise HTTPException(status_code=404, detail="Source image file missing")
+    resolved = os.path.realpath(asset_path)
+    user_root = os.path.realpath(user_base_dir(doc.user_id))
+    if not resolved.startswith(user_root + os.sep) and resolved != user_root:
+        raise HTTPException(status_code=403, detail="Invalid source image path")
+    if not os.path.exists(resolved):
+        raise HTTPException(status_code=404, detail="Source image file not found")
+    return resolved, source_page, source_chunk
+
+
 def _queue_doc_reprocess(
     db: Session,
     background_tasks: BackgroundTasks,
@@ -689,6 +739,27 @@ def preview_doc_source(
         caption=preview.get("caption"),
         bbox=preview.get("bbox"),
     )
+
+
+@router.get("/docs/{doc_id}/image")
+def preview_doc_image(
+    doc_id: str,
+    user_id: str | None = None,
+    page: int | None = None,
+    chunk: int | None = None,
+    db: Session = Depends(get_db),
+):
+    resolved_user_id = ensure_user(db, user_id)
+    doc = _get_doc_or_404(db, resolved_user_id, doc_id)
+    image_entries = get_doc_image_vector_entries(resolved_user_id, doc_id)
+    asset_path, _, _ = _build_image_preview_path(
+        doc,
+        image_entries,
+        page=page,
+        chunk=chunk,
+    )
+    # Stored quiz/source crops are PNG today.
+    return FileResponse(asset_path, media_type="image/png")
 
 
 @router.get("/docs/tasks", response_model=DocumentTaskCenterResponse)
