@@ -60,16 +60,35 @@
                   清空
                 </button>
               </div>
-              <input
-                v-model="quizFocusInput"
-                type="text"
-                placeholder="如：牛顿定律、受力分析（支持逗号/顿号分隔）"
+              <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+                <input
+                  v-model="quizFocusSearch"
+                  type="text"
+                  placeholder="搜索已提取知识点（如：牛顿定律）"
+                  class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
+                  @keydown.enter.prevent="addSelectedQuizFocusCandidate"
+                />
+                <button
+                  type="button"
+                  class="px-3 py-2 rounded-lg border border-input bg-background text-sm hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="busy.focusKeypoints || !quizFocusCandidate"
+                  @click="addSelectedQuizFocusCandidate"
+                >
+                  添加
+                </button>
+              </div>
+              <select
+                v-model="quizFocusCandidate"
                 class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
-                @keydown.enter.prevent="applyQuizFocusInput"
-                @blur="applyQuizFocusInput"
-              />
+                :disabled="busy.focusKeypoints || !filteredQuizFocusOptions.length"
+              >
+                <option value="">{{ busy.focusKeypoints ? '正在加载知识点...' : (filteredQuizFocusOptions.length ? '请选择知识点' : '暂无可选知识点') }}</option>
+                <option v-for="item in filteredQuizFocusOptions" :key="item.id" :value="item.text">
+                  {{ item.text }}
+                </option>
+              </select>
               <p class="text-[10px] text-muted-foreground">
-                留空表示按整库/文档自动出题；填写后会优先围绕这些概念出题。
+                留空表示按整库/文档自动出题；这里的选项来自已提取知识点，避免手动输入语义不一致。
               </p>
               <div v-if="quizFocusConcepts.length" class="flex flex-wrap gap-2">
                 <span
@@ -431,12 +450,15 @@ const quizResult = ref(null)
 const quizCount = ref(5)
 const quizDifficulty = ref('medium')
 const autoAdapt = ref(true)
-const quizFocusInput = ref('')
 const quizFocusConcepts = ref([])
+const quizFocusSearch = ref('')
+const quizFocusCandidate = ref('')
+const quizFocusOptions = ref([])
 const busy = ref({
   quiz: false,
   submit: false,
   docs: false,
+  focusKeypoints: false,
 })
 
 const profileDelta = computed(() => quizResult.value?.profile_delta || null)
@@ -482,6 +504,20 @@ const quizEmptyPrimaryAction = computed(() => {
   if (!hasAnyKb.value) return { label: '去上传文档' }
   if (!selectedKbId.value) return null
   return { label: '生成新测验', loading: busy.value.quiz }
+})
+const filteredQuizFocusOptions = computed(() => {
+  const keyword = String(quizFocusSearch.value || '').trim().toLowerCase()
+  const selected = new Set((quizFocusConcepts.value || []).map((item) => String(item || '').trim().toLowerCase()))
+  const options = Array.isArray(quizFocusOptions.value) ? quizFocusOptions.value : []
+  return options
+    .filter((item) => {
+      const text = String(item?.text || '').trim()
+      if (!text) return false
+      if (selected.has(text.toLowerCase())) return false
+      if (!keyword) return true
+      return text.toLowerCase().includes(keyword)
+    })
+    .slice(0, 80)
 })
 const OPTION_LABELS = ['A', 'B', 'C', 'D']
 let quizImageLoadSeq = 0
@@ -584,36 +620,98 @@ function normalizeQuizFocusConcepts(values = []) {
   return out
 }
 
-function parseQuizFocusInput(text) {
-  return normalizeQuizFocusConcepts(
-    String(text ?? '')
-      .split(/[\n,，、;；]+/g)
-      .map((item) => item.trim())
-      .filter(Boolean)
-  )
+function addQuizFocusConcept(concept) {
+  const next = normalizeQuizFocusConcepts([...(quizFocusConcepts.value || []), concept])
+  quizFocusConcepts.value = next
 }
 
-function applyQuizFocusInput() {
-  const parsed = parseQuizFocusInput(quizFocusInput.value)
-  if (!parsed.length) {
-    quizFocusInput.value = ''
-    return
-  }
-  quizFocusConcepts.value = normalizeQuizFocusConcepts([
-    ...quizFocusConcepts.value,
-    ...parsed,
-  ])
-  quizFocusInput.value = ''
+function addSelectedQuizFocusCandidate() {
+  const text = String(quizFocusCandidate.value || '').trim()
+  if (!text) return
+  addQuizFocusConcept(text)
+  quizFocusCandidate.value = ''
 }
 
 function clearQuizFocusConcepts() {
   quizFocusConcepts.value = []
-  quizFocusInput.value = ''
+  quizFocusSearch.value = ''
+  quizFocusCandidate.value = ''
 }
 
 function removeQuizFocusConcept(index) {
   if (!Number.isInteger(index) || index < 0 || index >= quizFocusConcepts.value.length) return
   quizFocusConcepts.value = quizFocusConcepts.value.filter((_, idx) => idx !== index)
+}
+
+function normalizeQuizFocusOptions(items = []) {
+  const seen = new Set()
+  const out = []
+  for (const item of items) {
+    const id = String(item?.id || '').trim()
+    const text = String(item?.text || '').trim()
+    if (!text) continue
+    const key = text.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      id: id || text,
+      text,
+      memberCount: Number(item?.member_count || 1),
+      sourceDocCount: Array.isArray(item?.source_doc_ids) ? item.source_doc_ids.length : 0,
+    })
+  }
+  return out
+}
+
+async function refreshQuizFocusOptions() {
+  if (!selectedKbId.value) {
+    quizFocusOptions.value = []
+    quizFocusCandidate.value = ''
+    busy.value.focusKeypoints = false
+    return
+  }
+  busy.value.focusKeypoints = true
+  const requestKbId = selectedKbId.value
+  try {
+    const params = new URLSearchParams()
+    params.set('user_id', resolvedUserId.value)
+    params.set('grouped', 'true')
+    const res = await apiGet(`/api/keypoints/kb/${encodeURIComponent(requestKbId)}?${params.toString()}`)
+    if (selectedKbId.value !== requestKbId) return
+    quizFocusOptions.value = normalizeQuizFocusOptions(Array.isArray(res?.keypoints) ? res.keypoints : [])
+  } catch {
+    if (selectedKbId.value !== requestKbId) return
+    quizFocusOptions.value = []
+    // error toast handled globally
+  } finally {
+    if (selectedKbId.value === requestKbId) {
+      busy.value.focusKeypoints = false
+    }
+  }
+  if (
+    quizFocusCandidate.value
+    && !filteredQuizFocusOptions.value.some((item) => item.text === quizFocusCandidate.value)
+  ) {
+    quizFocusCandidate.value = ''
+  }
+}
+
+function maybeAdoptRouteFocusConcept(focusText) {
+  const raw = String(focusText || '').trim()
+  if (!raw || quizFocusConcepts.value.length) return
+  const exact = quizFocusOptions.value.find((item) => String(item?.text || '').trim() === raw)
+  if (exact) {
+    addQuizFocusConcept(exact.text)
+    return
+  }
+  const normalized = raw.toLowerCase()
+  const partial = quizFocusOptions.value.find((item) => String(item?.text || '').toLowerCase().includes(normalized))
+  if (partial) {
+    addQuizFocusConcept(partial.text)
+    return
+  }
+  // Route-provided focus originates from internal recommendation/learning-path flows; allow as fallback.
+  addQuizFocusConcept(raw)
 }
 
 async function refreshDocsInKb() {
@@ -807,8 +905,8 @@ async function syncFromRoute(options = {}) {
     lastAutoContextKey.value = contextKey
 
     const generateOptions = {}
-    if (queryFocus && !quizFocusConcepts.value.length) {
-      quizFocusConcepts.value = normalizeQuizFocusConcepts([queryFocus])
+    if (queryFocus) {
+      maybeAdoptRouteFocusConcept(queryFocus)
     }
     if (queryFocus) {
       generateOptions.focusConcepts = [queryFocus]
@@ -825,16 +923,16 @@ onMounted(async () => {
   } catch {
     // error toast handled globally
   }
+  await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions()])
   await syncFromRoute({ autoGenerate: true })
-  await refreshDocsInKb()
 })
 
 onActivated(async () => {
+  await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions()])
   await syncFromRoute({
     ensureKbs: !appContext.kbs.length,
     autoGenerate: true,
   })
-  await refreshDocsInKb()
 })
 
 onBeforeUnmount(() => {
@@ -846,13 +944,16 @@ onBeforeUnmount(() => {
 watch(
   () => route.fullPath,
   async () => {
+    await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions()])
     await syncFromRoute({ autoGenerate: true })
-    await refreshDocsInKb()
   }
 )
 
 watch(selectedKbId, async () => {
   clearQuizFocusConcepts()
-  await refreshDocsInKb()
+  quizFocusOptions.value = []
+  quizFocusSearch.value = ''
+  quizFocusCandidate.value = ''
+  await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions()])
 })
 </script>

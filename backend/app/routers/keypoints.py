@@ -138,6 +138,7 @@ async def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(ge
                         break
             if mastery_changed:
                 invalidate_learning_path_result_cache(db, doc.kb_id)
+                db.commit()
             return KeypointsResponse(
                 doc_id=doc.id,
                 keypoints=_to_keypoint_items(existing),
@@ -179,6 +180,7 @@ async def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(ge
                         break
             if mastery_changed:
                 invalidate_learning_path_result_cache(db, doc.kb_id)
+                db.commit()
             return KeypointsResponse(
                 doc_id=doc.id,
                 keypoints=_to_keypoint_items(keypoints),

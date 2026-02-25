@@ -107,6 +107,35 @@ def test_quality_guardrails_filters_fragmented_stem_and_explanation():
     assert report["invalid_reasons"].get("fragmented_explanation", 0) >= 1
 
 
+def test_quality_guardrails_filters_focus_mismatch_questions():
+    raw_questions = [
+        {
+            "question": "牛顿第二定律中，合力与加速度的关系是什么？",
+            "options": ["成正比", "成反比", "无关", "无法判断"],
+            "answer_index": 0,
+            "explanation": "根据 F=ma，在质量一定时合力与加速度成正比。",
+            "concepts": ["牛顿第二定律"],
+        },
+        {
+            "question": "光合作用的主要产物是什么？",
+            "options": ["氧气和葡萄糖", "二氧化碳", "氮气", "水"],
+            "answer_index": 0,
+            "explanation": "绿色植物通过光合作用生成有机物并释放氧气。",
+            "concepts": ["光合作用"],
+        },
+    ]
+
+    kept, report = _apply_quality_guardrails(
+        raw_questions,
+        target_count=5,
+        focus_concepts=["牛顿第二定律"],
+    )
+
+    assert len(kept) == 1
+    assert kept[0]["question"].startswith("牛顿第二定律")
+    assert report["dropped_focus_mismatch"] >= 1
+
+
 def test_generate_quiz_resamples_once_when_guardrails_reduce_count():
     first_round = [
         {
@@ -205,6 +234,53 @@ def test_build_context_scales_k_with_question_count_and_caps_context_length():
     assert call_kwargs["k"] <= 24
     assert len(keypoint_ids) == call_kwargs["k"]
     assert len(context) <= 16000
+
+
+def test_build_context_uses_per_focus_seed_search_when_multiple_focus_concepts():
+    focus_a_doc = SimpleNamespace(
+        page_content="牛顿第二定律相关内容",
+        metadata={"keypoint_id": "kp-a", "doc_id": "doc-1", "chunk": 1, "page": 1},
+    )
+    focus_b_doc = SimpleNamespace(
+        page_content="受力分析相关内容",
+        metadata={"keypoint_id": "kp-b", "doc_id": "doc-1", "chunk": 2, "page": 1},
+    )
+    fallback_doc = SimpleNamespace(
+        page_content="混合检索补充内容",
+        metadata={"keypoint_id": "kp-c", "doc_id": "doc-1", "chunk": 3, "page": 1},
+    )
+
+    vectorstore = Mock()
+
+    def _similarity_search(query, k, filter):
+        assert filter == {"kb_id": "kb-1"}
+        if query == "牛顿第二定律":
+            return [focus_a_doc]
+        if query == "受力分析":
+            return [focus_b_doc]
+        return [fallback_doc]
+
+    vectorstore.similarity_search.side_effect = _similarity_search
+
+    with (
+        patch("app.services.quiz.get_vectorstore", return_value=vectorstore),
+        patch("app.services.quiz.settings.quiz_context_reconstruct_enabled", False),
+    ):
+        context, keypoint_ids = _build_context(
+            user_id="u1",
+            doc_id=None,
+            kb_id="kb-1",
+            reference_questions=None,
+            focus_concepts=["牛顿第二定律", "受力分析"],
+            target_count=2,
+        )
+
+    queried = [call.kwargs["query"] if "query" in call.kwargs else call.args[0] for call in vectorstore.similarity_search.call_args_list]
+    assert "牛顿第二定律" in queried
+    assert "受力分析" in queried
+    assert "牛顿第二定律相关内容" in context
+    assert "受力分析相关内容" in context
+    assert set(keypoint_ids) >= {"kp-a", "kp-b"}
 
 
 def test_generate_quiz_attaches_image_for_figure_question_when_image_hit_exists():

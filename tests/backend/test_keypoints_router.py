@@ -209,3 +209,49 @@ def test_get_keypoints_by_kb_grouped_semantic_dedup(client, db_session):
     assert item["id"] == "kp-grouped-sem-1"
     assert item["attempt_count"] == 3
     assert item["mastery_level"] == 0.5
+
+
+def test_post_keypoints_with_study_keypoint_text_persists_mastery_update(client, db_session):
+    user_id = "kp_study_update_user"
+    kb_id = "kp_study_update_kb"
+    doc_id = "kp_study_update_doc"
+    _seed_kb_with_docs(
+        db_session,
+        user_id=user_id,
+        kb_id=kb_id,
+        docs=[(doc_id, "study.txt")],
+    )
+    db_session.add(
+        Keypoint(
+            id="kp-study-001",
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            text="牛顿第二定律",
+            explanation="力与加速度关系",
+            mastery_level=0.2,
+            attempt_count=0,
+            correct_count=0,
+        )
+    )
+    db_session.commit()
+
+    resp = client.post(
+        "/api/keypoints",
+        json={
+            "doc_id": doc_id,
+            "user_id": user_id,
+            "study_keypoint_text": "牛顿第二定律",
+        },
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["cached"] is True
+    item = next(kp for kp in payload["keypoints"] if kp["text"] == "牛顿第二定律")
+    assert item["mastery_level"] > 0.2
+
+    db_session.expire_all()
+    persisted = db_session.query(Keypoint).filter(Keypoint.id == "kp-study-001").first()
+    assert persisted is not None
+    assert float(persisted.mastery_level or 0.0) > 0.2

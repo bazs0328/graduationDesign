@@ -165,6 +165,66 @@ def _build_context_text(docs, *, max_chars: int) -> str:
     return "\n\n".join(blocks)
 
 
+def _doc_search_identity(doc: Any) -> tuple[str, str, str]:
+    meta = dict(getattr(doc, "metadata", {}) or {})
+    doc_id = str(meta.get("doc_id") or "")
+    chunk = str(meta.get("chunk") or "")
+    page = str(meta.get("page") or "")
+    if doc_id and (chunk or page):
+        return (doc_id, page, chunk)
+    content = str(getattr(doc, "page_content", "") or "").strip()
+    return (doc_id, page, content[:160])
+
+
+def _dedupe_search_docs(docs: list[Any], *, limit: int | None = None) -> list[Any]:
+    out: list[Any] = []
+    seen: set[tuple[str, str, str]] = set()
+    for doc in docs or []:
+        ident = _doc_search_identity(doc)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        out.append(doc)
+        if limit is not None and len(out) >= limit:
+            break
+    return out
+
+
+def _similarity_search_focus_seed_docs(
+    *,
+    vectorstore: Any,
+    focus_concepts: list[str],
+    fallback_query: str,
+    k: int,
+    search_filter: dict[str, Any],
+) -> list[Any]:
+    cleaned = [str(item).strip() for item in (focus_concepts or []) if str(item).strip()]
+    if not cleaned:
+        return vectorstore.similarity_search(fallback_query, k=k, filter=search_filter)
+
+    if len(cleaned) == 1:
+        return vectorstore.similarity_search(cleaned[0], k=k, filter=search_filter)
+
+    target_k = max(1, int(k or 1))
+    # Pull a small batch per concept, then dedupe + trim.
+    per_focus_k = max(4, min(target_k, int(math.ceil(target_k / len(cleaned))) + 2))
+    merged: list[Any] = []
+    for concept in cleaned:
+        try:
+            merged.extend(vectorstore.similarity_search(concept, k=per_focus_k, filter=search_filter) or [])
+        except Exception:
+            logger.exception("Quiz focus seed search failed for concept=%s", concept)
+    merged = _dedupe_search_docs(merged, limit=target_k)
+    if len(merged) >= target_k:
+        return merged
+
+    try:
+        fallback = vectorstore.similarity_search(fallback_query, k=target_k, filter=search_filter) or []
+    except Exception:
+        fallback = []
+    return _dedupe_search_docs([*merged, *fallback], limit=target_k)
+
+
 def _build_context(
     user_id: str,
     doc_id: Optional[str],
@@ -178,15 +238,20 @@ def _build_context(
     Returns (context_text, keypoint_ids).
     """
     query = "key concepts and definitions"
+    cleaned_focus: list[str] = []
     if focus_concepts:
-        cleaned = [str(item).strip() for item in focus_concepts if str(item).strip()]
-        if cleaned:
-            query = ", ".join(cleaned)
+        cleaned_focus = [str(item).strip() for item in focus_concepts if str(item).strip()]
+        if cleaned_focus:
+            query = ", ".join(cleaned_focus)
     if doc_id:
         vectorstore = get_vectorstore(user_id)
         k = _context_seed_search_k(target_count, kb_scope=False, focus_concepts=focus_concepts)
-        docs = vectorstore.similarity_search(
-            query, k=k, filter={"doc_id": doc_id}
+        docs = _similarity_search_focus_seed_docs(
+            vectorstore=vectorstore,
+            focus_concepts=cleaned_focus,
+            fallback_query=query,
+            k=k,
+            search_filter={"doc_id": doc_id},
         )
         if not docs:
             raise ValueError("No relevant context found for quiz generation")
@@ -218,8 +283,12 @@ def _build_context(
     if kb_id:
         vectorstore = get_vectorstore(user_id)
         k = _context_seed_search_k(target_count, kb_scope=True, focus_concepts=focus_concepts)
-        docs = vectorstore.similarity_search(
-            query, k=k, filter={"kb_id": kb_id}
+        docs = _similarity_search_focus_seed_docs(
+            vectorstore=vectorstore,
+            focus_concepts=cleaned_focus,
+            fallback_query=query,
+            k=k,
+            search_filter={"kb_id": kb_id},
         )
         if not docs:
             raise ValueError("No relevant context found for quiz generation")
@@ -534,7 +603,9 @@ def _build_extra_instructions(
         cleaned = [str(item).strip() for item in focus_concepts if str(item).strip()]
         if cleaned:
             parts.append(
-                "Focus on the following concepts when generating questions:\n"
+                "Focus on the following concepts when generating questions.\n"
+                "Every question must primarily test at least one listed concept.\n"
+                "In the `concepts` field, include at least one concept name copied from this list verbatim whenever possible:\n"
                 f"{', '.join(cleaned)}\n\n"
             )
     avoid_part = _build_avoid_questions_instructions(avoid_question_texts)
@@ -557,6 +628,41 @@ def _normalize_text_for_compare(text: str) -> str:
     normalized = re.sub(r"\s+", " ", str(text or "").strip().lower())
     normalized = re.sub(r"[\W_]+", "", normalized, flags=re.UNICODE)
     return normalized
+
+
+def _question_matches_focus_concepts(question: dict[str, Any], focus_concepts: Optional[List[str]]) -> bool:
+    cleaned_focus = [str(item).strip() for item in (focus_concepts or []) if str(item).strip()]
+    if not cleaned_focus:
+        return True
+    focus_keys = [_normalize_text_for_compare(item) for item in cleaned_focus]
+    focus_keys = [key for key in focus_keys if key]
+    if not focus_keys:
+        return True
+
+    concept_keys = [
+        _normalize_text_for_compare(item)
+        for item in (question.get("concepts") or [])
+        if str(item).strip()
+    ]
+    concept_keys = [key for key in concept_keys if key]
+    for c_key in concept_keys:
+        for f_key in focus_keys:
+            if c_key == f_key or c_key in f_key or f_key in c_key:
+                return True
+
+    combined_text = " ".join(
+        [
+            str(question.get("question") or ""),
+            str(question.get("explanation") or ""),
+        ]
+    )
+    combined_key = _normalize_text_for_compare(combined_text)
+    if not combined_key:
+        return False
+    for f_key in focus_keys:
+        if f_key and f_key in combined_key:
+            return True
+    return False
 
 
 def _normalize_concepts_list(raw_concepts: Any) -> List[str]:
@@ -701,6 +807,7 @@ def _apply_quality_guardrails(
         "dropped_duplicate_exact": 0,
         "dropped_duplicate_near": 0,
         "dropped_concept_overload": 0,
+        "dropped_focus_mismatch": 0,
         "invalid_reasons": {},
     }
 
@@ -746,6 +853,9 @@ def _apply_quality_guardrails(
             continue
 
         concepts = normalized.get("concepts") or []
+        if focus_concepts and not _question_matches_focus_concepts(normalized, focus_concepts):
+            report["dropped_focus_mismatch"] += 1
+            continue
         if _would_exceed_concept_repeat_limit(concepts, concept_counts, concept_limit):
             report["dropped_concept_overload"] += 1
             continue
@@ -774,6 +884,7 @@ def _merge_quality_reports(base: dict, extra: dict) -> dict:
         "dropped_duplicate_exact": int(base.get("dropped_duplicate_exact", 0)) + int(extra.get("dropped_duplicate_exact", 0)),
         "dropped_duplicate_near": int(base.get("dropped_duplicate_near", 0)) + int(extra.get("dropped_duplicate_near", 0)),
         "dropped_concept_overload": int(base.get("dropped_concept_overload", 0)) + int(extra.get("dropped_concept_overload", 0)),
+        "dropped_focus_mismatch": int(base.get("dropped_focus_mismatch", 0)) + int(extra.get("dropped_focus_mismatch", 0)),
         "invalid_reasons": {},
     }
     invalid_reasons = dict(base.get("invalid_reasons") or {})
@@ -789,7 +900,7 @@ def _merge_quality_reports(base: dict, extra: dict) -> dict:
 
 def _log_quality_report(report: dict, *, requested_count: int, stage: str, resampled: bool = False) -> None:
     logger.info(
-        "Quiz quality guardrail stage=%s requested=%s raw=%s kept=%s drop_invalid=%s drop_dup_exact=%s drop_dup_near=%s drop_concept=%s resampled=%s invalid_reasons=%s",
+        "Quiz quality guardrail stage=%s requested=%s raw=%s kept=%s drop_invalid=%s drop_dup_exact=%s drop_dup_near=%s drop_concept=%s drop_focus=%s resampled=%s invalid_reasons=%s",
         stage,
         requested_count,
         report.get("raw_count", 0),
@@ -798,6 +909,7 @@ def _log_quality_report(report: dict, *, requested_count: int, stage: str, resam
         report.get("dropped_duplicate_exact", 0),
         report.get("dropped_duplicate_near", 0),
         report.get("dropped_concept_overload", 0),
+        report.get("dropped_focus_mismatch", 0),
         resampled,
         report.get("invalid_reasons") or {},
     )
