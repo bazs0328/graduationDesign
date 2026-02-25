@@ -77,8 +77,8 @@
             </button>
           </div>
 
-          <div v-if="busy.init" class="space-y-4">
-            <SkeletonBlock type="card" :lines="6" />
+          <div v-if="busy.init || busy.recommendations" class="space-y-4">
+            <SkeletonBlock type="card" :lines="8" />
           </div>
           <template v-else>
             <div v-if="nextRecommendation" class="rounded-xl border border-primary/25 bg-primary/5 p-4 space-y-3">
