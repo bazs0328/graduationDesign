@@ -110,10 +110,13 @@
 
         <!-- Keypoints Card -->
         <section class="bg-card border border-border rounded-xl p-8 shadow-sm space-y-6">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3 flex-wrap">
               <Layers class="w-6 h-6 text-primary" />
               <h2 class="text-2xl font-bold">核心知识点</h2>
+              <span class="text-[10px] font-bold px-2 py-1 rounded-full border border-primary/20 bg-primary/10 text-primary uppercase tracking-tighter">
+                单文档视图
+              </span>
             </div>
             <span v-if="keypointsCached" class="text-[10px] font-bold bg-green-500/10 text-green-500 px-2 py-1 rounded-full uppercase tracking-tighter">
               已缓存
@@ -125,6 +128,115 @@
           </div>
           <p v-else-if="keypointsError" class="text-sm text-destructive">{{ keypointsError }}</p>
           <div v-else-if="keypoints.length" class="grid grid-cols-1 gap-4">
+            <div
+              v-if="hasSelectedDocKb"
+              class="rounded-lg border border-border bg-background px-4 py-3 space-y-3"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="space-y-1">
+                  <p class="text-xs font-bold uppercase tracking-widest text-primary">知识库聚合视图</p>
+                  <p class="text-xs text-muted-foreground">
+                    跨文档去重后的知识点视图，便于统整复习与对照不同文档表述。
+                  </p>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button
+                    class="text-xs font-semibold px-3 py-1.5 rounded-md border border-input hover:bg-accent transition-colors"
+                    :disabled="kbGroupedBusy"
+                    @click="toggleKbGroupedPanel"
+                  >
+                    {{ kbGroupedPanelOpen ? '收起聚合知识点' : '查看知识库聚合知识点' }}
+                  </button>
+                  <button
+                    v-if="kbGroupedPanelOpen"
+                    class="text-xs font-semibold px-3 py-1.5 rounded-md border border-input hover:bg-accent transition-colors disabled:opacity-50"
+                    :disabled="kbGroupedBusy"
+                    @click="refreshKbGroupedKeypoints"
+                  >
+                    {{ kbGroupedBusy ? '加载中…' : '刷新' }}
+                  </button>
+                </div>
+              </div>
+
+              <div v-if="kbGroupedPanelOpen" class="space-y-3">
+                <div v-if="kbGroupedBusy" class="py-6">
+                  <LoadingSpinner size="sm" message="正在加载 KB 聚合知识点…" vertical />
+                </div>
+                <p v-else-if="kbGroupedError" class="text-sm text-destructive">{{ kbGroupedError }}</p>
+                <div v-else-if="kbGroupedKeypoints.length" class="space-y-2">
+                  <div class="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+                    <span class="px-2 py-1 rounded-full border border-primary/15 bg-primary/5 text-primary font-semibold">
+                      知识库聚合
+                    </span>
+                    <span v-if="kbGroupedGroupCount !== null">聚合后 {{ kbGroupedGroupCount }} 项</span>
+                    <span v-if="kbGroupedRawCount !== null">原始 {{ kbGroupedRawCount }} 项</span>
+                  </div>
+                  <div class="max-h-[360px] overflow-y-auto pr-1 space-y-2">
+                    <div
+                      v-for="(point, idx) in kbGroupedKeypoints"
+                      :key="point.id || idx"
+                      class="rounded-lg border border-border p-3 bg-card space-y-2"
+                    >
+                      <div class="flex items-start gap-3">
+                        <span class="w-6 h-6 shrink-0 rounded-full bg-primary/10 text-primary text-[11px] font-bold flex items-center justify-center">
+                          {{ idx + 1 }}
+                        </span>
+                        <div class="flex-1 min-w-0 space-y-1.5">
+                          <p class="text-sm font-medium leading-snug">{{ point.text }}</p>
+                          <p v-if="point.explanation" class="text-xs text-muted-foreground leading-relaxed">
+                            {{ point.explanation }}
+                          </p>
+                          <div class="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                            <span class="px-2 py-0.5 rounded-full border border-primary/20 bg-primary/10 text-primary font-semibold">KB聚合</span>
+                            <span>来自 {{ ((point.source_doc_ids && point.source_doc_ids.length) || point.member_count || 1) }} 个文档</span>
+                            <span v-if="Number(point.member_count || 1) > 1">合并 {{ point.member_count }} 个条目</span>
+                          </div>
+                          <div
+                            v-if="point.source_doc_names && point.source_doc_names.length"
+                            class="text-[10px] text-muted-foreground"
+                            :title="point.source_doc_names.join('、')"
+                          >
+                            文档：{{ point.source_doc_names.slice(0, 3).join('、') }}<span v-if="point.source_doc_names.length > 3"> 等 {{ point.source_doc_names.length }} 个</span>
+                          </div>
+                          <details v-if="point.source_refs && point.source_refs.length" class="text-xs">
+                            <summary class="cursor-pointer text-primary hover:underline select-none">
+                              查看来源定位（{{ point.source_refs.length }}）
+                            </summary>
+                            <div class="mt-2 space-y-1.5">
+                              <div
+                                v-for="(ref, refIdx) in point.source_refs"
+                                :key="`${ref.keypoint_id || point.id}-${refIdx}`"
+                                class="rounded border border-border/70 bg-background px-2 py-1.5 text-[11px] text-muted-foreground"
+                              >
+                                <span class="font-medium text-foreground">{{ ref.doc_name || ref.doc_id }}</span>
+                                <span v-if="ref.source"> · {{ ref.source }}</span>
+                                <span v-if="ref.page !== undefined && ref.page !== null"> · p.{{ ref.page }}</span>
+                                <span v-if="ref.chunk !== undefined && ref.chunk !== null"> · c.{{ ref.chunk }}</span>
+                              </div>
+                            </div>
+                          </details>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="rounded-lg border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
+                  当前知识库暂无可展示的聚合知识点。
+                </div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-primary/15 bg-primary/5 px-4 py-3 text-sm">
+              <p class="text-muted-foreground leading-relaxed">
+                当前展示的是该文档提取结果（单文档视图）；跨文档去重后的知识点请在进度页查看学习路径。
+              </p>
+              <button
+                v-if="hasSelectedDocKb"
+                class="mt-2 text-xs font-semibold text-primary hover:underline"
+                @click="goToKbProgressFromKeypointsCard"
+              >
+                查看 KB 学习路径
+              </button>
+            </div>
             <div
               v-for="(point, idx) in keypoints"
               :key="point?.id || idx"
@@ -276,6 +388,13 @@ const summaryCached = ref(false)
 const keypoints = ref([])
 const keypointsCached = ref(false)
 const keypointsError = ref('')
+const kbGroupedPanelOpen = ref(false)
+const kbGroupedBusy = ref(false)
+const kbGroupedError = ref('')
+const kbGroupedKeypoints = ref([])
+const kbGroupedRawCount = ref(null)
+const kbGroupedGroupCount = ref(null)
+const kbGroupedLoadedKbId = ref('')
 const forceRefresh = ref(false)
 const sourcePreview = ref({
   open: false,
@@ -297,9 +416,12 @@ const renderedSummary = computed(() => {
   return renderMarkdown(summary.value)
 })
 const hasDocs = computed(() => docs.value.length > 0)
+const selectedDoc = computed(() => docs.value.find(d => d.id === selectedDocId.value) || null)
+const hasSelectedDocKb = computed(() => Boolean(selectedDoc.value?.kb_id))
+const selectedDocKbId = computed(() => selectedDoc.value?.kb_id || '')
 
 const selectedKbName = computed(() => {
-  const doc = docs.value.find(d => d.id === selectedDocId.value)
+  const doc = selectedDoc.value
   if (!doc) return '未知'
   const kb = kbs.value.find(k => k.id === doc.kb_id)
   return kb ? kb.name : '未知'
@@ -482,6 +604,67 @@ function goToProgress(point) {
   })
 }
 
+function goToKbProgressFromKeypointsCard() {
+  if (!selectedDoc.value?.kb_id) return
+  router.push({
+    path: '/progress',
+    query: buildRouteContextQuery({ kbId: selectedDoc.value.kb_id }),
+  })
+}
+
+function resetKbGroupedPanelState() {
+  kbGroupedPanelOpen.value = false
+  kbGroupedBusy.value = false
+  kbGroupedError.value = ''
+  kbGroupedKeypoints.value = []
+  kbGroupedRawCount.value = null
+  kbGroupedGroupCount.value = null
+  kbGroupedLoadedKbId.value = ''
+}
+
+async function loadKbGroupedKeypoints(options = {}) {
+  const kbId = selectedDocKbId.value
+  if (!kbId) return
+  const { force = false } = options
+  if (!force && kbGroupedLoadedKbId.value === kbId && !kbGroupedError.value) return
+
+  kbGroupedBusy.value = true
+  kbGroupedError.value = ''
+  const requestKbId = kbId
+  try {
+    const params = new URLSearchParams()
+    params.set('user_id', resolvedUserId.value)
+    params.set('grouped', 'true')
+    const res = await apiGet(`/api/keypoints/kb/${encodeURIComponent(requestKbId)}?${params.toString()}`)
+    if (selectedDocKbId.value !== requestKbId) return
+    kbGroupedKeypoints.value = Array.isArray(res?.keypoints) ? res.keypoints : []
+    kbGroupedRawCount.value = Number.isFinite(Number(res?.raw_count)) ? Number(res.raw_count) : null
+    kbGroupedGroupCount.value = Number.isFinite(Number(res?.group_count)) ? Number(res.group_count) : null
+    kbGroupedLoadedKbId.value = requestKbId
+  } catch (err) {
+    if (selectedDocKbId.value !== requestKbId) return
+    kbGroupedError.value = err?.message || '加载 KB 聚合知识点失败，请稍后重试'
+  } finally {
+    if (selectedDocKbId.value === requestKbId) {
+      kbGroupedBusy.value = false
+    }
+  }
+}
+
+async function toggleKbGroupedPanel() {
+  if (!hasSelectedDocKb.value) return
+  kbGroupedPanelOpen.value = !kbGroupedPanelOpen.value
+  if (kbGroupedPanelOpen.value) {
+    await loadKbGroupedKeypoints()
+  }
+}
+
+async function refreshKbGroupedKeypoints() {
+  if (!hasSelectedDocKb.value) return
+  if (!kbGroupedPanelOpen.value) kbGroupedPanelOpen.value = true
+  await loadKbGroupedKeypoints({ force: true })
+}
+
 async function refreshDocs() {
   try {
     docs.value = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}`)
@@ -616,4 +799,9 @@ watch(
     await syncFromRoute()
   }
 )
+
+watch(selectedDocKbId, (nextKbId, prevKbId) => {
+  if (nextKbId === prevKbId) return
+  resetKbGroupedPanelState()
+})
 </script>

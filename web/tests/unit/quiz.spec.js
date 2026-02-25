@@ -176,4 +176,84 @@ describe('Quiz wrong-answer explain link', () => {
     const pushArg = pushSpy.mock.calls.at(-1)?.[0]
     expect(String(pushArg?.query?.qa_question || '')).toContain('请用讲解模式解析这道选择题')
   })
+
+  it('shows KB aggregation wording in mastery updates and wrong-question groups', async () => {
+    apiPost.mockImplementation((path) => {
+      if (path === '/api/quiz/generate') {
+        return Promise.resolve({
+          quiz_id: 'quiz-1',
+          questions: [
+            {
+              question: '矩阵的行列式为零意味着什么？',
+              options: ['可逆', '不可逆', '对称', '正定'],
+              answer_index: 1,
+              explanation: '行列式为零表示矩阵不可逆。',
+              concepts: ['矩阵可逆性'],
+            },
+          ],
+        })
+      }
+      if (path === '/api/quiz/submit') {
+        return Promise.resolve({
+          score: 0,
+          correct: 0,
+          total: 1,
+          results: [false],
+          explanations: ['因为行列式为零，所以矩阵不可逆。'],
+          feedback: null,
+          next_quiz_recommendation: null,
+          profile_delta: null,
+          wrong_questions_by_concept: [{ concept: '矩阵可逆性', question_indices: [1] }],
+          mastery_updates: [
+            {
+              keypoint_id: 'kp-1',
+              text: '矩阵可逆性',
+              old_level: 0.4,
+              new_level: 0.3,
+            },
+          ],
+        })
+      }
+      if (path === '/api/chat/sessions') {
+        return Promise.resolve({ id: 'session-1', title: null })
+      }
+      return Promise.resolve({})
+    })
+
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await router.push('/quiz')
+    await flushPromises()
+    await nextTick()
+    await nextTick()
+
+    const kbSelect = wrapper.findAll('select').at(0)
+    expect(kbSelect?.exists()).toBe(true)
+    await kbSelect.setValue('kb-1')
+    await flushPromises()
+    await nextTick()
+
+    const generateButton = wrapper.findAll('button').find((btn) => btn.text().includes('生成新测验'))
+    expect(generateButton).toBeTruthy()
+    await generateButton.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const firstWrongRadio = wrapper.find('input[type="radio"][name="q-0"][value="0"]')
+    await firstWrongRadio.setValue(true)
+    await nextTick()
+
+    const submitButton = wrapper.findAll('button').find((btn) => btn.text().includes('提交全部答案'))
+    expect(submitButton).toBeTruthy()
+    await submitButton.trigger('click')
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+
+    const html = wrapper.html()
+    expect(html).toContain('知识点掌握度变化')
+    expect(html).toContain('以下知识点反馈已按知识库口径去重合并统计')
+    expect(html).toContain('概念名称可能与单文档表述不同，但会映射到同一知识点')
+  })
 })

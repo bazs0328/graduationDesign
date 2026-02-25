@@ -9,7 +9,13 @@ from app.core.knowledge_bases import ensure_kb
 from app.core.users import ensure_user
 from app.db import get_db
 from app.models import Document, Keypoint, KeypointRecord
-from app.schemas import KeypointItemV2, KeypointsRequest, KeypointsResponse
+from app.schemas import (
+    KeypointItemV2,
+    KeypointSourceRef,
+    KeypointsRequest,
+    KeypointsResponse,
+)
+from app.services.keypoint_dedup import KeypointCluster, cluster_kb_keypoints
 from app.services.keypoints import extract_keypoints, save_keypoints_to_db
 from app.services.learning_path import (
     invalidate_dependency_cache,
@@ -62,6 +68,38 @@ def _to_keypoint_items(points: list[Keypoint]) -> list[KeypointItemV2]:
         )
         for point in points
     ]
+
+
+def _cluster_to_keypoint_item(cluster: KeypointCluster) -> KeypointItemV2:
+    rep = cluster.representative_keypoint
+    source_refs = [
+        KeypointSourceRef(
+            keypoint_id=member.id,
+            doc_id=member.doc_id,
+            doc_name=member.doc_name,
+            source=member.keypoint.source,
+            page=member.keypoint.page,
+            chunk=member.keypoint.chunk,
+        )
+        for member in cluster.sorted_members()
+    ]
+    return KeypointItemV2(
+        id=rep.id,
+        text=rep.text,
+        explanation=cluster.explanation,
+        source=rep.source,
+        page=rep.page,
+        chunk=rep.chunk,
+        mastery_level=cluster.mastery_level_max,
+        attempt_count=cluster.attempt_count_sum,
+        correct_count=cluster.correct_count_sum,
+        member_count=cluster.member_count,
+        member_keypoint_ids=cluster.member_keypoint_ids,
+        source_doc_ids=cluster.source_doc_ids,
+        source_doc_names=cluster.source_doc_names,
+        source_refs=source_refs,
+        grouped=True,
+    )
 
 
 @router.post("/keypoints", response_model=KeypointsResponse)
@@ -239,11 +277,27 @@ def get_keypoints(
 
 @router.get("/keypoints/kb/{kb_id}", response_model=KeypointsResponse)
 def get_keypoints_by_kb(
-    kb_id: str, user_id: Optional[str] = None, db: Session = Depends(get_db)
+    kb_id: str,
+    user_id: Optional[str] = None,
+    grouped: bool = False,
+    db: Session = Depends(get_db),
 ):
     """Get keypoints for a knowledge base with mastery stats."""
     resolved_user_id = ensure_user(db, user_id)
     kb = ensure_kb(db, resolved_user_id, kb_id)
+
+    if grouped:
+        clusters = cluster_kb_keypoints(db, resolved_user_id, kb.id)
+        items = [_cluster_to_keypoint_item(cluster) for cluster in clusters]
+        raw_count = sum(cluster.member_count for cluster in clusters)
+        return KeypointsResponse(
+            doc_id=kb.id,
+            keypoints=items,
+            cached=True,
+            grouped=True,
+            raw_count=raw_count,
+            group_count=len(clusters),
+        )
 
     keypoints = (
         db.query(Keypoint)
@@ -255,4 +309,5 @@ def get_keypoints_by_kb(
         doc_id=kb.id,
         keypoints=_to_keypoint_items(keypoints),
         cached=True,
+        grouped=False,
     )

@@ -1,5 +1,7 @@
 import asyncio
-from typing import Optional
+import logging
+import re
+from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
@@ -9,7 +11,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from app.core.llm import get_llm
 from app.core.vectorstore import get_vectorstore
 from app.models import Keypoint
+from app.services.keypoint_dedup import normalize_keypoint_text
 from app.utils.json_tools import safe_json_loads
+
+logger = logging.getLogger(__name__)
 
 KEYPOINT_SYSTEM = (
     "你是一位知识提取专家。从材料中提取核心和关键的知识点。"
@@ -59,6 +64,34 @@ FINAL_PROMPT = ChatPromptTemplate.from_messages(
 _KP_CHUNK_SIZE = 6000
 _KP_CHUNK_OVERLAP = 300
 _MAX_CHUNKS = 15
+_KP_MIN_TEXT_LEN = 4
+_KP_MAX_TEXT_LEN = 40
+_KP_MAX_EXPLANATION_LEN = 80
+_KP_WARN_LOW_COUNT = 3
+
+_KP_GENERIC_TEXT_PATTERNS = [
+    "重要概念",
+    "核心概念",
+    "关键概念",
+    "关键知识点",
+    "核心知识点",
+    "相关知识点",
+    "主要内容",
+    "核心内容",
+    "重点内容",
+    "本节内容",
+    "知识点总结",
+    "学习目标",
+]
+_KP_GENERIC_TEXT_PATTERNS_NORMALIZED = [normalize_keypoint_text(p) for p in _KP_GENERIC_TEXT_PATTERNS]
+_KP_HEADING_LIKE_PATTERNS = [
+    re.compile(r"^第[一二三四五六七八九十0-9]+[章节部分]"),
+    re.compile(r"^\d+(?:\.\d+){0,3}$"),
+    re.compile(r"^(引言|绪论|总结|小结|习题|参考文献)$"),
+]
+_KP_COMPARE_REMOVE_RE = re.compile(
+    r"[\s\-_—·•、，,。；;：:()（）\[\]{}<>《》\"'“”‘’]+"
+)
 
 
 def _sample_chunks(chunks: list[str], max_count: int) -> list[str]:
@@ -85,6 +118,119 @@ def _parse_point(p) -> dict:
             "chunk": None,
         }
     return None
+
+
+def _clean_keypoint_text(text: str) -> str:
+    s = re.sub(r"\s+", " ", str(text or "")).strip()
+    s = re.sub(r"^[\-\u2022\u00b7•·,，;；:：]+", "", s).strip()
+    s = re.sub(r"[，,；;。.!！?？：:]+$", "", s).strip()
+    return s
+
+
+def _clean_keypoint_explanation(explanation: str | None, text: str | None = None) -> str | None:
+    if explanation is None:
+        return None
+    s = re.sub(r"\s+", " ", str(explanation or "")).strip()
+    if not s:
+        return None
+    if len(s) > _KP_MAX_EXPLANATION_LEN:
+        s = s[:_KP_MAX_EXPLANATION_LEN].rstrip(" ，,；;。.!！?？：:")
+    if not s:
+        return None
+    if text:
+        norm_text = normalize_keypoint_text(text)
+        norm_exp = normalize_keypoint_text(s)
+        if norm_text and norm_exp:
+            if norm_text == norm_exp:
+                return None
+            if (norm_text in norm_exp or norm_exp in norm_text) and abs(len(norm_text) - len(norm_exp)) <= 8:
+                return None
+    return s
+
+
+def _is_heading_like_keypoint_text(text: str, normalized_text: str) -> bool:
+    candidate = (text or "").strip() or normalized_text
+    if not candidate:
+        return True
+    return any(pattern.match(candidate) for pattern in _KP_HEADING_LIKE_PATTERNS)
+
+
+def _is_generic_keypoint_text(text: str, normalized_text: str) -> bool:
+    if not normalized_text:
+        return False
+    if normalized_text in _KP_GENERIC_TEXT_PATTERNS_NORMALIZED:
+        return True
+    if len(normalized_text) <= 12:
+        return any(p and p in normalized_text for p in _KP_GENERIC_TEXT_PATTERNS_NORMALIZED)
+    return False
+
+
+def _comparison_key_from_normalized(normalized_text: str) -> str:
+    return _KP_COMPARE_REMOVE_RE.sub("", normalized_text or "")
+
+
+def _postprocess_extracted_keypoints(points: list[Any], *, mode: str) -> tuple[list[dict], dict]:
+    if mode not in {"chunk", "final", "final_relaxed_fallback"}:
+        raise ValueError(f"Unsupported keypoint postprocess mode: {mode}")
+
+    diagnostics = {
+        "input_count": len(points or []),
+        "kept_count": 0,
+        "dropped_invalid": 0,
+        "dropped_empty": 0,
+        "dropped_duplicate": 0,
+        "dropped_length": 0,
+        "dropped_generic": 0,
+        "dropped_heading_like": 0,
+        "mode": mode,
+    }
+
+    apply_strict_filters = mode == "final"
+    seen_keys: set[str] = set()
+    out: list[dict] = []
+
+    for raw in points or []:
+        parsed = _parse_point(raw)
+        if not parsed:
+            diagnostics["dropped_invalid"] += 1
+            continue
+
+        text = _clean_keypoint_text(parsed.get("text") or "")
+        if not text:
+            diagnostics["dropped_empty"] += 1
+            continue
+
+        normalized_text = normalize_keypoint_text(text)
+        compare_key = _comparison_key_from_normalized(normalized_text)
+        if not normalized_text or not compare_key:
+            diagnostics["dropped_empty"] += 1
+            continue
+
+        if compare_key in seen_keys:
+            diagnostics["dropped_duplicate"] += 1
+            continue
+
+        if apply_strict_filters and (
+            len(normalized_text) < _KP_MIN_TEXT_LEN or len(normalized_text) > _KP_MAX_TEXT_LEN
+        ):
+            diagnostics["dropped_length"] += 1
+            continue
+
+        if apply_strict_filters and _is_heading_like_keypoint_text(text, normalized_text):
+            diagnostics["dropped_heading_like"] += 1
+            continue
+
+        if apply_strict_filters and _is_generic_keypoint_text(text, normalized_text):
+            diagnostics["dropped_generic"] += 1
+            continue
+
+        parsed["text"] = text
+        parsed["explanation"] = _clean_keypoint_explanation(parsed.get("explanation"), text=text)
+        seen_keys.add(compare_key)
+        out.append(parsed)
+
+    diagnostics["kept_count"] = len(out)
+    return out, diagnostics
 
 
 def _attach_source(user_id: str, doc_id: str, point: dict) -> dict:
@@ -257,19 +403,55 @@ async def extract_keypoints(
     chunks = splitter.split_text(text)
     chunks = _sample_chunks(chunks, _MAX_CHUNKS)
 
-    async def _process_chunk(chunk: str) -> list[dict]:
+    async def _process_chunk(chunk_index: int, chunk: str) -> list[dict]:
         safe_chunk = chunk.replace("{", "{{").replace("}", "}}")
         msg = CHUNK_PROMPT.format_messages(chunk=safe_chunk)
         result = await llm.ainvoke(msg)
         try:
-            points = safe_json_loads(result.content)
-        except Exception:
+            raw_points = safe_json_loads(result.content)
+        except Exception as exc:
+            logger.warning(
+                "keypoints.extract.chunk_parse_error %s",
+                {
+                    "doc_id": doc_id,
+                    "chunk_count": len(chunks),
+                    "chunk_index": chunk_index,
+                    "error": str(exc),
+                },
+            )
+            raw_points = []
+        if not isinstance(raw_points, list):
+            logger.warning(
+                "keypoints.extract.chunk_non_list %s",
+                {
+                    "doc_id": doc_id,
+                    "chunk_count": len(chunks),
+                    "chunk_index": chunk_index,
+                    "result_type": type(raw_points).__name__,
+                },
+            )
             points = []
-        if not isinstance(points, list):
-            return []
-        return [p for p in (_parse_point(p) for p in points) if p and p.get("text")]
+        else:
+            points = raw_points
+        processed, diag = _postprocess_extracted_keypoints(points, mode="chunk")
+        logger.info(
+            "keypoints.extract.chunk_summary %s",
+            {
+                "doc_id": doc_id,
+                "chunk_count": len(chunks),
+                "chunk_index": chunk_index,
+                "raw_chunk_count": len(points),
+                "chunk_kept_count": diag["kept_count"],
+                "chunk_dropped_invalid": diag["dropped_invalid"],
+                "chunk_dropped_empty": diag["dropped_empty"],
+                "chunk_dropped_duplicate": diag["dropped_duplicate"],
+            },
+        )
+        return processed
 
-    chunk_results = await asyncio.gather(*[_process_chunk(c) for c in chunks])
+    chunk_results = await asyncio.gather(
+        *[_process_chunk(idx, c) for idx, c in enumerate(chunks, start=1)]
+    )
     all_points: list[dict] = [p for chunk_pts in chunk_results for p in chunk_pts]
 
     points_str = "\n".join(
@@ -279,17 +461,76 @@ async def extract_keypoints(
     final_msg = FINAL_PROMPT.format_messages(points=points_str)
     final_result = await llm.ainvoke(final_msg)
     try:
-        final_points = safe_json_loads(final_result.content)
-    except Exception:
-        final_points = []
-    if not isinstance(final_points, list):
-        return []
+        raw_final_points = safe_json_loads(final_result.content)
+    except Exception as exc:
+        logger.warning(
+            "keypoints.extract.final_parse_error %s",
+            {
+                "doc_id": doc_id,
+                "chunk_count": len(chunks),
+                "all_chunk_points_count": len(all_points),
+                "error": str(exc),
+            },
+        )
+        raw_final_points = []
+    if not isinstance(raw_final_points, list):
+        logger.warning(
+            "keypoints.extract.final_non_list %s",
+            {
+                "doc_id": doc_id,
+                "chunk_count": len(chunks),
+                "all_chunk_points_count": len(all_points),
+                "result_type": type(raw_final_points).__name__,
+            },
+        )
+        raw_final_points = []
+
+    strict_points, strict_diag = _postprocess_extracted_keypoints(raw_final_points, mode="final")
+    final_points = strict_points
+    final_diag = strict_diag
+    relaxed_fallback_used = False
+
+    if not final_points and raw_final_points:
+        relaxed_points, relaxed_diag = _postprocess_extracted_keypoints(
+            raw_final_points, mode="final_relaxed_fallback"
+        )
+        if relaxed_points:
+            final_points = relaxed_points
+            final_diag = relaxed_diag
+            relaxed_fallback_used = True
 
     out: list[dict] = []
-    for p in final_points:
-        parsed = _parse_point(p)
-        if parsed and parsed.get("text"):
-            if user_id and doc_id:
-                parsed = _attach_source(user_id, doc_id, parsed)
-            out.append(parsed)
+    source_attach_hits = 0
+    source_attach_misses = 0
+    for parsed in final_points:
+        if user_id and doc_id:
+            parsed = _attach_source(user_id, doc_id, parsed)
+            if any(parsed.get(field) is not None for field in ("source", "page", "chunk")):
+                source_attach_hits += 1
+            else:
+                source_attach_misses += 1
+        out.append(parsed)
+
+    summary_payload = {
+        "doc_id": doc_id,
+        "chunk_count": len(chunks),
+        "all_chunk_points_count": len(all_points),
+        "raw_final_candidate_count": len(raw_final_points),
+        "final_count": len(out),
+        "postprocess_mode_used": final_diag["mode"],
+        "postprocess_relaxed_fallback": relaxed_fallback_used,
+        "dropped_invalid": final_diag["dropped_invalid"],
+        "dropped_empty": final_diag["dropped_empty"],
+        "dropped_duplicate": final_diag["dropped_duplicate"],
+        "dropped_length": final_diag["dropped_length"],
+        "dropped_generic": final_diag["dropped_generic"],
+        "dropped_heading_like": final_diag["dropped_heading_like"],
+        "source_attach_hits": source_attach_hits,
+        "source_attach_misses": source_attach_misses,
+    }
+    logger.info("keypoints.extract.final_summary %s", summary_payload)
+    if not out:
+        logger.warning("keypoints.extract.final_empty %s", summary_payload)
+    elif len(out) < _KP_WARN_LOW_COUNT:
+        logger.warning("keypoints.extract.final_low_count %s", summary_payload)
     return out

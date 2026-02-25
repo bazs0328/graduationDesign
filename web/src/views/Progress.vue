@@ -205,6 +205,9 @@
             <SkeletonBlock type="card" :lines="8" />
           </div>
           <div v-else-if="learningPath.length" class="space-y-6">
+            <div class="rounded-lg border border-primary/15 bg-primary/5 px-4 py-3 text-xs text-muted-foreground">
+              学习路径中的知识点已按知识库跨文档去重合并，掌握度为聚合口径。
+            </div>
             <!-- Path summary -->
             <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
               <div v-for="stat in pathSummaryCards" :key="stat.label" class="rounded-lg border border-border bg-background p-3 space-y-1">
@@ -278,28 +281,31 @@
             </div>
 
             <!-- Legend -->
-            <div class="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-              <div class="flex items-center gap-2">
-                <span class="font-medium text-foreground">文档颜色：</span>
-                <span v-for="(color, docName) in docColorLegend" :key="docName" class="inline-flex items-center gap-1">
-                  <span class="w-3 h-3 rounded-full inline-block" :style="{ background: color }"></span>
-                  <span class="truncate max-w-[100px]">{{ docName }}</span>
-                </span>
+            <div class="space-y-2 text-xs text-muted-foreground">
+              <div class="flex flex-wrap items-center gap-4">
+                <div class="flex items-center gap-2">
+                  <span class="font-medium text-foreground">文档颜色：</span>
+                  <span v-for="(color, docName) in docColorLegend" :key="docName" class="inline-flex items-center gap-1">
+                    <span class="w-3 h-3 rounded-full inline-block" :style="{ background: color }"></span>
+                    <span class="truncate max-w-[100px]">{{ docName }}</span>
+                  </span>
+                </div>
+                <span class="text-border">|</span>
+                <div class="flex items-center gap-2">
+                  <span class="font-medium text-foreground">阶段：</span>
+                  <span v-for="stage in displayStages" :key="stage.stage_id" class="inline-flex items-center gap-1">
+                    <span class="w-2.5 h-2.5 rounded-full inline-block" :style="{ background: stageColor(stage.stage_id) }"></span>
+                    <span>{{ stage.name }}</span>
+                  </span>
+                </div>
+                <span class="text-border">|</span>
+                <div class="flex items-center gap-3">
+                  <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-foreground inline-block"></span> 待学习</span>
+                  <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-foreground/40 inline-block"></span> 已掌握</span>
+                  <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rotate-45 bg-primary/40 inline-block"></span> 里程碑</span>
+                </div>
               </div>
-              <span class="text-border">|</span>
-              <div class="flex items-center gap-2">
-                <span class="font-medium text-foreground">阶段：</span>
-                <span v-for="stage in displayStages" :key="stage.stage_id" class="inline-flex items-center gap-1">
-                  <span class="w-2.5 h-2.5 rounded-full inline-block" :style="{ background: stageColor(stage.stage_id) }"></span>
-                  <span>{{ stage.name }}</span>
-                </span>
-              </div>
-              <span class="text-border">|</span>
-              <div class="flex items-center gap-3">
-                <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-foreground inline-block"></span> 待学习</span>
-                <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-foreground/40 inline-block"></span> 已掌握</span>
-                <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rotate-45 bg-primary/40 inline-block"></span> 里程碑</span>
-              </div>
+              <p>标注“KB聚合”的步骤表示该概念合并了多个文档来源。</p>
             </div>
 
             <!-- Step list -->
@@ -319,6 +325,17 @@
                   <div class="flex-1 min-w-0 space-y-1">
                     <div class="flex items-center gap-2 flex-wrap">
                       <div class="progress-item-markdown markdown-content font-medium leading-tight" v-html="renderMarkdown(item.text)"></div>
+                      <template v-if="item.member_count > 1">
+                        <span class="text-[10px] px-2 py-0.5 rounded-full border border-primary/20 bg-primary/10 text-primary font-semibold">
+                          KB聚合
+                        </span>
+                        <span
+                          class="text-[10px] text-muted-foreground"
+                          :title="item.source_doc_names?.length ? item.source_doc_names.join('、') : undefined"
+                        >
+                          来自 {{ (item.source_doc_ids?.length || item.member_count) }} 个文档
+                        </span>
+                      </template>
                       <span v-if="item.milestone" class="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-semibold">里程碑</span>
                     </div>
                     <div class="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
@@ -667,6 +684,27 @@ function normalizeRecommendationItems(items) {
   }))
 }
 
+function normalizeLearningPathItem(item) {
+  if (!item || typeof item !== 'object') return item
+  const sourceDocIds = Array.isArray(item.source_doc_ids)
+    ? item.source_doc_ids.map((v) => String(v || '').trim()).filter(Boolean)
+    : []
+  const sourceDocNames = Array.isArray(item.source_doc_names)
+    ? item.source_doc_names.map((v) => String(v || '').trim()).filter(Boolean)
+    : []
+  return {
+    ...item,
+    member_count: Math.max(1, Number(item.member_count) || 1),
+    source_doc_ids: sourceDocIds,
+    source_doc_names: sourceDocNames,
+  }
+}
+
+function normalizeLearningPathItems(items) {
+  if (!Array.isArray(items)) return []
+  return items.map((item) => normalizeLearningPathItem(item)).filter(Boolean)
+}
+
 async function fetchProgress() {
   try {
     progress.value = await apiGet(`/api/progress?user_id=${encodeURIComponent(resolvedUserId.value)}`)
@@ -797,9 +835,11 @@ function hydrateRecommendationsFromCache(kbId, options = {}) {
 }
 
 function applyLearningPathPayload(payload = {}) {
-  learningPath.value = Array.isArray(payload?.learning_path)
-    ? payload.learning_path
-    : (payload?.items || [])
+  learningPath.value = normalizeLearningPathItems(
+    Array.isArray(payload?.learning_path)
+      ? payload.learning_path
+      : (payload?.items || [])
+  )
   learningPathEdges.value = Array.isArray(payload?.learning_path_edges)
     ? payload.learning_path_edges
     : (payload?.edges || [])

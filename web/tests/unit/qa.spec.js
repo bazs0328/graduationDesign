@@ -215,6 +215,7 @@ describe('Q&A', () => {
     expect(html).toContain(qaResponse.answer)
     expect(html).toContain('doc p.1 c.0')
     expect(html).toContain('本次回答来源')
+    expect(html).toContain('来源可能来自该知识库下多个文档片段')
     expect(html).toContain('回答生成完成')
   })
 
@@ -251,6 +252,28 @@ describe('Q&A', () => {
       })
     )
     expect(wrapper.html()).toContain('已回退非流式')
+  })
+
+  it('shows KB multi-document hint in learning-path context banner when focus is provided', async () => {
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await router.push({
+      path: '/qa',
+      query: {
+        kb_id: 'kb-1',
+        focus: '矩阵定义',
+      },
+    })
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+
+    const html = wrapper.html()
+    expect(html).toContain('学习路径上下文')
+    expect(html).toContain('当前学习目标')
+    expect(html).toContain('矩阵定义')
+    expect(html).toContain('该学习目标可能关联同一知识库中的多个文档来源')
   })
 
   it('auto-sends explain mode from route query and clears transient qa query params', async () => {

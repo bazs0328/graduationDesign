@@ -36,6 +36,7 @@ from app.services.keypoints import (
     match_keypoints_by_concepts,
     match_keypoints_by_kb,
 )
+from app.services.keypoint_dedup import collapse_kb_keypoint_ids_to_representatives
 from app.services.learning_path import invalidate_learning_path_result_cache
 from app.services.mastery import record_quiz_result
 from app.services.quiz import filter_quiz_questions_quality, generate_quiz
@@ -263,12 +264,32 @@ def parse_reference_pdf(file: UploadFile = File(...)):
 
 
 def _resolve_keypoints_for_question(
-    q: dict, user_id: str, doc_id: str | None, kb_id: str | None,
+    db: Session,
+    q: dict,
+    user_id: str,
+    doc_id: str | None,
+    kb_id: str | None,
+    kb_member_to_rep: dict[str, str] | None = None,
 ) -> list[str]:
     """Get keypoint_ids for a question: prefer pre-bound ids, fallback to concept search."""
     kp_ids = q.get("keypoint_ids")
     if kp_ids and isinstance(kp_ids, list):
-        return [k for k in kp_ids if isinstance(k, str)]
+        cleaned = [k for k in kp_ids if isinstance(k, str)]
+        if kb_id and not doc_id:
+            if kb_member_to_rep is not None:
+                out: list[str] = []
+                seen: set[str] = set()
+                for kp_id in cleaned:
+                    rep_id = kb_member_to_rep.get(kp_id, kp_id)
+                    if rep_id in seen:
+                        continue
+                    seen.add(rep_id)
+                    out.append(rep_id)
+                return out
+            return collapse_kb_keypoint_ids_to_representatives(
+                db, user_id, kb_id, cleaned
+            )
+        return cleaned
 
     concepts = q.get("concepts") or []
     if not concepts:
@@ -276,7 +297,18 @@ def _resolve_keypoints_for_question(
     if doc_id:
         return match_keypoints_by_concepts(user_id, doc_id, concepts)
     if kb_id:
-        return match_keypoints_by_kb(user_id, kb_id, concepts)
+        matched = match_keypoints_by_kb(user_id, kb_id, concepts)
+        if kb_member_to_rep is not None:
+            out: list[str] = []
+            seen: set[str] = set()
+            for kp_id in matched:
+                rep_id = kb_member_to_rep.get(kp_id, kp_id)
+                if rep_id in seen:
+                    continue
+                seen.add(rep_id)
+                out.append(rep_id)
+            return out
+        return collapse_kb_keypoint_ids_to_representatives(db, user_id, kb_id, matched)
     return []
 
 
@@ -305,6 +337,7 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
     explanations = []
     correct = 0
     mastery_deltas: dict[str, tuple[float, float]] = {}
+    kb_member_to_rep: dict[str, str] | None = None
 
     for idx, q in enumerate(questions):
         expected = q.get("answer_index")
@@ -315,8 +348,24 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
         if is_correct:
             correct += 1
 
+        if quiz.kb_id and not quiz.doc_id and kb_member_to_rep is None:
+            # Lazy-load once per submission to avoid repeated KB clustering per question.
+            from app.services.keypoint_dedup import (
+                build_keypoint_cluster_index,
+                cluster_kb_keypoints,
+            )
+
+            kb_member_to_rep = build_keypoint_cluster_index(
+                cluster_kb_keypoints(db, resolved_user_id, quiz.kb_id)
+            )
+
         kp_ids = _resolve_keypoints_for_question(
-            q, resolved_user_id, quiz.doc_id, quiz.kb_id
+            db,
+            q,
+            resolved_user_id,
+            quiz.doc_id,
+            quiz.kb_id,
+            kb_member_to_rep=kb_member_to_rep,
         )
         for kp_id in kp_ids:
             delta = record_quiz_result(db, kp_id, is_correct)

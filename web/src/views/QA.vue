@@ -12,6 +12,9 @@
       <p class="text-xs text-muted-foreground mt-1">
         你可以针对这个知识点提问，AI 会为你详细讲解。
       </p>
+      <p v-if="selectedKbId" class="text-xs text-muted-foreground mt-1">
+        该学习目标可能关联同一知识库中的多个文档来源。
+      </p>
     </section>
     <div class="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-8 overflow-hidden min-h-0">
       <!-- Left: Chat Interface -->
@@ -166,6 +169,9 @@
               <!-- Sources -->
               <div v-if="msg.sources && msg.sources.length" class="mt-4 pt-3 border-t border-accent-foreground/10 space-y-2">
                 <p class="text-[10px] font-bold uppercase opacity-50">参考来源（{{ msg.sources.length }}）</p>
+                <p v-if="selectedKbId" class="text-[10px] opacity-60">
+                  来源可能来自该知识库下多个文档片段。
+                </p>
                 <div class="flex flex-wrap gap-2">
                   <button
                     v-for="(source, sIdx) in msg.sources"
@@ -357,6 +363,9 @@
               {{ qaFlowPanelBadgeText }}
             </span>
           </div>
+          <p v-if="selectedKbId" class="text-xs text-muted-foreground -mt-1">
+            本次回答来源可能来自该知识库下多个文档片段。
+          </p>
           <div class="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
             <span v-if="qaFlow.retrievedCount > 0" class="px-2 py-1 rounded border border-border bg-accent/20">
               检索片段 {{ qaFlow.retrievedCount }}
@@ -428,7 +437,7 @@
             <div class="grid grid-cols-2 gap-3">
               <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
                 <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">总文档</p>
-                <p class="text-lg font-bold">{{ docsInKb.length }}</p>
+                <p class="text-lg font-bold">{{ Array.isArray(docsInKb) ? docsInKb.length : 0 }}</p>
               </div>
               <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
                 <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">相关会话</p>

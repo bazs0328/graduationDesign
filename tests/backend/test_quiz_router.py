@@ -1,13 +1,14 @@
 """Tests for quiz router (generate + submit, mimic style/reference, parse-reference PDF)."""
 import io
 import json
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.session import Session as OrmSession
 
-from app.models import Keypoint, LearnerProfile, Quiz, QuizAttempt
+from app.models import Document, Keypoint, LearnerProfile, Quiz, QuizAttempt
 from app.services.text_extraction import ExtractionResult
 
 
@@ -425,6 +426,101 @@ def test_quiz_submit_duplicate_submission_returns_409_without_side_effects(
         profile_recent_accuracy
     )
     assert float(profile_after_second.theta or 0.0) == pytest.approx(profile_theta)
+
+
+def test_quiz_submit_kb_concept_matching_collapses_to_representative_keypoint(
+    client, db_session, seeded_session
+):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc1 = seeded_session["doc_id"]
+    doc2 = "quiz-kb-dedup-doc-2"
+    quiz_id = "quiz-kb-dedup-1"
+    rep_id = "quiz-kb-dedup-kp-1"
+    dup_id = "quiz-kb-dedup-kp-2"
+    base = datetime.utcnow()
+
+    db_session.add(
+        Document(
+            id=doc2,
+            user_id=user_id,
+            kb_id=kb_id,
+            filename="dedup-2.txt",
+            file_type="txt",
+            text_path=f"/tmp/{doc2}.txt",
+            num_chunks=1,
+            num_pages=1,
+            char_count=100,
+            status="ready",
+        )
+    )
+    db_session.add_all(
+        [
+            Keypoint(
+                id=rep_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc1,
+                text="1. KB去重概念Alpha",
+                mastery_level=0.0,
+                attempt_count=0,
+                correct_count=0,
+                created_at=base,
+            ),
+            Keypoint(
+                id=dup_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc2,
+                text="KB去重概念Alpha",
+                mastery_level=0.0,
+                attempt_count=0,
+                correct_count=0,
+                created_at=base + timedelta(seconds=1),
+            ),
+            Quiz(
+                id=quiz_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=None,
+                difficulty="easy",
+                question_type="mcq",
+                questions_json=json.dumps(
+                    [
+                        {
+                            "question": "q1",
+                            "options": ["A", "B", "C", "D"],
+                            "answer_index": 0,
+                            "explanation": "e1",
+                            "concepts": ["KB去重概念Alpha"],
+                        }
+                    ]
+                ),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    with (
+        patch("app.routers.quiz.match_keypoints_by_kb", return_value=[dup_id, rep_id, dup_id]),
+        patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("no vector")),
+    ):
+        resp = client.post(
+            "/api/quiz/submit",
+            json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["mastery_updates"]) == 1
+    assert data["mastery_updates"][0]["keypoint_id"] == rep_id
+
+    db_session.expire_all()
+    rep = db_session.query(Keypoint).filter(Keypoint.id == rep_id).first()
+    dup = db_session.query(Keypoint).filter(Keypoint.id == dup_id).first()
+    assert rep is not None and dup is not None
+    assert int(rep.attempt_count or 0) == 1
+    assert int(dup.attempt_count or 0) == 0
 
 
 def test_quiz_submit_maps_quiz_attempt_unique_constraint_to_409(

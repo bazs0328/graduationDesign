@@ -12,13 +12,14 @@ from langchain_core.prompts import ChatPromptTemplate
 from sqlalchemy.orm import Session
 
 from app.core.llm import get_llm
-from app.models import Document, Keypoint, KeypointDependency, LearnerProfile
+from app.models import Keypoint, KeypointDependency, LearnerProfile
 from app.schemas import (
     LearningPathEdge,
     LearningPathItem,
     LearningPathModule,
     LearningPathStage,
 )
+from app.services.keypoint_dedup import cluster_kb_keypoints
 from app.services.mastery import (
     MASTERY_MASTERED,
     MASTERY_PREREQ_THRESHOLD,
@@ -249,6 +250,30 @@ def _normalize_stage(stage: Any) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
+def _load_clustered_kb_keypoints(
+    db: Session,
+    user_id: str,
+    kb_id: str,
+) -> tuple[list[Any], list[Keypoint], dict[str, Any], dict[str, str]]:
+    """Load KB keypoints and return deduplicated clusters + representative views."""
+    clusters = cluster_kb_keypoints(db, user_id, kb_id)
+    if not clusters:
+        return [], [], {}, {}
+
+    keypoints = sorted(
+        [cluster.representative_keypoint for cluster in clusters],
+        key=lambda kp: (kp.doc_id or "", kp.id or ""),
+    )
+    cluster_map = {cluster.representative_id: cluster for cluster in clusters}
+
+    doc_map: dict[str, str] = {}
+    for cluster in clusters:
+        for member in cluster.members:
+            if member.doc_id not in doc_map:
+                doc_map[member.doc_id] = member.doc_name or member.doc_id
+    return clusters, keypoints, cluster_map, doc_map
+
+
 def _format_keypoints_for_prompt(
     keypoints: list[Keypoint], doc_map: dict[str, str]
 ) -> str:
@@ -362,12 +387,7 @@ def build_dependency_graph(
         if existing:
             return existing
 
-    keypoints = (
-        db.query(Keypoint)
-        .filter(Keypoint.user_id == user_id, Keypoint.kb_id == kb_id)
-        .order_by(Keypoint.doc_id, Keypoint.id)
-        .all()
-    )
+    _, keypoints, _, doc_map = _load_clustered_kb_keypoints(db, user_id, kb_id)
     if not keypoints:
         return []
 
@@ -375,12 +395,6 @@ def build_dependency_graph(
     if len(doc_ids) <= 1:
         return _build_sequential_deps(db, kb_id, keypoints, force)
 
-    doc_map = {
-        row.id: row.filename
-        for row in db.query(Document.id, Document.filename)
-        .filter(Document.id.in_(doc_ids))
-        .all()
-    }
     points_text = _format_keypoints_for_prompt(keypoints, doc_map)
     kp_ids = {kp.id for kp in keypoints}
 
@@ -927,12 +941,7 @@ def generate_learning_path(
         if cached is not None:
             return cached
 
-    keypoints = (
-        db.query(Keypoint)
-        .filter(Keypoint.user_id == user_id, Keypoint.kb_id == kb_id)
-        .order_by(Keypoint.doc_id, Keypoint.id)
-        .all()
-    )
+    _, keypoints, cluster_map, doc_map = _load_clustered_kb_keypoints(db, user_id, kb_id)
     if not keypoints:
         empty_result = ([], [], [], [], {})
         _set_cached_learning_path_result(user_id, kb_id, limit, empty_result)
@@ -942,13 +951,6 @@ def generate_learning_path(
     ability_level = profile.ability_level if profile and profile.ability_level else "intermediate"
 
     kp_map = {kp.id: kp for kp in keypoints}
-    doc_ids = {kp.doc_id for kp in keypoints}
-    doc_map = {
-        row.id: row.filename
-        for row in db.query(Document.id, Document.filename)
-        .filter(Document.id.in_(doc_ids))
-        .all()
-    }
 
     deps = build_dependency_graph(db, user_id, kb_id, force=force)
     edge_tuples = [
@@ -976,8 +978,12 @@ def generate_learning_path(
         kp = kp_map.get(kp_id)
         if not kp:
             continue
+        cluster = cluster_map.get(kp_id)
+        if not cluster:
+            continue
 
-        mastery = kp.mastery_level or 0.0
+        mastery = cluster.mastery_level_max
+        attempt_count = cluster.attempt_count_sum
         prereq_count = len(prereq_map.get(kp_id, []))
         outgoing_count = len(outgoing_map.get(kp_id, []))
         hint = llm_hints.get(kp_id, {})
@@ -997,8 +1003,19 @@ def generate_learning_path(
         unmet_prereqs = []
         for prereq_id in prereq_map.get(kp_id, []):
             prereq_kp = kp_map.get(prereq_id)
-            if prereq_kp and (prereq_kp.mastery_level or 0.0) < MASTERY_PREREQ_THRESHOLD:
-                unmet_prereqs.append(prereq_kp.text)
+            prereq_cluster = cluster_map.get(prereq_id)
+            prereq_mastery = (
+                prereq_cluster.mastery_level_max
+                if prereq_cluster is not None
+                else float(prereq_kp.mastery_level or 0.0) if prereq_kp else 0.0
+            )
+            prereq_text = (
+                prereq_cluster.representative_text
+                if prereq_cluster is not None
+                else str(prereq_kp.text or "") if prereq_kp else ""
+            )
+            if prereq_text and prereq_mastery < MASTERY_PREREQ_THRESHOLD:
+                unmet_prereqs.append(prereq_text)
 
         step += 1
         items.append(
@@ -1011,7 +1028,7 @@ def generate_learning_path(
                 priority=mastery_priority(mastery),
                 step=step,
                 prerequisites=unmet_prereqs,
-                action=mastery_action(mastery, kp.attempt_count or 0),
+                action=mastery_action(mastery, attempt_count),
                 stage=stage,
                 module="module-1",
                 difficulty=round(_clamp_score(difficulty, 0.5), 3),
@@ -1020,10 +1037,13 @@ def generate_learning_path(
                     stage=stage,
                     difficulty=_clamp_score(difficulty, 0.5),
                     text=kp.text,
-                    explanation=kp.explanation,
+                    explanation=cluster.explanation,
                     mastery=mastery,
                 ),
                 milestone=False,
+                member_count=cluster.member_count,
+                source_doc_ids=cluster.source_doc_ids,
+                source_doc_names=cluster.source_doc_names,
             )
         )
 

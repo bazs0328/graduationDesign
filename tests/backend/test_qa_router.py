@@ -5,8 +5,10 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.models import ChatMessage
-from app.routers.qa import QA_HISTORY_TOTAL_CHAR_BUDGET
+import pytest
+
+from app.models import ChatMessage, Document, Keypoint, KnowledgeBase, User
+from app.routers.qa import QA_HISTORY_TOTAL_CHAR_BUDGET, _update_mastery_from_qa
 
 
 MOCK_SOURCES = [{"source": "doc p.1 c.0", "snippet": "snippet text", "doc_id": "doc-1"}]
@@ -394,3 +396,87 @@ def test_qa_stream_generation_error_emits_retryable_error(client, seeded_session
     error_payload = [payload for name, payload in events if name == "error"][-1]
     assert error_payload["retryable"] is True
     assert error_payload["code"] == "generation_failed"
+
+
+def test_update_mastery_from_qa_kb_vector_hits_collapse_to_representative(db_session):
+    user_id = "qa_kb_dedup_user"
+    kb_id = "qa_kb_dedup_kb"
+    doc1 = "qa_kb_dedup_doc1"
+    doc2 = "qa_kb_dedup_doc2"
+    rep_id = "qa_kb_dedup_kp1"
+    dup_id = "qa_kb_dedup_kp2"
+    base = datetime.utcnow()
+
+    db_session.add(User(id=user_id, username=user_id, password_hash="hash", name="User"))
+    db_session.add(KnowledgeBase(id=kb_id, user_id=user_id, name="KB"))
+    db_session.add_all(
+        [
+            Document(
+                id=doc1,
+                user_id=user_id,
+                kb_id=kb_id,
+                filename="d1.txt",
+                file_type="txt",
+                text_path=f"/tmp/{doc1}.txt",
+                num_chunks=1,
+                num_pages=1,
+                char_count=100,
+                status="ready",
+            ),
+            Document(
+                id=doc2,
+                user_id=user_id,
+                kb_id=kb_id,
+                filename="d2.txt",
+                file_type="txt",
+                text_path=f"/tmp/{doc2}.txt",
+                num_chunks=1,
+                num_pages=1,
+                char_count=100,
+                status="ready",
+            ),
+            Keypoint(
+                id=rep_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc1,
+                text="1. 矩阵定义",
+                mastery_level=0.0,
+                created_at=base,
+            ),
+            Keypoint(
+                id=dup_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc2,
+                text="矩阵定义",
+                mastery_level=0.0,
+                created_at=base + timedelta(seconds=1),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    vectorstore = SimpleNamespace(
+        similarity_search_with_score=lambda *args, **kwargs: [
+            (SimpleNamespace(metadata={"keypoint_id": dup_id, "doc_id": doc2}), 0.1),
+            (SimpleNamespace(metadata={"keypoint_id": rep_id, "doc_id": doc1}), 0.2),
+        ]
+    )
+
+    with patch("app.routers.qa.get_vectorstore", return_value=vectorstore):
+        with patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("no vector")):
+            _update_mastery_from_qa(
+                db_session,
+                user_id=user_id,
+                question="什么是矩阵定义？",
+                doc_id=None,
+                kb_id=kb_id,
+            )
+
+    db_session.expire_all()
+    rep = db_session.query(Keypoint).filter(Keypoint.id == rep_id).first()
+    dup = db_session.query(Keypoint).filter(Keypoint.id == dup_id).first()
+    assert rep is not None and dup is not None
+    assert float(rep.mastery_level or 0.0) > 0.0
+    assert float(dup.mastery_level or 0.0) == pytest.approx(0.0)

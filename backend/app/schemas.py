@@ -284,6 +284,15 @@ class KeypointItem(BaseModel):
     chunk: Optional[int] = None
 
 
+class KeypointSourceRef(BaseModel):
+    keypoint_id: str
+    doc_id: str
+    doc_name: Optional[str] = None
+    source: Optional[str] = None
+    page: Optional[int] = None
+    chunk: Optional[int] = None
+
+
 class KeypointItemV2(BaseModel):
     id: str
     text: str
@@ -294,12 +303,21 @@ class KeypointItemV2(BaseModel):
     mastery_level: float = 0.0
     attempt_count: int = 0
     correct_count: int = 0
+    member_count: int = 1
+    member_keypoint_ids: List[str] = []
+    source_doc_ids: List[str] = []
+    source_doc_names: List[str] = []
+    source_refs: List[KeypointSourceRef] = []
+    grouped: bool = False
 
 
 class KeypointsResponse(BaseModel):
     doc_id: str
     keypoints: List[KeypointItemV2]
     cached: bool = False
+    grouped: bool = False
+    raw_count: Optional[int] = None
+    group_count: Optional[int] = None
 
 
 class ActivityItem(BaseModel):
@@ -404,6 +422,9 @@ class LearningPathItem(BaseModel):
     importance: float = 0.5
     estimated_time: int = 10
     milestone: bool = False
+    member_count: int = 1
+    source_doc_ids: List[str] = []
+    source_doc_names: List[str] = []
 
 
 class LearningPathEdge(BaseModel):

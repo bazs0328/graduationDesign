@@ -66,6 +66,35 @@ beforeEach(() => {
   apiGet.mockImplementation((path) => {
     if (path.startsWith('/api/kb')) return Promise.resolve([kbFixture])
     if (path.startsWith('/api/docs')) return Promise.resolve([docFixture])
+    if (path.startsWith('/api/keypoints/kb/')) {
+      return Promise.resolve({
+        grouped: true,
+        raw_count: 3,
+        group_count: 2,
+        keypoints: [
+          {
+            id: 'kp-group-1',
+            text: '矩阵定义',
+            explanation: '矩阵是按行列排列的数表。',
+            member_count: 2,
+            source_doc_ids: ['doc-1', 'doc-2'],
+            source_doc_names: ['矩阵.pdf', '线代讲义.pdf'],
+            source_refs: [
+              { keypoint_id: 'kp-a', doc_id: 'doc-1', doc_name: '矩阵.pdf', page: 1, chunk: 0 },
+              { keypoint_id: 'kp-b', doc_id: 'doc-2', doc_name: '线代讲义.pdf', page: 2, chunk: 1 }
+            ]
+          },
+          {
+            id: 'kp-group-2',
+            text: '特征值',
+            member_count: 1,
+            source_doc_ids: ['doc-1'],
+            source_doc_names: ['矩阵.pdf'],
+            source_refs: [{ keypoint_id: 'kp-c', doc_id: 'doc-1', doc_name: '矩阵.pdf', page: 3 }]
+          }
+        ]
+      })
+    }
     if (path.startsWith('/api/progress')) {
       return Promise.resolve({
         total_docs: 1,
@@ -169,5 +198,54 @@ describe('Summary/Keypoints payloads', () => {
     expect(html).toContain('k1')
     expect(html).toContain('explanation for k1')
     expect(html).toContain('p.1')
+    expect(html).toContain('单文档视图')
+    expect(html).toContain('当前展示的是该文档提取结果')
+    expect(html).toContain('查看 KB 学习路径')
+  })
+
+  it('loads and renders kb grouped keypoints panel on demand', async () => {
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await router.push('/summary')
+    await flushPromises()
+    await nextTick()
+    await nextTick()
+
+    const docSelect = wrapper.find('select')
+    await docSelect.setValue('doc-1')
+    await nextTick()
+
+    const keypointsBtn = wrapper
+      .findAll('button')
+      .find((btn) => btn.text().includes('提取要点'))
+    await keypointsBtn.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const groupedBtn = wrapper
+      .findAll('button')
+      .find((btn) => btn.text().includes('查看知识库聚合知识点'))
+    expect(groupedBtn).toBeTruthy()
+    await groupedBtn.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(apiGet).toHaveBeenCalledWith(
+      expect.stringContaining('/api/keypoints/kb/kb-1?')
+    )
+    const groupedCall = apiGet.mock.calls.find(([path]) => path.includes('/api/keypoints/kb/kb-1?'))
+    expect(groupedCall?.[0]).toContain('grouped=true')
+    expect(groupedCall?.[0]).toContain('user_id=test')
+
+    const html = wrapper.html()
+    expect(html).toContain('知识库聚合视图')
+    expect(html).toContain('聚合后 2 项')
+    expect(html).toContain('原始 3 项')
+    expect(html).toContain('矩阵定义')
+    expect(html).toContain('KB聚合')
+    expect(html).toContain('来自 2 个文档')
+    expect(html).toContain('矩阵.pdf')
+    expect(html).toContain('线代讲义.pdf')
+    expect(html).toContain('查看来源定位（2）')
   })
 })

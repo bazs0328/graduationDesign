@@ -221,6 +221,9 @@
           </div>
           <div v-if="hasMasteryUpdates" class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
             <h3 class="text-lg font-bold">知识点掌握度变化</h3>
+            <p v-if="isKbQuizResultContext" class="text-xs text-muted-foreground">
+              以下知识点反馈已按知识库口径去重合并统计。
+            </p>
             <div class="grid grid-cols-1 gap-3">
               <div v-for="mu in masteryUpdates" :key="mu.keypoint_id"
                 class="flex items-center gap-3 p-3 border rounded-lg"
@@ -247,6 +250,9 @@
               <div>
                 <h3 class="text-lg font-bold">错题知识点归类</h3>
                 <p class="text-xs text-muted-foreground">点击题号可跳转到对应题目</p>
+                <p v-if="isKbQuizResultContext" class="text-xs text-muted-foreground">
+                  概念名称可能与单文档表述不同，但会映射到同一知识点。
+                </p>
               </div>
               <button
                 class="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity"
@@ -336,6 +342,7 @@ const wrongQuestionGroups = computed(() => quizResult.value?.wrong_questions_by_
 const hasWrongGroups = computed(() => wrongQuestionGroups.value.length > 0)
 const masteryUpdates = computed(() => quizResult.value?.mastery_updates || [])
 const hasMasteryUpdates = computed(() => masteryUpdates.value.length > 0)
+const isKbQuizResultContext = computed(() => Boolean(selectedKbId.value && quizResult.value))
 const entryKbContextId = computed(() => parseRouteContext(route.query).kbId)
 const entryFocusContext = computed(() => appContext.routeContext.focus)
 const hasPathContext = computed(() => Boolean(entryKbContextId.value || entryFocusContext.value))

@@ -17,6 +17,11 @@ from app.db import get_db
 from app.models import ChatMessage, ChatSession, Document, QARecord
 from app.schemas import QARequest, QAResponse, SourceSnippet
 from app.services.learner_profile import get_or_create_profile, get_weak_concepts_by_mastery
+from app.services.keypoint_dedup import (
+    build_keypoint_cluster_index,
+    cluster_kb_keypoints,
+    find_kb_representative_by_text,
+)
 from app.services.learning_path import invalidate_learning_path_result_cache
 from app.services.mastery import record_study_interaction
 from app.services.qa import (
@@ -554,6 +559,16 @@ def _update_mastery_from_qa(
     # 优先：如果指定了 focus_keypoint_text（从学习路径跳转），直接查找匹配的知识点
     if focus_keypoint_text and focus_keypoint_text.strip():
         focus_text = focus_keypoint_text.strip()
+        if kb_id and not doc_id:
+            matched_rep = find_kb_representative_by_text(db, user_id, kb_id, focus_text)
+            if matched_rep:
+                result = record_study_interaction(db, matched_rep.id)
+                if result:
+                    logger.info(
+                        f"QA mastery updated for keypoint {matched_rep.id} (focus KB representative match)"
+                    )
+                return
+
         query = db.query(Keypoint).filter(Keypoint.user_id == user_id)
         if doc_id:
             query = query.filter(Keypoint.doc_id == doc_id)
@@ -599,14 +614,26 @@ def _update_mastery_from_qa(
         return
 
     updated_count = 0
+    updated_ids: set[str] = set()
+    kb_member_to_rep: dict[str, str] | None = None
+    if kb_id and not doc_id:
+        kb_member_to_rep = build_keypoint_cluster_index(
+            cluster_kb_keypoints(db, user_id, kb_id)
+        )
     for doc_result, score in results:
         if score > 1.0:
             continue
         meta = getattr(doc_result, "metadata", {}) or {}
         kp_id = meta.get("keypoint_id")
         if kp_id:
-            result = record_study_interaction(db, kp_id)
+            target_id = str(kp_id)
+            if kb_member_to_rep is not None:
+                target_id = kb_member_to_rep.get(target_id, target_id)
+            if target_id in updated_ids:
+                continue
+            result = record_study_interaction(db, target_id)
             if result:
+                updated_ids.add(target_id)
                 updated_count += 1
     
     if updated_count > 0:
