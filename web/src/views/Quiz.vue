@@ -9,8 +9,12 @@
         <span v-if="entryKbContextId">
           当前知识库：<span class="font-semibold text-foreground">{{ entryKbContextName }}</span>
         </span>
-        <span v-if="entryFocusContext">
+        <span v-if="entryDocContextId">
           <span v-if="entryKbContextId"> · </span>
+          当前文档：<span class="font-semibold text-foreground">{{ entryDocContextName }}</span>
+        </span>
+        <span v-if="entryFocusContext">
+          <span v-if="entryKbContextId || entryDocContextId"> · </span>
           重点概念：<span class="font-semibold text-foreground">{{ entryFocusContext }}</span>
         </span>
       </p>
@@ -31,6 +35,59 @@
                 <option disabled value="">请选择</option>
                 <option v-for="kb in kbs" :key="kb.id" :value="kb.id">{{ kb.name || kb.id }}</option>
               </select>
+            </div>
+
+            <div v-if="selectedKbId" class="space-y-2">
+              <div class="flex items-center gap-2">
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">限定文档（可选）</label>
+                <span v-if="busy.docs" class="text-[10px] text-muted-foreground">加载中...</span>
+              </div>
+              <select v-model="selectedDocId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
+                <option value="">不限定（整库测验）</option>
+                <option v-for="doc in docsInKb" :key="doc.id" :value="doc.id">{{ doc.filename }}</option>
+              </select>
+            </div>
+
+            <div v-if="selectedKbId" class="space-y-2">
+              <div class="flex items-center justify-between gap-2">
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">重点知识点（可选）</label>
+                <button
+                  v-if="quizFocusConcepts.length"
+                  type="button"
+                  class="text-[10px] text-muted-foreground hover:text-foreground"
+                  @click="clearQuizFocusConcepts"
+                >
+                  清空
+                </button>
+              </div>
+              <input
+                v-model="quizFocusInput"
+                type="text"
+                placeholder="如：牛顿定律、受力分析（支持逗号/顿号分隔）"
+                class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
+                @keydown.enter.prevent="applyQuizFocusInput"
+                @blur="applyQuizFocusInput"
+              />
+              <p class="text-[10px] text-muted-foreground">
+                留空表示按整库/文档自动出题；填写后会优先围绕这些概念出题。
+              </p>
+              <div v-if="quizFocusConcepts.length" class="flex flex-wrap gap-2">
+                <span
+                  v-for="(concept, idx) in quizFocusConcepts"
+                  :key="`${concept}-${idx}`"
+                  class="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-primary/20 bg-primary/10 text-primary text-[11px] font-semibold"
+                >
+                  <span>{{ concept }}</span>
+                  <button
+                    type="button"
+                    class="text-primary/80 hover:text-primary"
+                    :aria-label="`移除重点知识点 ${concept}`"
+                    @click="removeQuizFocusConcept(idx)"
+                  >
+                    ×
+                  </button>
+                </span>
+              </div>
             </div>
 
             <div class="grid grid-cols-2 gap-4">
@@ -339,7 +396,7 @@
 import { ref, onMounted, onActivated, computed, watch, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PenTool, Sparkles, CheckCircle2, XCircle } from 'lucide-vue-next'
-import { apiGetBlob, apiPost } from '../api'
+import { apiGet, apiGetBlob, apiPost } from '../api'
 import AnimatedNumber from '../components/ui/AnimatedNumber.vue'
 import { useToast } from '../composables/useToast'
 import { useAppContextStore } from '../stores/appContext'
@@ -363,15 +420,23 @@ const selectedKbId = computed({
   get: () => appContext.selectedKbId,
   set: (value) => appContext.setSelectedKbId(value),
 })
+const selectedDocId = computed({
+  get: () => appContext.selectedDocId,
+  set: (value) => appContext.setSelectedDocId(value),
+})
+const docsInKb = ref([])
 const quiz = ref(null)
 const quizAnswers = ref({})
 const quizResult = ref(null)
 const quizCount = ref(5)
 const quizDifficulty = ref('medium')
 const autoAdapt = ref(true)
+const quizFocusInput = ref('')
+const quizFocusConcepts = ref([])
 const busy = ref({
   quiz: false,
-  submit: false
+  submit: false,
+  docs: false,
 })
 
 const profileDelta = computed(() => quizResult.value?.profile_delta || null)
@@ -382,13 +447,20 @@ const masteryUpdates = computed(() => quizResult.value?.mastery_updates || [])
 const hasMasteryUpdates = computed(() => masteryUpdates.value.length > 0)
 const isKbQuizResultContext = computed(() => Boolean(selectedKbId.value && quizResult.value))
 const entryKbContextId = computed(() => parseRouteContext(route.query).kbId)
+const entryDocContextId = computed(() => parseRouteContext(route.query).docId)
 const entryFocusContext = computed(() => appContext.routeContext.focus)
-const hasPathContext = computed(() => Boolean(entryKbContextId.value || entryFocusContext.value))
+const hasPathContext = computed(() => Boolean(entryKbContextId.value || entryDocContextId.value || entryFocusContext.value))
 const entryKbContextName = computed(() => {
   if (!entryKbContextId.value) return ''
   const kb = kbs.value.find((item) => item.id === entryKbContextId.value)
   if (kb?.name) return kb.name
   return `${entryKbContextId.value.slice(0, 8)}...`
+})
+const entryDocContextName = computed(() => {
+  if (!entryDocContextId.value) return ''
+  const doc = docsInKb.value.find((item) => item.id === entryDocContextId.value)
+  if (doc?.filename) return doc.filename
+  return `${entryDocContextId.value.slice(0, 8)}...`
 })
 const hasAnyKb = computed(() => kbs.value.length > 0)
 const quizEmptyTitle = computed(() => {
@@ -497,6 +569,77 @@ function handleQuizEmptyPrimary() {
   generateQuiz()
 }
 
+function normalizeQuizFocusConcepts(values = []) {
+  const seen = new Set()
+  const out = []
+  for (const raw of values) {
+    const text = String(raw ?? '').trim()
+    if (!text) continue
+    const key = text.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(text)
+    if (out.length >= 8) break
+  }
+  return out
+}
+
+function parseQuizFocusInput(text) {
+  return normalizeQuizFocusConcepts(
+    String(text ?? '')
+      .split(/[\n,，、;；]+/g)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  )
+}
+
+function applyQuizFocusInput() {
+  const parsed = parseQuizFocusInput(quizFocusInput.value)
+  if (!parsed.length) {
+    quizFocusInput.value = ''
+    return
+  }
+  quizFocusConcepts.value = normalizeQuizFocusConcepts([
+    ...quizFocusConcepts.value,
+    ...parsed,
+  ])
+  quizFocusInput.value = ''
+}
+
+function clearQuizFocusConcepts() {
+  quizFocusConcepts.value = []
+  quizFocusInput.value = ''
+}
+
+function removeQuizFocusConcept(index) {
+  if (!Number.isInteger(index) || index < 0 || index >= quizFocusConcepts.value.length) return
+  quizFocusConcepts.value = quizFocusConcepts.value.filter((_, idx) => idx !== index)
+}
+
+async function refreshDocsInKb() {
+  if (!selectedKbId.value) {
+    docsInKb.value = []
+    busy.value.docs = false
+    if (selectedDocId.value) selectedDocId.value = ''
+    return
+  }
+  busy.value.docs = true
+  try {
+    const rows = await apiGet(
+      `/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(selectedKbId.value)}`
+    )
+    docsInKb.value = Array.isArray(rows) ? rows : []
+  } catch {
+    docsInKb.value = []
+    // error toast handled globally
+  } finally {
+    busy.value.docs = false
+  }
+  if (selectedDocId.value && !docsInKb.value.some((doc) => doc.id === selectedDocId.value)) {
+    selectedDocId.value = ''
+  }
+}
+
 async function generateQuiz(options = {}) {
   if (!selectedKbId.value) return
   busy.value.quiz = true
@@ -512,8 +655,12 @@ async function generateQuiz(options = {}) {
       user_id: resolvedUserId.value,
       auto_adapt: autoAdapt.value
     }
-    if (options.focusConcepts?.length) {
-      payload.focus_concepts = options.focusConcepts
+    if (selectedDocId.value) {
+      payload.doc_id = selectedDocId.value
+    }
+    const explicitFocusConcepts = normalizeQuizFocusConcepts(options.focusConcepts || quizFocusConcepts.value)
+    if (explicitFocusConcepts.length) {
+      payload.focus_concepts = explicitFocusConcepts
     }
     if (!autoAdapt.value) {
       payload.difficulty = quizDifficulty.value
@@ -651,14 +798,18 @@ async function syncFromRoute(options = {}) {
     }
 
     const queryFocus = entryFocusContext.value
+    const queryDocId = entryDocContextId.value
     if (!options.autoGenerate) return
     if ((!queryFocus && !queryDifficulty) || !selectedKbId.value) return
 
-    const contextKey = `${selectedKbId.value}|${queryFocus}|${queryDifficulty}`
+    const contextKey = `${selectedKbId.value}|${queryDocId}|${queryFocus}|${queryDifficulty}`
     if (lastAutoContextKey.value === contextKey) return
     lastAutoContextKey.value = contextKey
 
     const generateOptions = {}
+    if (queryFocus && !quizFocusConcepts.value.length) {
+      quizFocusConcepts.value = normalizeQuizFocusConcepts([queryFocus])
+    }
     if (queryFocus) {
       generateOptions.focusConcepts = [queryFocus]
     }
@@ -675,6 +826,7 @@ onMounted(async () => {
     // error toast handled globally
   }
   await syncFromRoute({ autoGenerate: true })
+  await refreshDocsInKb()
 })
 
 onActivated(async () => {
@@ -682,6 +834,7 @@ onActivated(async () => {
     ensureKbs: !appContext.kbs.length,
     autoGenerate: true,
   })
+  await refreshDocsInKb()
 })
 
 onBeforeUnmount(() => {
@@ -694,6 +847,12 @@ watch(
   () => route.fullPath,
   async () => {
     await syncFromRoute({ autoGenerate: true })
+    await refreshDocsInKb()
   }
 )
+
+watch(selectedKbId, async () => {
+  clearQuizFocusConcepts()
+  await refreshDocsInKb()
+})
 </script>

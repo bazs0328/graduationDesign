@@ -1093,6 +1093,7 @@ function runRecommendation(item, action) {
         path: '/quiz',
         query: buildRouteContextQuery({
           kbId: selectedKbId.value,
+          docId: item?.doc_id,
           focus: focusConcept,
           difficulty,
         }),

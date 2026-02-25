@@ -5,6 +5,7 @@ import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const isWslMountedDrive = Boolean(process.env.WSL_DISTRO_NAME) && __dirname.startsWith('/mnt/')
 
 export default defineConfig({
   plugins: [
@@ -17,7 +18,14 @@ export default defineConfig({
     }
   },
   server: {
-    port: 5173
+    port: 5173,
+    // WSL + /mnt/* often misses filesystem events, which breaks Vite HMR.
+    watch: isWslMountedDrive
+      ? {
+          usePolling: true,
+          interval: 100
+        }
+      : undefined
   },
   test: {
     environment: 'jsdom',
