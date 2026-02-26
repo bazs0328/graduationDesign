@@ -216,6 +216,29 @@
               </div>
             </div>
 
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 space-y-2">
+              <div class="flex items-center justify-between gap-2">
+                <h3 class="text-sm font-bold text-emerald-800">当前可学队列</h3>
+                <span class="text-[11px] text-emerald-700">
+                  {{ currentLearnableQueue.length }} / {{ learningPath.filter((item) => item.priority !== 'completed').length }} 项可直接推进
+                </span>
+              </div>
+              <div v-if="currentLearnableQueue.length" class="flex flex-wrap gap-2">
+                <button
+                  v-for="item in currentLearnableQueue"
+                  :key="item.keypoint_id"
+                  class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-emerald-200 bg-white text-xs hover:bg-emerald-50 transition-colors"
+                  @click="goToAction(item)"
+                >
+                  <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-bold">{{ item.step }}</span>
+                  <span class="max-w-[180px] truncate">{{ item.text }}</span>
+                </button>
+              </div>
+              <p v-else class="text-xs text-emerald-700/80">
+                当前没有已解锁且未完成的知识点，先完成前置项后会自动解锁后续内容。
+              </p>
+            </div>
+
             <!-- Stage & module views -->
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
               <div class="rounded-lg border border-border p-4 space-y-3">
@@ -284,27 +307,18 @@
             <div class="space-y-2 text-xs text-muted-foreground">
               <div class="flex flex-wrap items-center gap-4">
                 <div class="flex items-center gap-2">
-                  <span class="font-medium text-foreground">文档颜色：</span>
-                  <span v-for="(color, docName) in docColorLegend" :key="docName" class="inline-flex items-center gap-1">
-                    <span class="w-3 h-3 rounded-full inline-block" :style="{ background: color }"></span>
-                    <span class="truncate max-w-[100px]">{{ docName }}</span>
-                  </span>
-                </div>
-                <span class="text-border">|</span>
-                <div class="flex items-center gap-2">
-                  <span class="font-medium text-foreground">阶段：</span>
-                  <span v-for="stage in displayStages" :key="stage.stage_id" class="inline-flex items-center gap-1">
-                    <span class="w-2.5 h-2.5 rounded-full inline-block" :style="{ background: stageColor(stage.stage_id) }"></span>
-                    <span>{{ stage.name }}</span>
-                  </span>
+                  <span class="font-medium text-foreground">状态颜色：</span>
+                  <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span> 当前可学</span>
+                  <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-orange-400 inline-block"></span> 阻塞</span>
+                  <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-slate-400 inline-block"></span> 已掌握</span>
                 </div>
                 <span class="text-border">|</span>
                 <div class="flex items-center gap-3">
-                  <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-foreground inline-block"></span> 待学习</span>
-                  <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-foreground/40 inline-block"></span> 已掌握</span>
+                  <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full border border-border bg-white inline-block"></span> 节点显示步骤号</span>
                   <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rotate-45 bg-primary/40 inline-block"></span> 里程碑</span>
                 </div>
               </div>
+              <p>竖向背景带表示先修层级列，越靠右通常依赖越多。</p>
               <p>标注“KB聚合”的步骤表示该概念合并了多个文档来源。</p>
             </div>
 
@@ -317,7 +331,10 @@
               <div class="mt-3 space-y-2 max-h-[320px] overflow-y-auto pr-2">
                 <div v-for="item in learningPath" :key="item.keypoint_id"
                   class="flex items-start gap-3 p-3 border border-border rounded-lg text-sm"
-                  :class="{ 'opacity-50': item.priority === 'completed' }">
+                  :class="{
+                    'opacity-50': item.priority === 'completed',
+                    'border-orange-200 bg-orange-50/30': isLearningPathItemBlocked(item),
+                  }">
                   <span class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
                     :class="stepBadgeClass(item.priority)">
                     {{ item.step }}
@@ -325,6 +342,12 @@
                   <div class="flex-1 min-w-0 space-y-1">
                     <div class="flex items-center gap-2 flex-wrap">
                       <div class="progress-item-markdown markdown-content font-medium leading-tight" v-html="renderMarkdown(item.text)"></div>
+                      <span
+                        class="text-[10px] px-2 py-0.5 rounded-full border font-semibold"
+                        :class="learningPathItemStateClass(item)"
+                      >
+                        {{ learningPathItemStateLabel(item) }}
+                      </span>
                       <template v-if="item.member_count > 1">
                         <span class="text-[10px] px-2 py-0.5 rounded-full border border-primary/20 bg-primary/10 text-primary font-semibold">
                           KB聚合
@@ -347,14 +370,20 @@
                       <span>·</span>
                       <span>难度 {{ Math.round((item.difficulty || 0) * 100) }}</span>
                       <span>·</span>
+                      <span>先修层级 {{ item.path_level ?? 0 }}</span>
+                      <span>·</span>
                       <span>约 {{ item.estimated_time || 0 }} 分钟</span>
                     </div>
-                    <div v-if="item.prerequisites.length" class="text-xs text-orange-500">
-                      需先学习：{{ item.prerequisites.join('、') }}
+                    <div v-if="unmetPrereqLabels(item).length" class="text-xs text-orange-500">
+                      缺少前置：{{ unmetPrereqLabels(item).join('、') }}
+                    </div>
+                    <div v-if="(item.unlocks_count || 0) > 0" class="text-xs text-muted-foreground">
+                      完成后可解锁/推进后续 {{ item.unlocks_count }} 项
                     </div>
                   </div>
                   <button v-if="item.priority !== 'completed'"
-                    class="flex-shrink-0 px-3 py-1 bg-primary/10 text-primary rounded-md text-xs font-medium hover:bg-primary/20 transition-colors"
+                    class="flex-shrink-0 px-3 py-1 bg-primary/10 text-primary rounded-md text-xs font-medium hover:bg-primary/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-primary/10"
+                    :disabled="isLearningPathItemBlocked(item)"
                     @click="goToAction(item)">
                     {{ actionBtnLabel(item.action) }}
                   </button>
@@ -648,6 +677,13 @@ const pathSummaryCards = computed(() => {
   ]
 })
 
+const currentLearnableQueue = computed(() => {
+  return learningPath.value
+    .filter((item) => item.priority !== 'completed' && item.is_unlocked !== false)
+    .sort((a, b) => (Number(a.step) || 0) - (Number(b.step) || 0))
+    .slice(0, 5)
+})
+
 const recommendationsUpdatedLabel = computed(() => {
   if (!recommendationsUpdatedAt.value) return ''
   const dt = new Date(recommendationsUpdatedAt.value)
@@ -692,9 +728,26 @@ function normalizeLearningPathItem(item) {
   const sourceDocNames = Array.isArray(item.source_doc_names)
     ? item.source_doc_names.map((v) => String(v || '').trim()).filter(Boolean)
     : []
+  const prerequisiteIds = Array.isArray(item.prerequisite_ids)
+    ? item.prerequisite_ids.map((v) => String(v || '').trim()).filter(Boolean)
+    : []
+  const unmetPrerequisiteIds = Array.isArray(item.unmet_prerequisite_ids)
+    ? item.unmet_prerequisite_ids.map((v) => String(v || '').trim()).filter(Boolean)
+    : []
+  const legacyPrereqTexts = Array.isArray(item.prerequisites)
+    ? item.prerequisites.map((v) => String(v || '').trim()).filter(Boolean)
+    : []
+  const hasUnlockFlag = Object.prototype.hasOwnProperty.call(item, 'is_unlocked')
+  const inferredUnlocked = legacyPrereqTexts.length === 0 && unmetPrerequisiteIds.length === 0
   return {
     ...item,
     member_count: Math.max(1, Number(item.member_count) || 1),
+    prerequisites: legacyPrereqTexts,
+    prerequisite_ids: prerequisiteIds,
+    unmet_prerequisite_ids: unmetPrerequisiteIds,
+    is_unlocked: hasUnlockFlag ? item.is_unlocked !== false : inferredUnlocked,
+    path_level: Math.max(0, Number(item.path_level) || 0),
+    unlocks_count: Math.max(0, Number(item.unlocks_count) || 0),
     source_doc_ids: sourceDocIds,
     source_doc_names: sourceDocNames,
   }
@@ -1151,68 +1204,139 @@ function modulePrereqLabels(module) {
   return (module.prerequisite_modules || []).map((moduleId) => moduleNameMap.value[moduleId] || moduleId)
 }
 
-// -- Learning path chart --
-const DOC_PALETTE = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
+function isLearningPathItemBlocked(item) {
+  if (!item || item.priority === 'completed') return false
+  return item.is_unlocked === false
+}
 
-const docColorMap = computed(() => {
-  const map = {}
-  const docIds = [...new Set(learningPath.value.map((item) => item.doc_id))]
-  docIds.forEach((id, idx) => { map[id] = DOC_PALETTE[idx % DOC_PALETTE.length] })
-  return map
-})
+function unmetPrereqLabels(item) {
+  if (!item) return []
+  const labels = Array.isArray(item.unmet_prerequisite_ids)
+    ? item.unmet_prerequisite_ids
+      .map((kpId) => itemById.value[kpId]?.text || '')
+      .filter((text) => typeof text === 'string' && text.trim())
+    : []
+  if (labels.length) return labels
+  return Array.isArray(item.prerequisites) ? item.prerequisites : []
+}
 
-const docColorLegend = computed(() => {
-  const legend = {}
-  for (const item of learningPath.value) {
-    const name = item.doc_name || item.doc_id
-    if (!legend[name]) legend[name] = docColorMap.value[item.doc_id]
+function learningPathItemStateLabel(item) {
+  if (!item) return ''
+  if (item.priority === 'completed') return '已掌握'
+  if (isLearningPathItemBlocked(item)) return '阻塞'
+  return '当前可学'
+}
+
+function learningPathItemStateClass(item) {
+  if (!item) return 'text-muted-foreground bg-accent border-border'
+  if (item.priority === 'completed') return 'text-muted-foreground bg-accent border-border'
+  if (isLearningPathItemBlocked(item)) return 'text-orange-700 bg-orange-50 border-orange-200'
+  return 'text-emerald-700 bg-emerald-50 border-emerald-200'
+}
+
+function learningPathNodeState(item) {
+  if (!item) return 'locked'
+  if (item.priority === 'completed') return 'completed'
+  if (isLearningPathItemBlocked(item)) return 'blocked'
+  return 'learnable'
+}
+
+function learningPathNodeColor(item) {
+  switch (learningPathNodeState(item)) {
+    case 'completed':
+      return '#94a3b8'
+    case 'blocked':
+      return '#fb923c'
+    case 'learnable':
+      return '#10b981'
+    default:
+      return '#64748b'
   }
-  return legend
-})
+}
 
+function learningPathNodeBorderColor(item) {
+  switch (learningPathNodeState(item)) {
+    case 'completed':
+      return '#64748b'
+    case 'blocked':
+      return '#ea580c'
+    case 'learnable':
+      return '#059669'
+    default:
+      return '#475569'
+  }
+}
+
+// -- Learning path chart --
 const pathChartOption = computed(() => {
   if (!learningPath.value.length) return {}
 
-  const colors = docColorMap.value
-  const stageIds = displayStages.value.length
-    ? displayStages.value.map((stage) => stage.stage_id)
-    : [...new Set(learningPath.value.map((item) => item.stage || 'foundation'))]
-  const stageIndexMap = {}
-  stageIds.forEach((stageId, idx) => { stageIndexMap[stageId] = idx })
+  const chartHeight = 380
+  const levelGap = 220
+  const rowGap = 86
+  const topPadding = 60
+  const leftPadding = 80
+  const bandTop = 28
+  const bandWidth = 170
+  const bandHeight = chartHeight - 44
+  const headerPillTop = 4
+  const headerPillHeight = 20
+  const separatorTop = 28
+  const separatorBottom = chartHeight - 16
+  const levelValues = [...new Set(
+    learningPath.value.map((item) => Math.max(0, Number(item.path_level) || 0)),
+  )].sort((a, b) => a - b)
+  const levelIndexMap = {}
+  levelValues.forEach((level, idx) => { levelIndexMap[level] = idx })
+  const levelCounts = {}
+  for (const item of learningPath.value) {
+    const level = Math.max(0, Number(item.path_level) || 0)
+    levelCounts[level] = (levelCounts[level] || 0) + 1
+  }
 
-  const stageCounts = {}
+  const rowCounts = {}
   const nodes = learningPath.value.map((item) => {
     const stageId = item.stage || 'foundation'
-    const rowIdx = stageCounts[stageId] || 0
-    stageCounts[stageId] = rowIdx + 1
-    const stageIdx = stageIndexMap[stageId] ?? 0
+    const pathLevel = Math.max(0, Number(item.path_level) || 0)
+    const rowIdx = rowCounts[pathLevel] || 0
+    rowCounts[pathLevel] = rowIdx + 1
+    const levelIdx = levelIndexMap[pathLevel] ?? 0
     const isMastered = item.mastery_level >= MASTERY_MASTERED
+    const isBlocked = isLearningPathItemBlocked(item)
     const baseSize = 24 + Math.round((item.importance || 0.5) * 18)
+    const prereqLabels = unmetPrereqLabels(item)
+    const nodeStepText = String(item.step || '')
     return {
       id: item.keypoint_id,
       name: item.text.length > 20 ? `${item.text.slice(0, 20)}…` : item.text,
-      x: 80 + stageIdx * 240 + (item.milestone ? 12 : 0),
-      y: 60 + rowIdx * 86,
+      x: leftPadding + levelIdx * levelGap + (item.milestone ? 12 : 0),
+      y: topPadding + rowIdx * rowGap,
       symbol: item.milestone ? 'diamond' : 'circle',
       symbolSize: item.milestone ? baseSize + 6 : baseSize,
       itemStyle: {
-        color: colors[item.doc_id] || '#666',
-        opacity: isMastered ? 0.35 : 1,
-        borderColor: stageColor(stageId),
+        color: learningPathNodeColor(item),
+        opacity: isMastered ? 0.35 : (isBlocked ? 0.62 : 1),
+        borderColor: learningPathNodeBorderColor(item),
         borderWidth: item.milestone ? 3 : 2,
+        borderType: isBlocked ? 'dashed' : 'solid',
       },
       label: {
         show: true,
-        position: 'bottom',
+        position: 'inside',
+        distance: 0,
         fontSize: 10,
-        color: 'inherit',
-        overflow: 'truncate',
-        width: 120,
+        fontWeight: 700,
+        lineHeight: 12,
+        color: '#0f172a',
+        backgroundColor: 'transparent',
+        borderRadius: 0,
+        padding: [0, 0],
+        formatter: () => nodeStepText,
       },
       tooltip: {
         formatter: () => {
-          const prereqs = item.prerequisites.length ? `<br/><span style="color:#f59e0b">前置：${item.prerequisites.join('、')}</span>` : ''
-          return `<b>${item.text}</b><br/>阶段：${stageLabel(stageId)}<br/>模块：${item.module || '—'}<br/>掌握度：${masteryPercent(item.mastery_level)}%<br/>难度：${Math.round((item.difficulty || 0) * 100)}<br/>重要性：${Math.round((item.importance || 0) * 100)}<br/>预计时长：${item.estimated_time || 0} 分钟${prereqs}`
+          const prereqs = prereqLabels.length ? `<br/><span style="color:#f59e0b">缺少前置：${prereqLabels.join('、')}</span>` : ''
+          return `<b>#${item.step || ''} ${item.text}</b><br/>状态：${learningPathItemStateLabel(item)}<br/>阶段：${stageLabel(stageId)}<br/>先修层级：${pathLevel}<br/>模块：${item.module || '—'}<br/>掌握度：${masteryPercent(item.mastery_level)}%<br/>难度：${Math.round((item.difficulty || 0) * 100)}<br/>重要性：${Math.round((item.importance || 0) * 100)}<br/>预计时长：${item.estimated_time || 0} 分钟${prereqs}`
         },
       },
     }
@@ -1222,27 +1346,106 @@ const pathChartOption = computed(() => {
   const links = learningPathEdges.value
     .filter((edge) => nodeIdSet.has(edge.from_id) && nodeIdSet.has(edge.to_id))
     .map((edge) => {
-      const targetStage = itemById.value[edge.to_id]?.stage
+      const targetItem = itemById.value[edge.to_id]
+      const targetBlocked = isLearningPathItemBlocked(targetItem)
+      const confidence = Math.max(0, Math.min(1, Number(edge?.confidence) || 0.5))
       return {
         source: edge.from_id,
         target: edge.to_id,
-        lineStyle: { color: stageColor(targetStage), width: 1.4, curveness: 0.06, opacity: 0.65 },
+        lineStyle: {
+          color: targetBlocked ? '#f59e0b' : '#94a3b8',
+          width: 1.2 + confidence * 1.6,
+          curveness: 0.06,
+          opacity: targetBlocked ? 0.85 : 0.65,
+          type: targetBlocked ? 'dashed' : 'solid',
+        },
         symbol: ['none', 'arrow'],
         symbolSize: [0, 8],
       }
     })
 
-  const graphics = stageIds.map((stageId, idx) => ({
-    type: 'text',
-    left: 55 + idx * 240,
-    top: 8,
+  const backgroundGraphics = levelValues.map((level, idx) => ({
+    type: 'rect',
+    silent: true,
+    z: -2,
+    shape: {
+      x: leftPadding - (bandWidth / 2) + idx * levelGap,
+      y: bandTop,
+      width: bandWidth,
+      height: bandHeight,
+      r: 8,
+    },
     style: {
-      text: stageLabel(stageId),
-      fill: '#94a3b8',
-      fontSize: 12,
-      fontWeight: 600,
+      fill: `rgba(148,163,184,${idx % 2 === 0 ? 0.05 : 0.08})`,
+      stroke: 'rgba(148,163,184,0.14)',
+      lineWidth: 1,
     },
   }))
+
+  const separatorGraphics = levelValues
+    .slice(1)
+    .map((level, idx) => {
+      const boundaryX = leftPadding + ((idx + 1) * levelGap) - (levelGap / 2)
+      return {
+        type: 'line',
+        silent: true,
+        z: -1,
+        shape: {
+          x1: boundaryX,
+          y1: separatorTop,
+          x2: boundaryX,
+          y2: separatorBottom,
+        },
+        style: {
+          stroke: 'rgba(148,163,184,0.22)',
+          lineWidth: 1,
+          lineDash: [4, 4],
+        },
+      }
+    })
+
+  const headerGraphics = levelValues.flatMap((level, idx) => {
+    const count = levelCounts[level] || 0
+    const title = `${level === 0 ? '先修起点' : `先修层级 ${level}`} · ${count}项`
+    const pillWidth = Math.max(92, (title.length * 8) + 18)
+    const pillX = leftPadding + (idx * levelGap) - (pillWidth / 2)
+    return [
+      {
+        type: 'rect',
+        silent: true,
+        z: 2,
+        shape: {
+          x: pillX,
+          y: headerPillTop,
+          width: pillWidth,
+          height: headerPillHeight,
+          r: 10,
+        },
+        style: {
+          fill: 'rgba(255,255,255,0.9)',
+          stroke: 'rgba(148,163,184,0.2)',
+          lineWidth: 1,
+          shadowColor: 'rgba(15,23,42,0.03)',
+          shadowBlur: 4,
+        },
+      },
+      {
+        type: 'text',
+        silent: true,
+        z: 3,
+        left: pillX + 9,
+        top: headerPillTop + 4,
+        style: {
+          text: title,
+          fill: '#475569',
+          fontSize: 12,
+          fontWeight: 700,
+        },
+      },
+    ]
+  })
+
+  const graphics = [...backgroundGraphics, ...separatorGraphics, ...headerGraphics]
 
   return {
     tooltip: { trigger: 'item', backgroundColor: 'rgba(0,0,0,0.75)', textStyle: { color: '#fff', fontSize: 12 } },
@@ -1251,7 +1454,7 @@ const pathChartOption = computed(() => {
       type: 'graph',
       layout: 'none',
       roam: true,
-      draggable: true,
+      draggable: false,
       data: nodes,
       links,
       edgeSymbol: ['none', 'arrow'],

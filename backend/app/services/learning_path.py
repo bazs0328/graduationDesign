@@ -1,11 +1,13 @@
 """Cross-document learning path with stages, modules and milestones."""
 
 import logging
+import re
 import time
 from collections import defaultdict, deque
 from copy import deepcopy
+from dataclasses import dataclass
 from threading import Lock
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from uuid import uuid4
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -30,9 +32,13 @@ from app.utils.json_tools import safe_json_loads
 
 logger = logging.getLogger(__name__)
 
+DEPENDENCY_GRAPH_VERSION = "v2"
+DEPENDENCY_RELATION = f"prerequisite:{DEPENDENCY_GRAPH_VERSION}"
+_LEARNING_PATH_CACHE_SCHEMA_VERSION = "lpv2"
+
 _LEARNING_PATH_RESULT_CACHE_TTL_SECONDS = 300
 _LEARNING_PATH_RESULT_CACHE_MAX_ENTRIES = 64
-_learning_path_result_cache: dict[tuple[str, str, int], tuple[float, Any]] = {}
+_learning_path_result_cache: dict[tuple[str, str, int, str], tuple[float, Any]] = {}
 _learning_path_result_cache_lock = Lock()
 
 STAGE_ORDER = ["foundation", "intermediate", "advanced", "application"]
@@ -43,9 +49,48 @@ STAGE_META = {
     "application": ("应用阶段", "迁移到实战场景并完成综合应用。"),
 }
 
+_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]")
+_NUMERIC_PREFIX_RE = re.compile(r"^\s*(?:第\s*(\d+)\s*[章节篇条]|(\d+)\s*[\.、)\-:])")
+_CJK_NUM_PREFIX_RE = re.compile(r"^\s*([一二三四五六七八九十百零两]+)\s*[、\.]")
+_BASIC_HINT_RE = re.compile(r"(定义|概念|基础|术语|简介|入门|原理)")
+_ADVANCED_HINT_RE = re.compile(r"(应用|算法|推导|案例|实现|实践|优化|综合)")
 
-def _learning_path_cache_key(user_id: str, kb_id: str, limit: int) -> tuple[str, str, int]:
-    return (str(user_id), str(kb_id), int(limit or 0))
+_CJK_NUM_MAP = {
+    "零": 0,
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+    "百": 100,
+}
+
+_RULE_EDGE_CONFIDENCE_STRONG = 0.55
+_RULE_EDGE_CONFIDENCE_MEDIUM = 0.46
+_RULE_EDGE_CONFIDENCE_LIGHT = 0.38
+_LLM_EDGE_CONFIDENCE = 0.72
+_MAX_IN_DEGREE = 3
+_MAX_OUT_DEGREE = 4
+
+
+@dataclass(frozen=True)
+class _DependencyEdgeCandidate:
+    from_id: str
+    to_id: str
+    confidence: float
+    source: str
+
+
+def _learning_path_cache_key(
+    user_id: str, kb_id: str, limit: int
+) -> tuple[str, str, int, str]:
+    return (str(user_id), str(kb_id), int(limit or 0), _LEARNING_PATH_CACHE_SCHEMA_VERSION)
 
 
 def _prune_learning_path_result_cache(now: float) -> None:
@@ -245,6 +290,263 @@ def _normalize_stage(stage: Any) -> Optional[str]:
     return None
 
 
+def _dependency_relation_is_current(relation: Optional[str]) -> bool:
+    return (relation or "") == DEPENDENCY_RELATION
+
+
+def _tokenize_text(text: str) -> list[str]:
+    return _TOKEN_RE.findall((text or "").lower())
+
+
+def _token_overlap_count(a: str, b: str) -> int:
+    if not a or not b:
+        return 0
+    tokens_a = set(_tokenize_text(a))
+    tokens_b = set(_tokenize_text(b))
+    if not tokens_a or not tokens_b:
+        return 0
+    return len(tokens_a.intersection(tokens_b))
+
+
+def _looks_basic(text: str) -> bool:
+    return bool(_BASIC_HINT_RE.search(text or ""))
+
+
+def _looks_advanced(text: str) -> bool:
+    return bool(_ADVANCED_HINT_RE.search(text or ""))
+
+
+def _cjk_numeral_to_int(text: str) -> Optional[int]:
+    s = (text or "").strip()
+    if not s:
+        return None
+    total = 0
+    current = 0
+    seen = False
+    for ch in s:
+        value = _CJK_NUM_MAP.get(ch)
+        if value is None:
+            return None
+        seen = True
+        if value == 100:
+            current = max(1, current) * value
+            total += current
+            current = 0
+        elif value == 10:
+            current = max(1, current) * value
+        else:
+            current += value
+    if not seen:
+        return None
+    return total + current
+
+
+def _extract_order_number(text: str) -> Optional[int]:
+    if not text:
+        return None
+    match = _NUMERIC_PREFIX_RE.match(text)
+    if match:
+        number = match.group(1) or match.group(2)
+        if number:
+            try:
+                return int(number)
+            except ValueError:
+                return None
+    match = _CJK_NUM_PREFIX_RE.match(text)
+    if match:
+        return _cjk_numeral_to_int(match.group(1))
+    return None
+
+
+def _keypoint_local_sort_tuple(keypoint: Keypoint) -> tuple[Any, ...]:
+    page = keypoint.page if isinstance(keypoint.page, int) else 10**9
+    chunk = keypoint.chunk if isinstance(keypoint.chunk, int) else 10**9
+    created_at = keypoint.created_at.isoformat() if getattr(keypoint, "created_at", None) else "9999-12-31T23:59:59"
+    return (
+        str(keypoint.doc_id or ""),
+        page,
+        chunk,
+        created_at,
+        str(keypoint.id or ""),
+    )
+
+
+def _add_rule_candidate(
+    candidate_map: dict[tuple[str, str], _DependencyEdgeCandidate],
+    from_id: str,
+    to_id: str,
+    confidence: float,
+    source: str,
+) -> None:
+    if not from_id or not to_id or from_id == to_id:
+        return
+    key = (from_id, to_id)
+    current = candidate_map.get(key)
+    new_candidate = _DependencyEdgeCandidate(
+        from_id=from_id,
+        to_id=to_id,
+        confidence=round(_clamp_score(confidence, 0.5), 3),
+        source=source,
+    )
+    if current is None or new_candidate.confidence > current.confidence:
+        candidate_map[key] = new_candidate
+
+
+def _infer_rule_dependency_edges(
+    keypoints: list[Keypoint],
+    doc_map: dict[str, str],  # kept for future richer prompts/rules
+) -> list[_DependencyEdgeCandidate]:
+    """Infer conservative dependency edges using local structural heuristics."""
+    del doc_map  # currently unused in rule inference
+    if len(keypoints) < 2:
+        return []
+
+    candidate_map: dict[tuple[str, str], _DependencyEdgeCandidate] = {}
+    grouped: dict[str, list[Keypoint]] = defaultdict(list)
+    for kp in keypoints:
+        grouped[str(kp.doc_id or "")].append(kp)
+
+    for doc_kps in grouped.values():
+        ordered = sorted(doc_kps, key=_keypoint_local_sort_tuple)
+        for idx, left in enumerate(ordered):
+            left_text = str(left.text or "")
+            left_num = _extract_order_number(left_text)
+            for offset in (1, 2):
+                j = idx + offset
+                if j >= len(ordered):
+                    break
+                right = ordered[j]
+                right_text = str(right.text or "")
+                right_num = _extract_order_number(right_text)
+                overlap = _token_overlap_count(left_text, right_text)
+
+                if left_num is not None and right_num is not None and left_num < right_num:
+                    confidence = _RULE_EDGE_CONFIDENCE_STRONG if right_num - left_num <= 1 else _RULE_EDGE_CONFIDENCE_MEDIUM
+                    _add_rule_candidate(candidate_map, left.id, right.id, confidence, "rule:number_prefix")
+
+                if overlap >= 2 and _looks_basic(left_text) and _looks_advanced(right_text):
+                    _add_rule_candidate(
+                        candidate_map,
+                        left.id,
+                        right.id,
+                        _RULE_EDGE_CONFIDENCE_STRONG,
+                        "rule:basic_to_advanced",
+                    )
+
+                if overlap >= (2 if offset == 1 else 3):
+                    _add_rule_candidate(
+                        candidate_map,
+                        left.id,
+                        right.id,
+                        _RULE_EDGE_CONFIDENCE_LIGHT if offset == 2 else _RULE_EDGE_CONFIDENCE_MEDIUM,
+                        "rule:local_overlap",
+                    )
+
+    # Cross-document conservative linking for deduplicated KBs:
+    # only near neighbors in stable order with strong lexical overlap and a basic/ordered cue.
+    global_ordered = sorted(keypoints, key=_keypoint_local_sort_tuple)
+    for idx, left in enumerate(global_ordered):
+        left_text = str(left.text or "")
+        left_num = _extract_order_number(left_text)
+        for offset in (1, 2, 3):
+            j = idx + offset
+            if j >= len(global_ordered):
+                break
+            right = global_ordered[j]
+            if left.doc_id == right.doc_id:
+                continue
+            right_text = str(right.text or "")
+            overlap = _token_overlap_count(left_text, right_text)
+            if overlap < 2:
+                continue
+            if left_num is not None or _looks_basic(left_text):
+                _add_rule_candidate(
+                    candidate_map,
+                    left.id,
+                    right.id,
+                    _RULE_EDGE_CONFIDENCE_LIGHT,
+                    "rule:cross_doc_overlap",
+                )
+
+    return sorted(
+        candidate_map.values(),
+        key=lambda c: (-c.confidence, c.source, c.from_id, c.to_id),
+    )
+
+
+def _infer_llm_dependency_edges(
+    keypoints: list[Keypoint],
+    doc_map: dict[str, str],
+) -> tuple[list[_DependencyEdgeCandidate], dict[str, dict[str, Any]]]:
+    """Infer dependency edges with LLM and return candidates + optional attributes."""
+    if not keypoints:
+        return [], {}
+    kp_ids = {kp.id for kp in keypoints}
+    points_text = _format_keypoints_for_prompt(keypoints, doc_map)
+    payload = _invoke_prompt_json(DEPENDENCY_PROMPT, points_text=points_text)
+    edge_tuples, attr_hints = _parse_dependency_payload(payload, kp_ids)
+    candidates = [
+        _DependencyEdgeCandidate(
+            from_id=from_id,
+            to_id=to_id,
+            confidence=_LLM_EDGE_CONFIDENCE,
+            source="llm",
+        )
+        for from_id, to_id in edge_tuples
+    ]
+    return candidates, attr_hints
+
+
+def _merge_dependency_edges_with_constraints(
+    candidates: list[_DependencyEdgeCandidate],
+    valid_ids: set[str],
+) -> list[_DependencyEdgeCandidate]:
+    """Merge edge candidates by confidence while enforcing DAG and degree limits."""
+    if not candidates:
+        return []
+
+    seen: set[tuple[str, str]] = set()
+    in_degree: dict[str, int] = defaultdict(int)
+    out_degree: dict[str, int] = defaultdict(int)
+    adj: dict[str, list[str]] = defaultdict(list)
+    merged: list[_DependencyEdgeCandidate] = []
+
+    def source_rank(source: str) -> int:
+        if source == "llm":
+            return 0
+        if source.startswith("rule:number_prefix"):
+            return 1
+        if source.startswith("rule:basic_to_advanced"):
+            return 2
+        return 3
+
+    ordered = sorted(
+        candidates,
+        key=lambda c: (-c.confidence, source_rank(c.source), c.from_id, c.to_id),
+    )
+
+    for candidate in ordered:
+        from_id = candidate.from_id
+        to_id = candidate.to_id
+        if from_id not in valid_ids or to_id not in valid_ids or from_id == to_id:
+            continue
+        pair = (from_id, to_id)
+        if pair in seen:
+            continue
+        if out_degree[from_id] >= _MAX_OUT_DEGREE or in_degree[to_id] >= _MAX_IN_DEGREE:
+            continue
+        adj[from_id].append(to_id)
+        if _has_path(adj, to_id, from_id):
+            adj[from_id].pop()
+            continue
+        seen.add(pair)
+        out_degree[from_id] += 1
+        in_degree[to_id] += 1
+        merged.append(candidate)
+
+    return merged
+
+
 # ---------------------------------------------------------------------------
 # Dependency graph building
 # ---------------------------------------------------------------------------
@@ -335,10 +637,16 @@ def _parse_dependency_payload(
     seen_edges: set[tuple[str, str]] = set()
     if isinstance(raw_edges, list):
         for edge in raw_edges:
-            if not isinstance(edge, dict):
+            from_id = ""
+            to_id = ""
+            if isinstance(edge, dict):
+                from_id = edge.get("from_id", "")
+                to_id = edge.get("to_id", "")
+            elif isinstance(edge, (list, tuple)) and len(edge) >= 2:
+                from_id = str(edge[0] or "")
+                to_id = str(edge[1] or "")
+            else:
                 continue
-            from_id = edge.get("from_id", "")
-            to_id = edge.get("to_id", "")
             if from_id not in kp_ids or to_id not in kp_ids or from_id == to_id:
                 continue
             pair = (from_id, to_id)
@@ -378,38 +686,58 @@ def build_dependency_graph(
     force: bool = False,
 ) -> list[KeypointDependency]:
     """Build or retrieve cached dependency graph for a KB."""
-    if not force:
-        existing = (
-            db.query(KeypointDependency)
-            .filter(KeypointDependency.kb_id == kb_id)
-            .all()
-        )
-        if existing:
+    existing = (
+        db.query(KeypointDependency)
+        .filter(KeypointDependency.kb_id == kb_id)
+        .all()
+    )
+    if not force and existing:
+        if all(_dependency_relation_is_current(dep.relation) for dep in existing):
             return existing
+        logger.info(
+            "Rebuilding legacy dependency graph for kb=%s (version=%s)",
+            kb_id,
+            DEPENDENCY_GRAPH_VERSION,
+        )
+        force = True
 
     _, keypoints, _, doc_map = _load_clustered_kb_keypoints(db, user_id, kb_id)
     if not keypoints:
+        if force and existing:
+            _save_dependencies(db, kb_id, [], True)
         return []
 
-    doc_ids = {kp.doc_id for kp in keypoints}
-    if len(doc_ids) <= 1:
-        return _build_sequential_deps(db, kb_id, keypoints, force)
-
-    points_text = _format_keypoints_for_prompt(keypoints, doc_map)
     kp_ids = {kp.id for kp in keypoints}
-
+    rule_candidates = _infer_rule_dependency_edges(keypoints, doc_map)
+    llm_candidates: list[_DependencyEdgeCandidate] = []
+    llm_failed = False
     try:
-        payload = _invoke_prompt_json(DEPENDENCY_PROMPT, points_text=points_text)
-        edge_tuples, _ = _parse_dependency_payload(payload, kp_ids)
+        llm_candidates, _ = _infer_llm_dependency_edges(keypoints, doc_map)
     except Exception:
-        logger.exception("LLM dependency inference failed, falling back to sequential")
-        return _build_sequential_deps(db, kb_id, keypoints, force)
+        llm_failed = True
+        logger.exception("LLM dependency inference failed; using rule-only sparse graph")
 
-    if not edge_tuples:
-        return _build_sequential_deps(db, kb_id, keypoints, force)
+    merged_candidates = _merge_dependency_edges_with_constraints(
+        [*llm_candidates, *rule_candidates],
+        kp_ids,
+    )
+    edge_records = [
+        (candidate.from_id, candidate.to_id, candidate.confidence)
+        for candidate in merged_candidates
+    ]
 
-    edge_tuples = _remove_cycles(edge_tuples)
-    return _save_dependencies(db, kb_id, edge_tuples, force)
+    logger.info(
+        "Learning-path dependency graph built for kb=%s keypoints=%d edges=%d llm_edges=%d rule_edges=%d llm_failed=%s version=%s",
+        kb_id,
+        len(keypoints),
+        len(edge_records),
+        len(llm_candidates),
+        len(rule_candidates),
+        llm_failed,
+        DEPENDENCY_GRAPH_VERSION,
+    )
+
+    return _save_dependencies(db, kb_id, edge_records, force, relation=DEPENDENCY_RELATION)
 
 
 def _build_sequential_deps(
@@ -418,18 +746,19 @@ def _build_sequential_deps(
     keypoints: list[Keypoint],
     force: bool,
 ) -> list[KeypointDependency]:
-    """Build simple sequential dependencies from keypoint order."""
+    """Build simple sequential dependencies from keypoint order (debug/test helper)."""
     edge_tuples: list[tuple[str, str]] = []
     for idx in range(len(keypoints) - 1):
         edge_tuples.append((keypoints[idx].id, keypoints[idx + 1].id))
-    return _save_dependencies(db, kb_id, edge_tuples, force)
+    return _save_dependencies(db, kb_id, edge_tuples, force, relation=DEPENDENCY_RELATION)
 
 
 def _save_dependencies(
     db: Session,
     kb_id: str,
-    edge_tuples: list[tuple[str, str]],
+    edge_tuples: list[tuple[Any, ...]],
     force: bool,
+    relation: str = DEPENDENCY_RELATION,
 ) -> list[KeypointDependency]:
     """Persist dependency edges to DB, clearing old ones if force=True."""
     if force:
@@ -439,14 +768,21 @@ def _save_dependencies(
         db.commit()
 
     deps: list[KeypointDependency] = []
-    for from_id, to_id in edge_tuples:
+    for raw_edge in edge_tuples:
+        if len(raw_edge) < 2:
+            continue
+        from_id = str(raw_edge[0] or "")
+        to_id = str(raw_edge[1] or "")
+        confidence = _clamp_score(raw_edge[2], 1.0) if len(raw_edge) >= 3 else 1.0
+        if not from_id or not to_id or from_id == to_id:
+            continue
         dep = KeypointDependency(
             id=str(uuid4()),
             kb_id=kb_id,
             from_keypoint_id=from_id,
             to_keypoint_id=to_id,
-            relation="prerequisite",
-            confidence=1.0,
+            relation=relation,
+            confidence=confidence,
         )
         db.add(dep)
         deps.append(dep)
@@ -496,6 +832,36 @@ def _compute_depths(
             continue
         depth_map[node_id] = max(depth_map.get(pid, 0) for pid in prereqs) + 1
     return depth_map
+
+
+def _prioritized_topological_order(
+    all_ids: list[str],
+    edges: list[tuple[str, str]],
+    rank_key: Callable[[str], tuple[Any, ...]],
+) -> list[str]:
+    """Topological order that prioritizes available nodes by a rank key."""
+    in_degree: dict[str, int] = {nid: 0 for nid in all_ids}
+    adj: dict[str, list[str]] = defaultdict(list)
+    for from_id, to_id in edges:
+        if from_id in in_degree and to_id in in_degree:
+            adj[from_id].append(to_id)
+            in_degree[to_id] += 1
+
+    available = [nid for nid in all_ids if in_degree[nid] == 0]
+    ordered: list[str] = []
+    while available:
+        available.sort(key=rank_key)
+        node = available.pop(0)
+        ordered.append(node)
+        for neighbor in adj.get(node, []):
+            in_degree[neighbor] -= 1
+            if in_degree[neighbor] == 0:
+                available.append(neighbor)
+
+    remaining = [nid for nid in all_ids if nid not in set(ordered)]
+    remaining.sort(key=rank_key)
+    ordered.extend(remaining)
+    return ordered
 
 
 def _heuristic_difficulty(
@@ -631,7 +997,9 @@ def _infer_stage_hints(
     return hint_map
 
 
-def _fallback_modules(items: list[LearningPathItem]) -> tuple[list[LearningPathModule], dict[str, str]]:
+def _fallback_modules_by_document(
+    items: list[LearningPathItem],
+) -> tuple[list[LearningPathModule], dict[str, str]]:
     """Fallback module grouping by document."""
     grouped: dict[str, list[LearningPathItem]] = defaultdict(list)
     for item in items:
@@ -660,6 +1028,84 @@ def _fallback_modules(items: list[LearningPathItem]) -> tuple[list[LearningPathM
     return modules, kp_to_module
 
 
+def _fallback_modules(
+    items: list[LearningPathItem],
+    edges: list[tuple[str, str]],
+) -> tuple[list[LearningPathModule], dict[str, str]]:
+    """Fallback module grouping by dependency-connected components, then document."""
+    if not items:
+        return [], {}
+    if not edges:
+        return _fallback_modules_by_document(items)
+
+    item_map = {item.keypoint_id: item for item in items}
+    item_ids = set(item_map.keys())
+    undirected: dict[str, set[str]] = defaultdict(set)
+    for from_id, to_id in edges:
+        if from_id not in item_ids or to_id not in item_ids:
+            continue
+        undirected[from_id].add(to_id)
+        undirected[to_id].add(from_id)
+    for kp_id in item_ids:
+        undirected.setdefault(kp_id, set())
+
+    visited: set[str] = set()
+    components: list[list[str]] = []
+    for kp_id in sorted(item_ids, key=lambda nid: item_map[nid].step):
+        if kp_id in visited:
+            continue
+        queue = deque([kp_id])
+        comp: list[str] = []
+        while queue:
+            node = queue.popleft()
+            if node in visited:
+                continue
+            visited.add(node)
+            comp.append(node)
+            for neighbor in sorted(undirected.get(node, set()), key=lambda nid: item_map[nid].step):
+                if neighbor not in visited:
+                    queue.append(neighbor)
+        comp.sort(key=lambda nid: item_map[nid].step)
+        components.append(comp)
+
+    components.sort(key=lambda comp: item_map[comp[0]].step if comp else 10**9)
+    modules: list[LearningPathModule] = []
+    kp_to_module: dict[str, str] = {}
+    idx = 1
+
+    def _chunk_size(component_len: int) -> int:
+        if component_len <= 8:
+            return component_len
+        return 6
+
+    for comp in components:
+        size = _chunk_size(len(comp))
+        for start in range(0, len(comp), size):
+            part = comp[start : start + size]
+            if not part:
+                continue
+            module_id = f"module-{idx}"
+            idx += 1
+            first_item = item_map[part[0]]
+            short_title = (first_item.text or "知识点").strip()
+            if len(short_title) > 12:
+                short_title = f"{short_title[:12]}…"
+            modules.append(
+                LearningPathModule(
+                    module_id=module_id,
+                    name=f"学习模块 {len(modules) + 1}（{short_title}）",
+                    description="按依赖结构自动分组的知识点集合。",
+                    keypoint_ids=part,
+                )
+            )
+            for kp_id in part:
+                kp_to_module[kp_id] = module_id
+
+    if not modules:
+        return _fallback_modules_by_document(items)
+    return modules, kp_to_module
+
+
 def _infer_modules(
     items: list[LearningPathItem],
     edges: list[tuple[str, str]],
@@ -667,7 +1113,7 @@ def _infer_modules(
 ) -> tuple[list[LearningPathModule], dict[str, str]]:
     """Infer topic modules with LLM and fallback to document grouping."""
     if len(items) < 4 or len(items) > 60:
-        return _fallback_modules(items)
+        return _fallback_modules(items, edges)
 
     points_lines = []
     for item in items:
@@ -687,13 +1133,13 @@ def _infer_modules(
         )
     except Exception:
         logger.exception("LLM module inference failed; fallback to document grouping")
-        return _fallback_modules(items)
+        return _fallback_modules(items, edges)
 
     if not isinstance(payload, dict):
-        return _fallback_modules(items)
+        return _fallback_modules(items, edges)
     raw_modules = payload.get("modules")
     if not isinstance(raw_modules, list):
-        return _fallback_modules(items)
+        return _fallback_modules(items, edges)
 
     item_map = {item.keypoint_id: item for item in items}
     modules: list[LearningPathModule] = []
@@ -745,7 +1191,7 @@ def _infer_modules(
             kp_to_module[kp_id] = module_id
 
     if not modules:
-        return _fallback_modules(items)
+        return _fallback_modules(items, edges)
     return modules, kp_to_module
 
 
@@ -953,12 +1399,25 @@ def generate_learning_path(
     kp_map = {kp.id: kp for kp in keypoints}
 
     deps = build_dependency_graph(db, user_id, kb_id, force=force)
-    edge_tuples = [
-        (dep.from_keypoint_id, dep.to_keypoint_id)
+    edge_records = [
+        (
+            dep.from_keypoint_id,
+            dep.to_keypoint_id,
+            round(float(dep.confidence if dep.confidence is not None else 1.0), 3),
+        )
         for dep in deps
         if dep.from_keypoint_id in kp_map and dep.to_keypoint_id in kp_map
     ]
-    edge_tuples = _remove_cycles(edge_tuples)
+    edge_tuples = _remove_cycles([(from_id, to_id) for from_id, to_id, _ in edge_records])
+    valid_pairs = set(edge_tuples)
+    edge_records = [
+        (from_id, to_id, confidence)
+        for from_id, to_id, confidence in edge_records
+        if (from_id, to_id) in valid_pairs
+    ]
+    edge_confidence_map = {
+        (from_id, to_id): confidence for from_id, to_id, confidence in edge_records
+    }
 
     prereq_map: dict[str, list[str]] = defaultdict(list)
     outgoing_map: dict[str, list[str]] = defaultdict(list)
@@ -966,14 +1425,15 @@ def generate_learning_path(
         prereq_map[to_id].append(from_id)
         outgoing_map[from_id].append(to_id)
 
-    sorted_ids = _topological_sort([kp.id for kp in keypoints], edge_tuples)
+    all_ids = [kp.id for kp in keypoints]
+    sorted_ids = _topological_sort(all_ids, edge_tuples)
+    base_order_idx = {kp_id: idx for idx, kp_id in enumerate(sorted_ids)}
     depth_map = _compute_depths(sorted_ids, prereq_map)
     max_depth = max(depth_map.values(), default=0)
 
     llm_hints = _infer_stage_hints(keypoints, doc_map, edge_tuples, ability_level)
 
-    items: list[LearningPathItem] = []
-    step = 0
+    runtime_meta: dict[str, dict[str, Any]] = {}
     for kp_id in sorted_ids:
         kp = kp_map.get(kp_id)
         if not kp:
@@ -1000,8 +1460,13 @@ def generate_learning_path(
             ability_level=ability_level,
         )
 
-        unmet_prereqs = []
-        for prereq_id in prereq_map.get(kp_id, []):
+        prereq_ids = sorted(
+            prereq_map.get(kp_id, []),
+            key=lambda pid: (depth_map.get(pid, 0), base_order_idx.get(pid, 10**9), pid),
+        )
+        unmet_prereq_ids: list[str] = []
+        unmet_prereqs: list[str] = []
+        for prereq_id in prereq_ids:
             prereq_kp = kp_map.get(prereq_id)
             prereq_cluster = cluster_map.get(prereq_id)
             prereq_mastery = (
@@ -1015,35 +1480,81 @@ def generate_learning_path(
                 else str(prereq_kp.text or "") if prereq_kp else ""
             )
             if prereq_text and prereq_mastery < MASTERY_PREREQ_THRESHOLD:
+                unmet_prereq_ids.append(prereq_id)
                 unmet_prereqs.append(prereq_text)
+        difficulty = round(_clamp_score(difficulty, 0.5), 3)
+        importance = round(_clamp_score(importance, 0.5), 3)
+        runtime_meta[kp_id] = {
+            "mastery": mastery,
+            "attempt_count": attempt_count,
+            "difficulty": difficulty,
+            "importance": importance,
+            "stage": stage,
+            "prerequisite_ids": prereq_ids,
+            "unmet_prereq_ids": unmet_prereq_ids,
+            "unmet_prereq_texts": unmet_prereqs,
+            "is_unlocked": len(unmet_prereq_ids) == 0,
+            "path_level": depth_map.get(kp_id, 0),
+            "unlocks_count": outgoing_count,
+            "estimated_time": _estimate_learning_time(
+                stage=stage,
+                difficulty=difficulty,
+                text=kp.text,
+                explanation=cluster.explanation,
+                mastery=mastery,
+            ),
+            "member_count": cluster.member_count,
+            "source_doc_ids": cluster.source_doc_ids,
+            "source_doc_names": cluster.source_doc_names,
+        }
 
-        step += 1
+    def _display_rank_key(node_id: str) -> tuple[Any, ...]:
+        meta = runtime_meta.get(node_id, {})
+        kp = kp_map.get(node_id)
+        return (
+            0 if meta.get("is_unlocked", True) else 1,
+            int(meta.get("path_level", 0)),
+            -int(meta.get("unlocks_count", 0)),
+            -float(meta.get("importance", 0.0)),
+            float(meta.get("mastery", 0.0)),
+            _keypoint_local_sort_tuple(kp) if kp is not None else ("", 10**9, 10**9, "9999", node_id),
+            str(node_id),
+        )
+
+    display_ids = _prioritized_topological_order(all_ids, edge_tuples, _display_rank_key)
+
+    items: list[LearningPathItem] = []
+    for step, kp_id in enumerate(display_ids, start=1):
+        kp = kp_map.get(kp_id)
+        cluster = cluster_map.get(kp_id)
+        meta = runtime_meta.get(kp_id)
+        if not kp or not cluster or not meta:
+            continue
         items.append(
             LearningPathItem(
                 keypoint_id=kp.id,
                 text=kp.text,
                 doc_id=kp.doc_id,
                 doc_name=doc_map.get(kp.doc_id),
-                mastery_level=mastery,
-                priority=mastery_priority(mastery),
+                mastery_level=float(meta["mastery"]),
+                priority=mastery_priority(float(meta["mastery"])),
                 step=step,
-                prerequisites=unmet_prereqs,
-                action=mastery_action(mastery, attempt_count),
-                stage=stage,
+                prerequisites=list(meta["unmet_prereq_texts"]),
+                prerequisite_ids=list(meta["prerequisite_ids"]),
+                unmet_prerequisite_ids=list(meta["unmet_prereq_ids"]),
+                is_unlocked=bool(meta["is_unlocked"]),
+                action=mastery_action(float(meta["mastery"]), int(meta["attempt_count"])),
+                stage=str(meta["stage"]),
                 module="module-1",
-                difficulty=round(_clamp_score(difficulty, 0.5), 3),
-                importance=round(_clamp_score(importance, 0.5), 3),
-                estimated_time=_estimate_learning_time(
-                    stage=stage,
-                    difficulty=_clamp_score(difficulty, 0.5),
-                    text=kp.text,
-                    explanation=cluster.explanation,
-                    mastery=mastery,
-                ),
+                difficulty=float(meta["difficulty"]),
+                importance=float(meta["importance"]),
+                path_level=int(meta["path_level"]),
+                unlocks_count=int(meta["unlocks_count"]),
+                estimated_time=int(meta["estimated_time"]),
                 milestone=False,
-                member_count=cluster.member_count,
-                source_doc_ids=cluster.source_doc_ids,
-                source_doc_names=cluster.source_doc_names,
+                member_count=int(meta["member_count"]),
+                source_doc_ids=list(meta["source_doc_ids"]),
+                source_doc_names=list(meta["source_doc_names"]),
             )
         )
 
@@ -1051,11 +1562,15 @@ def generate_learning_path(
         items = items[:limit]
 
     visible_ids = {item.keypoint_id for item in items}
-    edge_tuples = [
-        (from_id, to_id)
-        for from_id, to_id in edge_tuples
+    edge_records = [
+        (from_id, to_id, confidence)
+        for from_id, to_id, confidence in edge_records
         if from_id in visible_ids and to_id in visible_ids
     ]
+    edge_tuples = [(from_id, to_id) for from_id, to_id, _ in edge_records]
+    edge_confidence_map = {
+        (from_id, to_id): confidence for from_id, to_id, confidence in edge_records
+    }
 
     modules, kp_to_module = _infer_modules(items, edge_tuples, ability_level)
     item_map = {item.keypoint_id: item for item in items}
@@ -1074,7 +1589,12 @@ def generate_learning_path(
     path_summary = _build_path_summary(items, stages, modules, ability_level)
 
     edges = [
-        LearningPathEdge(from_id=from_id, to_id=to_id, relation="prerequisite")
+        LearningPathEdge(
+            from_id=from_id,
+            to_id=to_id,
+            relation="prerequisite",
+            confidence=float(edge_confidence_map.get((from_id, to_id), 1.0)),
+        )
         for from_id, to_id in edge_tuples
     ]
     result_payload = (items, edges, stages, modules, path_summary)
@@ -1108,7 +1628,7 @@ def invalidate_learning_path_result_cache(db: Session | None, kb_id: Optional[st
     removed = 0
     with _learning_path_result_cache_lock:
         for key in list(_learning_path_result_cache.keys()):
-            _, cached_kb_id, _ = key
+            _, cached_kb_id, _, _ = key
             if cached_kb_id != kb_id:
                 continue
             _learning_path_result_cache.pop(key, None)

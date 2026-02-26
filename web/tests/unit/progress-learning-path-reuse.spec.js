@@ -297,4 +297,93 @@ describe('Progress learning-path reuse', () => {
     expect(html).toContain('KB聚合')
     expect(html).toContain('来自 2 个文档')
   }, 20000)
+
+  it('renders unlocked queue and blocked prerequisite hints from learning path metadata', async () => {
+    localStorage.setItem(
+      'gradtutor_app_ctx_v1:test',
+      JSON.stringify({ selectedKbId: 'kb-1', selectedDocId: '' }),
+    )
+    sessionStorage.setItem(
+      'gradtutor_progress_rec_v1:test:kb-1',
+      JSON.stringify({
+        saved_at: Date.now(),
+        payload: {
+          items: [],
+          next_step: null,
+          generated_at: '',
+          learning_path: [
+            {
+              keypoint_id: 'kp-unlocked',
+              text: '矩阵定义',
+              doc_id: 'doc-1',
+              doc_name: '矩阵.pdf',
+              mastery_level: 0.1,
+              priority: 'high',
+              step: 1,
+              prerequisites: [],
+              prerequisite_ids: [],
+              unmet_prerequisite_ids: [],
+              is_unlocked: true,
+              action: 'study',
+              stage: 'foundation',
+              module: 'module-1',
+              difficulty: 0.2,
+              importance: 0.8,
+              path_level: 0,
+              unlocks_count: 1,
+              estimated_time: 8,
+              milestone: false,
+              member_count: 1,
+              source_doc_ids: [],
+              source_doc_names: [],
+            },
+            {
+              keypoint_id: 'kp-blocked',
+              text: '特征值应用',
+              doc_id: 'doc-1',
+              doc_name: '矩阵.pdf',
+              mastery_level: 0.0,
+              priority: 'high',
+              step: 2,
+              prerequisites: [],
+              prerequisite_ids: ['kp-unlocked'],
+              unmet_prerequisite_ids: ['kp-unlocked'],
+              is_unlocked: false,
+              action: 'quiz',
+              stage: 'advanced',
+              module: 'module-1',
+              difficulty: 0.8,
+              importance: 0.9,
+              path_level: 1,
+              unlocks_count: 0,
+              estimated_time: 20,
+              milestone: false,
+              member_count: 1,
+              source_doc_ids: [],
+              source_doc_names: [],
+            },
+          ],
+          learning_path_edges: [
+            { from_id: 'kp-unlocked', to_id: 'kp-blocked', relation: 'prerequisite', confidence: 0.72 },
+          ],
+          learning_path_stages: [],
+          learning_path_modules: [],
+          learning_path_summary: {},
+        },
+      }),
+    )
+
+    const { wrapper } = await mountAppWithRouter('/progress')
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+
+    const html = wrapper.html()
+    expect(html).toContain('当前可学队列')
+    expect(html).toContain('当前可学')
+    expect(html).toContain('阻塞')
+    expect(html).toContain('缺少前置')
+    expect(html).toContain('矩阵定义')
+  }, 20000)
 })

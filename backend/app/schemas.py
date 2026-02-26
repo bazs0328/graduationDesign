@@ -426,11 +426,16 @@ class LearningPathItem(BaseModel):
     priority: str
     step: int = 0
     prerequisites: List[str] = []
+    prerequisite_ids: List[str] = []
+    unmet_prerequisite_ids: List[str] = []
+    is_unlocked: bool = True
     action: str = "study"
     stage: str = "foundation"
     module: str = "module-1"
     difficulty: float = 0.5
     importance: float = 0.5
+    path_level: int = 0
+    unlocks_count: int = 0
     estimated_time: int = 10
     milestone: bool = False
     member_count: int = 1
@@ -442,6 +447,7 @@ class LearningPathEdge(BaseModel):
     from_id: str
     to_id: str
     relation: str = "prerequisite"
+    confidence: float = 1.0
 
 
 class LearningPathStage(BaseModel):
