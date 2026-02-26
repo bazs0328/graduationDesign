@@ -32,11 +32,11 @@
       </header>
       <div class="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
         <router-view v-slot="{ Component }">
-          <keep-alive>
-            <transition name="fade" mode="out-in">
+          <transition name="fade">
+            <keep-alive>
               <component :is="Component" />
-            </transition>
-          </keep-alive>
+            </keep-alive>
+          </transition>
         </router-view>
       </div>
     </main>

@@ -137,6 +137,8 @@ describe('Progress activity pagination', () => {
     await nextTick()
     await flushPromises()
     await nextTick()
+    await flushPromises()
+    await nextTick()
 
     const activityCalls = apiGet.mock.calls
       .map(([path]) => parsePath(path))
@@ -151,6 +153,8 @@ describe('Progress activity pagination', () => {
     const loadMoreBtn = wrapper.findAll('button').find((btn) => btn.text().includes('加载更多'))
     expect(loadMoreBtn).toBeTruthy()
     await loadMoreBtn.trigger('click')
+    await flushPromises()
+    await nextTick()
     await flushPromises()
     await nextTick()
     await flushPromises()

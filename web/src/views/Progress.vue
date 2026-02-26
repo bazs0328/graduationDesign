@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6 md:space-y-8 max-w-6xl mx-auto">
     <!-- Top Stats Bar -->
-    <section v-if="!busy.init && progress" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+    <section v-if="progress" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
       <div v-for="stat in topStats" :key="stat.label" class="bg-card border border-border rounded-xl p-4 sm:p-6 shadow-sm flex items-center gap-4">
         <div class="w-12 h-12 rounded-lg flex items-center justify-center" :class="stat.color">
           <component :is="stat.icon" class="w-6 h-6" />
@@ -12,7 +12,7 @@
         </div>
       </div>
     </section>
-    <section v-else-if="busy.init" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+    <section v-else-if="showTopStatsSkeleton" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
       <div v-for="index in 4" :key="`top-skeleton-${index}`" class="bg-card border border-border rounded-xl p-4 sm:p-6 shadow-sm">
         <SkeletonBlock type="card" :lines="3" />
       </div>
@@ -21,7 +21,7 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-8">
       <!-- Left: KB Breakdown & Recommendations -->
       <div class="lg:col-span-2 space-y-8">
-        <section v-if="busy.init" class="bg-card border border-border rounded-xl p-6 shadow-sm">
+        <section v-if="showProfileSkeleton" class="bg-card border border-border rounded-xl p-6 shadow-sm">
           <SkeletonBlock type="card" :lines="6" />
         </section>
         <LearnerProfileCard v-else :profile="profile" :kb-id="profileContextKbId" />
@@ -31,6 +31,10 @@
             <div class="flex items-center gap-3">
               <Database class="w-6 h-6 text-primary" />
               <h2 class="text-xl md:text-2xl font-bold">知识库统计</h2>
+              <span v-if="showProgressRefreshIndicator" class="text-sm text-muted-foreground flex items-center gap-2">
+                <RefreshCw class="w-4 h-4 animate-spin" />
+                <span>正在刷新统计...</span>
+              </span>
             </div>
             <select v-model="selectedKbId" class="bg-background border border-input rounded-lg px-4 py-2 outline-none focus:ring-2 focus:ring-primary text-sm min-w-[200px]">
               <option disabled value="">选择知识库…</option>
@@ -38,7 +42,7 @@
             </select>
           </div>
 
-          <div v-if="busy.init" class="py-2">
+          <div v-if="showKbStatsSkeleton" class="py-2">
             <SkeletonBlock type="card" :lines="5" />
           </div>
           <div v-else-if="kbProgress" class="grid grid-cols-2 md:grid-cols-4 gap-6 animate-in fade-in slide-in-from-bottom-2">
@@ -64,10 +68,10 @@
             <div class="flex items-center gap-3">
               <Sparkles class="w-6 h-6 text-primary" />
               <h2 class="text-xl md:text-2xl font-bold">智能推荐</h2>
-              <span v-if="recommendationsUpdatedLabel && !busy.init" class="text-xs text-muted-foreground">
+              <span v-if="recommendationsUpdatedLabel" class="text-xs text-muted-foreground">
                 更新于 {{ recommendationsUpdatedLabel }}
               </span>
-              <span v-if="busy.recommendations && !busy.init" class="text-sm text-muted-foreground flex items-center gap-2">
+              <span v-if="showRecommendationsRefreshIndicator" class="text-sm text-muted-foreground flex items-center gap-2">
                 <RefreshCw class="w-4 h-4 animate-spin" />
                 <span>正在加载推荐...</span>
               </span>
@@ -77,7 +81,7 @@
             </button>
           </div>
 
-          <div v-if="busy.init || busy.recommendations" class="space-y-4">
+          <div v-if="showRecommendationsSkeleton" class="space-y-4">
             <SkeletonBlock type="card" :lines="8" />
           </div>
           <template v-else>
@@ -184,7 +188,7 @@
             <div class="flex items-center gap-3">
               <GitBranch class="w-6 h-6 text-primary" />
               <h2 class="text-xl md:text-2xl font-bold">学习路径</h2>
-              <span v-if="busy.pathLoad && !busy.init" class="text-sm text-muted-foreground flex items-center gap-2">
+              <span v-if="showLearningPathRefreshIndicator" class="text-sm text-muted-foreground flex items-center gap-2">
                 <RefreshCw class="w-4 h-4 animate-spin" />
                 <span>正在加载学习路径...</span>
               </span>
@@ -194,14 +198,13 @@
               </span>
             </div>
             <div class="flex items-center gap-2">
-              <button @click="rebuildPath" class="p-2 hover:bg-accent rounded-lg transition-colors text-xs flex items-center gap-1" :disabled="busy.pathBuild || busy.pathLoad">
+              <button @click="rebuildPath" class="p-2 hover:bg-accent rounded-lg transition-colors" :disabled="busy.pathBuild || busy.pathLoad">
                 <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': busy.pathBuild || busy.pathLoad }" />
-                <span class="hidden sm:inline">重建</span>
               </button>
             </div>
           </div>
 
-          <div v-if="busy.init || busy.pathLoad || busy.pathBuild" class="space-y-4">
+          <div v-if="showLearningPathSkeleton" class="space-y-4">
             <SkeletonBlock type="card" :lines="8" />
           </div>
           <div v-else-if="learningPath.length" class="space-y-6">
@@ -423,10 +426,14 @@
         <div class="flex items-center gap-3 mb-6">
           <Activity class="w-6 h-6 text-primary" />
           <h2 class="text-xl font-bold">最近动态</h2>
+          <span v-if="showActivityRefreshIndicator" class="text-sm text-muted-foreground flex items-center gap-2">
+            <RefreshCw class="w-4 h-4 animate-spin" />
+            <span>正在刷新...</span>
+          </span>
         </div>
 
         <div class="flex-1 overflow-y-auto space-y-6 pr-2">
-          <div v-if="busy.init" class="space-y-4">
+          <div v-if="showActivitySkeleton" class="space-y-4">
             <SkeletonBlock type="list" :lines="6" />
           </div>
           <EmptyState
@@ -458,7 +465,7 @@
           </div>
         </div>
         <div
-          v-if="!busy.init && activity.length > 0"
+          v-if="showActivityFooter"
           class="mt-4 pt-4 border-t border-border/70 flex items-center justify-between gap-3 text-xs"
         >
           <span class="text-muted-foreground">已显示 {{ activity.length }} / {{ activityTotal }}</span>
@@ -478,7 +485,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onActivated, computed, watch, defineAsyncComponent } from 'vue'
+import { ref, onMounted, onActivated, onDeactivated, computed, watch, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   FileText,
@@ -556,6 +563,13 @@ const learningPathEdges = ref([])
 const learningPathStages = ref([])
 const learningPathModules = ref([])
 const learningPathSummary = ref({})
+const hasBootstrapped = ref(false)
+const isPageActive = ref(false)
+const activityLoaded = ref(false)
+const recommendationsStateKbId = ref('')
+const recommendationsLoadedKbId = ref('')
+const learningPathStateKbId = ref('')
+const learningPathLoadedKbId = ref('')
 const kbs = computed(() => appContext.kbs)
 const selectedKbId = computed({
   get: () => appContext.selectedKbId,
@@ -563,6 +577,9 @@ const selectedKbId = computed({
 })
 const busy = ref({
   init: false,
+  progress: false,
+  profile: false,
+  activity: false,
   recommendations: false,
   pathLoad: false,
   pathBuild: false,
@@ -595,6 +612,55 @@ const kbStatItems = computed(() => {
     { label: '平均分', value: `${Math.round(kbProgress.value.avg_score * 100)}%` },
   ]
 })
+
+const recommendationsLoadedForSelectedKb = computed(() => (
+  !!selectedKbId.value && recommendationsLoadedKbId.value === selectedKbId.value
+))
+
+const hasRecommendationsContentForSelectedKb = computed(() => (
+  !!selectedKbId.value
+  && recommendationsStateKbId.value === selectedKbId.value
+  && (recommendations.value.length > 0 || !!nextRecommendation.value)
+))
+
+const learningPathLoadedForSelectedKb = computed(() => (
+  !!selectedKbId.value && learningPathLoadedKbId.value === selectedKbId.value
+))
+
+const hasLearningPathContentForSelectedKb = computed(() => (
+  !!selectedKbId.value
+  && learningPathStateKbId.value === selectedKbId.value
+  && (
+    learningPath.value.length > 0
+    || Object.keys(learningPathSummary.value || {}).length > 0
+  )
+))
+
+const showTopStatsSkeleton = computed(() => busy.value.progress && !progress.value)
+const showProfileSkeleton = computed(() => busy.value.profile && !profile.value)
+const showKbStatsSkeleton = computed(() => busy.value.progress && !progress.value)
+const showProgressRefreshIndicator = computed(() => busy.value.progress && !!progress.value)
+const showRecommendationsSkeleton = computed(() => (
+  !!selectedKbId.value
+  && busy.value.recommendations
+  && !recommendationsLoadedForSelectedKb.value
+  && !hasRecommendationsContentForSelectedKb.value
+))
+const showRecommendationsRefreshIndicator = computed(() => (
+  busy.value.recommendations && !showRecommendationsSkeleton.value
+))
+const showLearningPathSkeleton = computed(() => (
+  !!selectedKbId.value
+  && (busy.value.pathLoad || busy.value.pathBuild)
+  && !learningPathLoadedForSelectedKb.value
+  && !hasLearningPathContentForSelectedKb.value
+))
+const showLearningPathRefreshIndicator = computed(() => (
+  busy.value.pathLoad && !showLearningPathSkeleton.value
+))
+const showActivitySkeleton = computed(() => busy.value.activity && !activityLoaded.value)
+const showActivityRefreshIndicator = computed(() => busy.value.activity && activityLoaded.value)
+const showActivityFooter = computed(() => activity.value.length > 0)
 
 const itemById = computed(() => {
   const map = {}
@@ -775,18 +841,26 @@ function normalizeLearningPathItems(items) {
 }
 
 async function fetchProgress() {
+  if (busy.value.progress) return
+  busy.value.progress = true
   try {
     progress.value = await apiGet(`/api/progress?user_id=${encodeURIComponent(resolvedUserId.value)}`)
   } catch {
     // error toast handled globally
+  } finally {
+    busy.value.progress = false
   }
 }
 
 async function fetchProfile() {
+  if (busy.value.profile) return
+  busy.value.profile = true
   try {
     profile.value = await getProfile(resolvedUserId.value)
   } catch {
     // error toast handled globally
+  } finally {
+    busy.value.profile = false
   }
 }
 
@@ -801,6 +875,9 @@ async function fetchActivity(options = {}) {
     : Math.max(0, Number.isFinite(Number(offset)) ? Number(offset) : activity.value.length)
   if (append) {
     busy.value.activityMore = true
+  } else {
+    if (busy.value.activity) return
+    busy.value.activity = true
   }
   try {
     const params = new URLSearchParams()
@@ -823,6 +900,9 @@ async function fetchActivity(options = {}) {
   } finally {
     if (append) {
       busy.value.activityMore = false
+    } else {
+      busy.value.activity = false
+      activityLoaded.value = true
     }
   }
 }
@@ -832,12 +912,28 @@ async function loadMoreActivity() {
   await fetchActivity({ reset: false, append: true, offset: activity.value.length })
 }
 
-function resetLearningPathState() {
+function resetRecommendationsState(options = {}) {
+  const { clearLoaded = true } = options
+  recommendations.value = []
+  nextRecommendation.value = null
+  recommendationsUpdatedAt.value = ''
+  recommendationsStateKbId.value = ''
+  if (clearLoaded) {
+    recommendationsLoadedKbId.value = ''
+  }
+}
+
+function resetLearningPathState(options = {}) {
+  const { clearLoaded = true } = options
   learningPath.value = []
   learningPathEdges.value = []
   learningPathStages.value = []
   learningPathModules.value = []
   learningPathSummary.value = {}
+  learningPathStateKbId.value = ''
+  if (clearLoaded) {
+    learningPathLoadedKbId.value = ''
+  }
 }
 
 function recommendationCacheKey(kbId) {
@@ -887,23 +983,31 @@ function writeRecommendationCache(kbId) {
 }
 
 function applyRecommendationsPayload(payload = {}, options = {}) {
-  const { hydrateLearningPath = true } = options
+  const {
+    hydrateLearningPath = true,
+    kbId = '',
+  } = options
   recommendations.value = normalizeRecommendationItems(payload?.items || [])
   nextRecommendation.value = payload?.next_step || null
   recommendationsUpdatedAt.value = payload?.generated_at || ''
+  if (kbId) {
+    recommendationsStateKbId.value = kbId
+    recommendationsLoadedKbId.value = kbId
+  }
   if (hydrateLearningPath) {
-    applyLearningPathPayload(payload)
+    applyLearningPathPayload(payload, { kbId })
   }
 }
 
 function hydrateRecommendationsFromCache(kbId, options = {}) {
   const payload = readRecommendationCache(kbId)
   if (!payload) return false
-  applyRecommendationsPayload(payload, options)
+  applyRecommendationsPayload(payload, { ...options, kbId })
   return true
 }
 
-function applyLearningPathPayload(payload = {}) {
+function applyLearningPathPayload(payload = {}, options = {}) {
+  const { kbId = '' } = options
   learningPath.value = normalizeLearningPathItems(
     Array.isArray(payload?.learning_path)
       ? payload.learning_path
@@ -919,34 +1023,62 @@ function applyLearningPathPayload(payload = {}) {
     ? payload.learning_path_modules
     : (payload?.modules || [])
   learningPathSummary.value = payload?.learning_path_summary || payload?.path_summary || {}
+  if (kbId) {
+    learningPathStateKbId.value = kbId
+    learningPathLoadedKbId.value = kbId
+  }
 }
 
 async function fetchRecommendations(options = {}) {
-  const { hydrateLearningPath = true, preferCache = false } = options
+  const {
+    hydrateLearningPath = true,
+    preferCache = false,
+    refreshAfterCache = false,
+  } = options
   if (!selectedKbId.value) {
+    resetRecommendationsState()
     if (hydrateLearningPath) resetLearningPathState()
     return
   }
   const requestKbId = selectedKbId.value
+  const hadSameKbRecommendations = recommendationsStateKbId.value === requestKbId
+  const hadSameKbLearningPath = learningPathStateKbId.value === requestKbId
+
   if (preferCache && hydrateRecommendationsFromCache(requestKbId, { hydrateLearningPath })) {
-    return
+    if (!refreshAfterCache) {
+      return
+    }
   }
+
   busy.value.recommendations = true
   if (hydrateLearningPath) {
     busy.value.pathLoad = true
-    resetLearningPathState()
+    if (!hadSameKbLearningPath && learningPathStateKbId.value !== requestKbId) {
+      resetLearningPathState({ clearLoaded: false })
+    }
   }
-  nextRecommendation.value = null
-  recommendationsUpdatedAt.value = ''
+  if (!hadSameKbRecommendations && recommendationsStateKbId.value !== requestKbId) {
+    resetRecommendationsState({ clearLoaded: false })
+  }
   try {
     const res = await apiGet(`/api/recommendations?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(requestKbId)}&limit=6`)
     if (selectedKbId.value !== requestKbId) return
-    applyRecommendationsPayload(res, { hydrateLearningPath })
+    applyRecommendationsPayload(res, { hydrateLearningPath, kbId: requestKbId })
     writeRecommendationCache(requestKbId)
   } catch {
     if (selectedKbId.value === requestKbId) {
-      recommendations.value = []
-      if (hydrateLearningPath) resetLearningPathState()
+      if (!hadSameKbRecommendations) {
+        resetRecommendationsState({ clearLoaded: false })
+        recommendationsStateKbId.value = requestKbId
+      }
+      recommendationsLoadedKbId.value = requestKbId
+      if (hydrateLearningPath) {
+        if (!hadSameKbLearningPath) {
+          resetLearningPathState({ clearLoaded: false })
+          learningPathStateKbId.value = requestKbId
+        }
+        learningPathLoadedKbId.value = requestKbId
+      }
     }
     // error toast handled globally
   } finally {
@@ -960,13 +1092,21 @@ async function fetchRecommendations(options = {}) {
 async function fetchLearningPath() {
   if (!selectedKbId.value) return
   const requestKbId = selectedKbId.value
+  const hadSameKbLearningPath = learningPathStateKbId.value === requestKbId
   busy.value.pathLoad = true
   try {
     const res = await apiGet(`/api/learning-path?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(requestKbId)}&limit=20`)
     if (selectedKbId.value !== requestKbId) return
-    applyLearningPathPayload(res)
+    applyLearningPathPayload(res, { kbId: requestKbId })
     writeRecommendationCache(requestKbId)
   } catch {
+    if (selectedKbId.value === requestKbId) {
+      if (!hadSameKbLearningPath) {
+        resetLearningPathState({ clearLoaded: false })
+        learningPathStateKbId.value = requestKbId
+      }
+      learningPathLoadedKbId.value = requestKbId
+    }
     // error toast handled globally
   } finally {
     busy.value.pathLoad = false
@@ -1548,7 +1688,42 @@ async function syncFromRoute(options = {}) {
   }
 }
 
+function clearKbScopedProgressState(nextKbId = '') {
+  if (!nextKbId) {
+    resetRecommendationsState()
+    resetLearningPathState()
+    return
+  }
+  if (recommendationsStateKbId.value && recommendationsStateKbId.value !== nextKbId) {
+    resetRecommendationsState()
+  }
+  if (learningPathStateKbId.value && learningPathStateKbId.value !== nextKbId) {
+    resetLearningPathState()
+  }
+}
+
+async function refreshProgressPageData(options = {}) {
+  const {
+    preferRecommendationCache = false,
+    refreshRecommendationAfterCache = false,
+  } = options
+
+  await Promise.all([
+    fetchProfile(),
+    fetchProgress(),
+    fetchActivity(),
+    selectedKbId.value
+      ? fetchRecommendations({
+        hydrateLearningPath: true,
+        preferCache: preferRecommendationCache,
+        refreshAfterCache: refreshRecommendationAfterCache,
+      })
+      : Promise.resolve(),
+  ])
+}
+
 onMounted(async () => {
+  isPageActive.value = true
   busy.value.init = true
   try {
     try {
@@ -1557,49 +1732,57 @@ onMounted(async () => {
       // error toast handled globally
     }
     await syncFromRoute({ ensureKbs: false })
-    await Promise.all([
-      fetchProfile(),
-      fetchProgress(),
-      fetchActivity(),
-      selectedKbId.value
-        ? fetchRecommendations({ hydrateLearningPath: true, preferCache: true })
-        : Promise.resolve(),
-    ])
+    await refreshProgressPageData({
+      preferRecommendationCache: true,
+      refreshRecommendationAfterCache: true,
+    })
   } finally {
     busy.value.init = false
+    hasBootstrapped.value = true
   }
 })
 
 onActivated(async () => {
+  isPageActive.value = true
+  if (!hasBootstrapped.value) return
   await syncFromRoute({
     ensureKbs: !appContext.kbs.length,
   })
-  if (selectedKbId.value && !busy.value.recommendations) {
-    const hasRec = Array.isArray(recommendations.value) && recommendations.value.length > 0
-    const hasPath = Array.isArray(learningPath.value) && learningPath.value.length > 0
-    if (!hasRec || !hasPath) {
-      fetchRecommendations({ hydrateLearningPath: true, preferCache: true })
-    }
-  }
+  void refreshProgressPageData({
+    preferRecommendationCache: true,
+    refreshRecommendationAfterCache: true,
+  })
 })
 
-watch(selectedKbId, () => {
+onDeactivated(() => {
+  isPageActive.value = false
+})
+
+watch(selectedKbId, (nextKbId, prevKbId) => {
+  if (nextKbId === prevKbId) return
   if (busy.value.init) return
-  if (selectedKbId.value) {
-    fetchRecommendations({ hydrateLearningPath: true, preferCache: true })
+  if (syncingRouteContext.value) return
+  if (nextKbId) {
+    clearKbScopedProgressState(nextKbId)
+    void fetchRecommendations({
+      hydrateLearningPath: true,
+      preferCache: true,
+      refreshAfterCache: true,
+    })
   } else {
-    recommendations.value = []
-    nextRecommendation.value = null
-    recommendationsUpdatedAt.value = ''
-    resetLearningPathState()
+    clearKbScopedProgressState('')
   }
 })
 
 watch(
   () => route.fullPath,
   async () => {
-    if (busy.value.init) return
+    if (busy.value.init || !isPageActive.value || route.path !== '/progress') return
     await syncFromRoute({ ensureKbs: false })
+    void refreshProgressPageData({
+      preferRecommendationCache: true,
+      refreshRecommendationAfterCache: true,
+    })
   }
 )
 </script>

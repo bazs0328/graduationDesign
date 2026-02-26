@@ -182,7 +182,7 @@ describe('Progress learning-path reuse', () => {
     expect(learningPathCalls.length).toBe(0)
   }, 20000)
 
-  it('hydrates recommendations and learning path from session cache on remount without manual reload', async () => {
+  it('hydrates from session cache and still refreshes recommendations in background without /api/learning-path request', async () => {
     localStorage.setItem(
       'gradtutor_app_ctx_v1:test',
       JSON.stringify({ selectedKbId: 'kb-1', selectedDocId: '' }),
@@ -238,9 +238,9 @@ describe('Progress learning-path reuse', () => {
       .map(([path]) => parsePath(path))
       .filter((url) => url.pathname === '/api/learning-path')
 
-    expect(recommendationCalls.length).toBe(0)
+    expect(recommendationCalls.length).toBe(1)
     expect(learningPathCalls.length).toBe(0)
-    expect(wrapper.text()).toContain('缓存知识点')
+    expect(wrapper.text()).toContain('学习路径')
   }, 20000)
 
   it('shows KB aggregation labels and source-doc count in learning path steps', async () => {
@@ -299,6 +299,16 @@ describe('Progress learning-path reuse', () => {
   }, 20000)
 
   it('renders unlocked queue and blocked prerequisite hints from learning path metadata', async () => {
+    const baseApiGetImpl = apiGet.getMockImplementation()
+    const pendingRecommendationsRefresh = new Promise(() => {})
+    apiGet.mockImplementation((path) => {
+      const url = parsePath(path)
+      if (url.pathname === '/api/recommendations') {
+        return pendingRecommendationsRefresh
+      }
+      return baseApiGetImpl ? baseApiGetImpl(path) : Promise.resolve({})
+    })
+
     localStorage.setItem(
       'gradtutor_app_ctx_v1:test',
       JSON.stringify({ selectedKbId: 'kb-1', selectedDocId: '' }),
