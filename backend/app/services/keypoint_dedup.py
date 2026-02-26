@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.vectorstore import get_vectorstore
 from app.models import Document, Keypoint
+from app.utils.chroma_filters import build_chroma_eq_filter
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +285,7 @@ def _merge_semantic_clusters(
             results = vectorstore.similarity_search_with_score(
                 rep.keypoint.text or "",
                 k=_SEMANTIC_TOP_K,
-                filter={"kb_id": kb_id, "type": "keypoint"},
+                filter=build_chroma_eq_filter(kb_id=kb_id, type="keypoint"),
             )
             for doc_result, score in results:
                 if score is None or float(score) > _SEMANTIC_DISTANCE_MAX:

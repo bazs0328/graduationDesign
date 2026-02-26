@@ -9,6 +9,7 @@ import pytest
 
 from app.models import ChatMessage, Document, Keypoint, KnowledgeBase, User
 from app.routers.qa import QA_HISTORY_TOTAL_CHAR_BUDGET, _update_mastery_from_qa
+from app.utils.chroma_filters import build_chroma_eq_filter
 
 
 MOCK_SOURCES = [{"source": "doc p.1 c.0", "snippet": "snippet text", "doc_id": "doc-1"}]
@@ -457,12 +458,15 @@ def test_update_mastery_from_qa_kb_vector_hits_collapse_to_representative(db_ses
     )
     db_session.commit()
 
-    vectorstore = SimpleNamespace(
-        similarity_search_with_score=lambda *args, **kwargs: [
+    def _search(question, k, filter):  # noqa: A002
+        assert k == 3
+        assert filter == build_chroma_eq_filter(type="keypoint", kb_id=kb_id)
+        return [
             (SimpleNamespace(metadata={"keypoint_id": dup_id, "doc_id": doc2}), 0.1),
             (SimpleNamespace(metadata={"keypoint_id": rep_id, "doc_id": doc1}), 0.2),
         ]
-    )
+
+    vectorstore = SimpleNamespace(similarity_search_with_score=_search)
 
     with patch("app.routers.qa.get_vectorstore", return_value=vectorstore):
         with patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("no vector")):
@@ -472,6 +476,90 @@ def test_update_mastery_from_qa_kb_vector_hits_collapse_to_representative(db_ses
                 question="什么是矩阵定义？",
                 doc_id=None,
                 kb_id=kb_id,
+            )
+
+    db_session.expire_all()
+    rep = db_session.query(Keypoint).filter(Keypoint.id == rep_id).first()
+    dup = db_session.query(Keypoint).filter(Keypoint.id == dup_id).first()
+    assert rep is not None and dup is not None
+    assert float(rep.mastery_level or 0.0) > 0.0
+    assert float(dup.mastery_level or 0.0) == pytest.approx(0.0)
+
+
+def test_update_mastery_from_qa_doc_vector_hits_collapse_to_kb_representative(db_session):
+    user_id = "qa_doc_dedup_user"
+    kb_id = "qa_doc_dedup_kb"
+    doc1 = "qa_doc_dedup_doc1"
+    doc2 = "qa_doc_dedup_doc2"
+    rep_id = "qa_doc_dedup_kp1"
+    dup_id = "qa_doc_dedup_kp2"
+    base = datetime.utcnow()
+
+    db_session.add(User(id=user_id, username=user_id, password_hash="hash", name="User"))
+    db_session.add(KnowledgeBase(id=kb_id, user_id=user_id, name="KB"))
+    db_session.add_all(
+        [
+            Document(
+                id=doc1,
+                user_id=user_id,
+                kb_id=kb_id,
+                filename="d1.txt",
+                file_type="txt",
+                text_path=f"/tmp/{doc1}.txt",
+                num_chunks=1,
+                num_pages=1,
+                char_count=100,
+                status="ready",
+            ),
+            Document(
+                id=doc2,
+                user_id=user_id,
+                kb_id=kb_id,
+                filename="d2.txt",
+                file_type="txt",
+                text_path=f"/tmp/{doc2}.txt",
+                num_chunks=1,
+                num_pages=1,
+                char_count=100,
+                status="ready",
+            ),
+            Keypoint(
+                id=rep_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc2,
+                text="线性变换定义",
+                mastery_level=0.0,
+                created_at=base,
+            ),
+            Keypoint(
+                id=dup_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc1,
+                text="线性变换定义",
+                mastery_level=0.0,
+                created_at=base + timedelta(seconds=1),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    def _search(question, k, filter):  # noqa: A002
+        assert k == 3
+        assert filter == build_chroma_eq_filter(type="keypoint", doc_id=doc1)
+        return [(SimpleNamespace(metadata={"keypoint_id": dup_id, "doc_id": doc1}), 0.1)]
+
+    vectorstore = SimpleNamespace(similarity_search_with_score=_search)
+
+    with patch("app.routers.qa.get_vectorstore", return_value=vectorstore):
+        with patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("no vector")):
+            _update_mastery_from_qa(
+                db_session,
+                user_id=user_id,
+                question="解释线性变换定义",
+                doc_id=doc1,
+                kb_id=None,
             )
 
     db_session.expire_all()

@@ -50,7 +50,7 @@
 
             <div v-if="selectedKbId" class="space-y-2">
               <div class="flex items-center justify-between gap-2">
-                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">重点知识点（可选）</label>
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">重点聚合知识点（可选）</label>
                 <button
                   v-if="quizFocusConcepts.length"
                   type="button"
@@ -64,7 +64,7 @@
                 <input
                   v-model="quizFocusSearch"
                   type="text"
-                  placeholder="搜索已提取知识点（如：牛顿定律）"
+                  placeholder="搜索聚合知识点（如：牛顿定律）"
                   class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
                   @keydown.enter.prevent="addSelectedQuizFocusCandidate"
                 />
@@ -82,13 +82,13 @@
                 class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
                 :disabled="busy.focusKeypoints || !filteredQuizFocusOptions.length"
               >
-                <option value="">{{ busy.focusKeypoints ? '正在加载知识点...' : (filteredQuizFocusOptions.length ? '请选择知识点' : '暂无可选知识点') }}</option>
+                <option value="">{{ quizFocusSelectPlaceholder }}</option>
                 <option v-for="item in filteredQuizFocusOptions" :key="item.id" :value="item.text">
                   {{ item.text }}
                 </option>
               </select>
               <p class="text-[10px] text-muted-foreground">
-                留空表示按整库/文档自动出题；这里的选项来自已提取知识点，避免手动输入语义不一致。
+                选项来自知识库聚合知识点；若已选择文档，仅显示该文档相关的聚合知识点。留空则按整库/文档自动出题。
               </p>
               <div v-if="quizFocusConcepts.length" class="flex flex-wrap gap-2">
                 <span
@@ -505,10 +505,19 @@ const quizEmptyPrimaryAction = computed(() => {
   if (!selectedKbId.value) return null
   return { label: '生成新测验', loading: busy.value.quiz }
 })
+const scopedQuizFocusOptions = computed(() => {
+  const options = Array.isArray(quizFocusOptions.value) ? quizFocusOptions.value : []
+  const docId = String(selectedDocId.value || '').trim()
+  if (!docId) return options
+  return options.filter((item) => {
+    const sourceDocIds = Array.isArray(item?.sourceDocIds) ? item.sourceDocIds : []
+    return sourceDocIds.includes(docId)
+  })
+})
 const filteredQuizFocusOptions = computed(() => {
   const keyword = String(quizFocusSearch.value || '').trim().toLowerCase()
   const selected = new Set((quizFocusConcepts.value || []).map((item) => String(item || '').trim().toLowerCase()))
-  const options = Array.isArray(quizFocusOptions.value) ? quizFocusOptions.value : []
+  const options = Array.isArray(scopedQuizFocusOptions.value) ? scopedQuizFocusOptions.value : []
   return options
     .filter((item) => {
       const text = String(item?.text || '').trim()
@@ -518,6 +527,11 @@ const filteredQuizFocusOptions = computed(() => {
       return text.toLowerCase().includes(keyword)
     })
     .slice(0, 80)
+})
+const quizFocusSelectPlaceholder = computed(() => {
+  if (busy.value.focusKeypoints) return '正在加载知识点...'
+  if (filteredQuizFocusOptions.value.length) return '请选择知识点'
+  return selectedDocId.value ? '该文档暂无可选聚合知识点' : '暂无可选聚合知识点'
 })
 const OPTION_LABELS = ['A', 'B', 'C', 'D']
 let quizImageLoadSeq = 0
@@ -644,23 +658,72 @@ function removeQuizFocusConcept(index) {
 }
 
 function normalizeQuizFocusOptions(items = []) {
-  const seen = new Set()
+  const seenIndex = new Map()
   const out = []
   for (const item of items) {
     const id = String(item?.id || '').trim()
     const text = String(item?.text || '').trim()
     if (!text) continue
     const key = text.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
+    const sourceDocIds = [
+      ...new Set(
+        (Array.isArray(item?.source_doc_ids) ? item.source_doc_ids : [])
+          .map((docId) => String(docId || '').trim())
+          .filter(Boolean)
+      )
+    ]
+    if (seenIndex.has(key)) {
+      const existingIndex = seenIndex.get(key)
+      const existing = out[existingIndex]
+      const mergedSourceDocIds = [
+        ...new Set([...(existing.sourceDocIds || []), ...sourceDocIds])
+      ]
+      existing.sourceDocIds = mergedSourceDocIds
+      existing.sourceDocCount = mergedSourceDocIds.length
+      existing.memberCount = Math.max(
+        Number(existing.memberCount || 1),
+        Number(item?.member_count || 1),
+      )
+      continue
+    }
+    seenIndex.set(key, out.length)
     out.push({
       id: id || text,
       text,
       memberCount: Number(item?.member_count || 1),
-      sourceDocCount: Array.isArray(item?.source_doc_ids) ? item.source_doc_ids.length : 0,
+      sourceDocCount: sourceDocIds.length,
+      sourceDocIds,
     })
   }
   return out
+}
+
+function syncQuizFocusCandidateSelection() {
+  if (
+    quizFocusCandidate.value
+    && !filteredQuizFocusOptions.value.some((item) => item.text === quizFocusCandidate.value)
+  ) {
+    quizFocusCandidate.value = ''
+  }
+}
+
+function pruneQuizFocusConceptsToCurrentDocScope() {
+  if (!selectedDocId.value) return
+  if (!Array.isArray(quizFocusOptions.value)) return
+  if (!quizFocusOptions.value.length && busy.value.focusKeypoints) return
+  const allowedTexts = new Set(
+    (Array.isArray(scopedQuizFocusOptions.value) ? scopedQuizFocusOptions.value : [])
+      .map((item) => String(item?.text || '').trim())
+      .filter(Boolean)
+  )
+  const next = (Array.isArray(quizFocusConcepts.value) ? quizFocusConcepts.value : [])
+    .map((item) => String(item || '').trim())
+    .filter((text) => text && allowedTexts.has(text))
+  const prev = Array.isArray(quizFocusConcepts.value) ? quizFocusConcepts.value : []
+  if (next.length === prev.length && next.every((item, idx) => item === prev[idx])) {
+    return
+  }
+  quizFocusConcepts.value = next
 }
 
 async function refreshQuizFocusOptions() {
@@ -688,30 +751,29 @@ async function refreshQuizFocusOptions() {
       busy.value.focusKeypoints = false
     }
   }
-  if (
-    quizFocusCandidate.value
-    && !filteredQuizFocusOptions.value.some((item) => item.text === quizFocusCandidate.value)
-  ) {
-    quizFocusCandidate.value = ''
-  }
+  pruneQuizFocusConceptsToCurrentDocScope()
+  syncQuizFocusCandidateSelection()
 }
 
 function maybeAdoptRouteFocusConcept(focusText) {
   const raw = String(focusText || '').trim()
-  if (!raw || quizFocusConcepts.value.length) return
-  const exact = quizFocusOptions.value.find((item) => String(item?.text || '').trim() === raw)
+  if (!raw || quizFocusConcepts.value.length) return ''
+  const scopedOptions = Array.isArray(scopedQuizFocusOptions.value) ? scopedQuizFocusOptions.value : []
+  const exact = scopedOptions.find((item) => String(item?.text || '').trim() === raw)
   if (exact) {
     addQuizFocusConcept(exact.text)
-    return
+    return exact.text
   }
   const normalized = raw.toLowerCase()
-  const partial = quizFocusOptions.value.find((item) => String(item?.text || '').toLowerCase().includes(normalized))
+  const partial = scopedOptions.find((item) => String(item?.text || '').toLowerCase().includes(normalized))
   if (partial) {
     addQuizFocusConcept(partial.text)
-    return
+    return partial.text
   }
+  if (selectedDocId.value) return ''
   // Route-provided focus originates from internal recommendation/learning-path flows; allow as fallback.
   addQuizFocusConcept(raw)
+  return raw
 }
 
 async function refreshDocsInKb() {
@@ -905,11 +967,12 @@ async function syncFromRoute(options = {}) {
     lastAutoContextKey.value = contextKey
 
     const generateOptions = {}
+    let adoptedFocus = ''
     if (queryFocus) {
-      maybeAdoptRouteFocusConcept(queryFocus)
+      adoptedFocus = maybeAdoptRouteFocusConcept(queryFocus)
     }
-    if (queryFocus) {
-      generateOptions.focusConcepts = [queryFocus]
+    if (adoptedFocus) {
+      generateOptions.focusConcepts = [adoptedFocus]
     }
     await generateQuiz(generateOptions)
   } finally {
@@ -955,5 +1018,23 @@ watch(selectedKbId, async () => {
   quizFocusSearch.value = ''
   quizFocusCandidate.value = ''
   await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions()])
+})
+
+watch(selectedDocId, () => {
+  pruneQuizFocusConceptsToCurrentDocScope()
+  syncQuizFocusCandidateSelection()
+})
+
+watch(quizFocusOptions, () => {
+  pruneQuizFocusConceptsToCurrentDocScope()
+  syncQuizFocusCandidateSelection()
+})
+
+watch(quizFocusSearch, () => {
+  syncQuizFocusCandidateSelection()
+})
+
+watch(quizFocusConcepts, () => {
+  syncQuizFocusCandidateSelection()
 })
 </script>

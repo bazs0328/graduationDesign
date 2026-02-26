@@ -25,6 +25,7 @@ from app.schemas import (
     NextQuizRecommendation,
     WrongQuestionGroup,
 )
+from app.services.aggregate_mastery import resolve_effective_kb_id
 from app.services.learner_profile import (
     extract_weak_concepts,
     generate_difficulty_plan,
@@ -100,6 +101,143 @@ def _group_wrong_questions_by_concept(
     ]
 
 
+def _collapse_kb_keypoint_ids(
+    db: Session,
+    user_id: str,
+    kb_id: str,
+    kp_ids: list[str],
+    kb_member_to_rep: dict[str, str] | None = None,
+) -> list[str]:
+    """Collapse KB keypoint ids to representative ids and deduplicate."""
+    if not kp_ids:
+        return []
+    if kb_member_to_rep is not None:
+        out: list[str] = []
+        seen: set[str] = set()
+        for kp_id in kp_ids:
+            rep_id = kb_member_to_rep.get(kp_id, kp_id)
+            if rep_id in seen:
+                continue
+            seen.add(rep_id)
+            out.append(rep_id)
+        return out
+    return collapse_kb_keypoint_ids_to_representatives(db, user_id, kb_id, kp_ids)
+
+
+def _build_kb_member_to_rep_index(
+    db: Session,
+    user_id: str,
+    kb_id: str,
+) -> dict[str, str]:
+    """Build a KB member->representative index once for dedup-aware mastery updates."""
+    from app.services.keypoint_dedup import (
+        build_keypoint_cluster_index,
+        cluster_kb_keypoints,
+    )
+
+    return build_keypoint_cluster_index(cluster_kb_keypoints(db, user_id, kb_id))
+
+
+def _match_keypoints_by_free_text(
+    db: Session,
+    user_id: str,
+    doc_id: str | None,
+    kb_id: str | None,
+    text: str,
+    kb_member_to_rep: dict[str, str] | None = None,
+) -> list[str]:
+    """Fallback vector match using full question/explanation text, limited to top-1."""
+    query_text = str(text or "").strip()
+    if not query_text:
+        return []
+    if doc_id:
+        matched = match_keypoints_by_concepts(
+            user_id,
+            doc_id,
+            [query_text],
+            top_k=1,
+        )
+        if kb_id and matched:
+            return _collapse_kb_keypoint_ids(
+                db,
+                user_id,
+                kb_id,
+                matched,
+                kb_member_to_rep=kb_member_to_rep,
+            )
+        return matched
+    if kb_id:
+        matched = match_keypoints_by_kb(
+            user_id,
+            kb_id,
+            [query_text],
+            top_k=1,
+        )
+        return _collapse_kb_keypoint_ids(
+            db,
+            user_id,
+            kb_id,
+            matched,
+            kb_member_to_rep=kb_member_to_rep,
+        )
+    return []
+
+
+def _prebind_quiz_question_keypoints(
+    db: Session,
+    questions: list[dict],
+    user_id: str,
+    doc_id: str | None,
+    kb_id: str | None,
+) -> None:
+    """
+    Attach hidden `keypoint_ids` to questions before quiz persistence.
+
+    These ids are stored in Quiz.questions_json and used by /quiz/submit for stable mastery updates.
+    """
+    if not (doc_id or kb_id):
+        return
+
+    total_questions = 0
+    bound_questions = 0
+    bound_refs = 0
+    kb_member_to_rep: dict[str, str] | None = None
+
+    for q in questions or []:
+        if not isinstance(q, dict):
+            continue
+        total_questions += 1
+
+        if kb_id and kb_member_to_rep is None:
+            kb_member_to_rep = _build_kb_member_to_rep_index(db, user_id, kb_id)
+
+        kp_ids = _resolve_keypoints_for_question(
+            db,
+            q,
+            user_id,
+            doc_id,
+            kb_id,
+            kb_member_to_rep=kb_member_to_rep,
+        )
+        if not kp_ids:
+            continue
+
+        q["keypoint_ids"] = kp_ids
+        bound_questions += 1
+        bound_refs += len(kp_ids)
+
+    if total_questions > 0:
+        logger.info(
+            "Quiz question keypoint prebind summary user_id=%s doc_id=%s kb_id=%s total=%s bound=%s refs=%s",
+            user_id,
+            doc_id,
+            kb_id,
+            total_questions,
+            bound_questions,
+            bound_refs,
+        )
+
+
 @router.post("/quiz/generate", response_model=QuizGenerateResponse)
 def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
     resolved_user_id = ensure_user(db, payload.user_id)
@@ -172,6 +310,19 @@ def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
                 reference_questions=payload.reference_questions,
             )
             difficulty_label = difficulty
+        effective_kb_id = resolve_effective_kb_id(
+            db,
+            resolved_user_id,
+            doc_id=payload.doc_id,
+            kb_id=payload.kb_id,
+        )
+        _prebind_quiz_question_keypoints(
+            db,
+            questions,
+            resolved_user_id,
+            payload.doc_id,
+            effective_kb_id,
+        )
         parsed = [QuizQuestion(**q) for q in questions]
     except ValueError as exc:
         logger.exception("Quiz generation validation error")
@@ -275,40 +426,53 @@ def _resolve_keypoints_for_question(
     kp_ids = q.get("keypoint_ids")
     if kp_ids and isinstance(kp_ids, list):
         cleaned = [k for k in kp_ids if isinstance(k, str)]
-        if kb_id and not doc_id:
-            if kb_member_to_rep is not None:
-                out: list[str] = []
-                seen: set[str] = set()
-                for kp_id in cleaned:
-                    rep_id = kb_member_to_rep.get(kp_id, kp_id)
-                    if rep_id in seen:
-                        continue
-                    seen.add(rep_id)
-                    out.append(rep_id)
-                return out
-            return collapse_kb_keypoint_ids_to_representatives(
-                db, user_id, kb_id, cleaned
+        if kb_id:
+            return _collapse_kb_keypoint_ids(
+                db,
+                user_id,
+                kb_id,
+                cleaned,
+                kb_member_to_rep=kb_member_to_rep,
             )
         return cleaned
 
     concepts = q.get("concepts") or []
-    if not concepts:
-        return []
+    if not isinstance(concepts, list):
+        concepts = []
     if doc_id:
-        return match_keypoints_by_concepts(user_id, doc_id, concepts)
+        matched = match_keypoints_by_concepts(user_id, doc_id, concepts) if concepts else []
+        if matched:
+            if kb_id:
+                return _collapse_kb_keypoint_ids(
+                    db,
+                    user_id,
+                    kb_id,
+                    matched,
+                    kb_member_to_rep=kb_member_to_rep,
+                )
+            return matched
     if kb_id:
-        matched = match_keypoints_by_kb(user_id, kb_id, concepts)
-        if kb_member_to_rep is not None:
-            out: list[str] = []
-            seen: set[str] = set()
-            for kp_id in matched:
-                rep_id = kb_member_to_rep.get(kp_id, kp_id)
-                if rep_id in seen:
-                    continue
-                seen.add(rep_id)
-                out.append(rep_id)
-            return out
-        return collapse_kb_keypoint_ids_to_representatives(db, user_id, kb_id, matched)
+        matched = match_keypoints_by_kb(user_id, kb_id, concepts) if concepts else []
+        if matched:
+            return _collapse_kb_keypoint_ids(
+                db,
+                user_id,
+                kb_id,
+                matched,
+                kb_member_to_rep=kb_member_to_rep,
+            )
+
+    for field in ("question", "explanation"):
+        matched = _match_keypoints_by_free_text(
+            db,
+            user_id,
+            doc_id,
+            kb_id,
+            str(q.get(field) or ""),
+            kb_member_to_rep=kb_member_to_rep,
+        )
+        if matched:
+            return matched
     return []
 
 
@@ -338,6 +502,12 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
     correct = 0
     mastery_deltas: dict[str, tuple[float, float]] = {}
     kb_member_to_rep: dict[str, str] | None = None
+    effective_kb_id = resolve_effective_kb_id(
+        db,
+        resolved_user_id,
+        doc_id=quiz.doc_id,
+        kb_id=quiz.kb_id,
+    )
 
     for idx, q in enumerate(questions):
         expected = q.get("answer_index")
@@ -348,15 +518,12 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
         if is_correct:
             correct += 1
 
-        if quiz.kb_id and not quiz.doc_id and kb_member_to_rep is None:
+        if effective_kb_id and kb_member_to_rep is None:
             # Lazy-load once per submission to avoid repeated KB clustering per question.
-            from app.services.keypoint_dedup import (
-                build_keypoint_cluster_index,
-                cluster_kb_keypoints,
-            )
-
-            kb_member_to_rep = build_keypoint_cluster_index(
-                cluster_kb_keypoints(db, resolved_user_id, quiz.kb_id)
+            kb_member_to_rep = _build_kb_member_to_rep_index(
+                db,
+                resolved_user_id,
+                effective_kb_id,
             )
 
         kp_ids = _resolve_keypoints_for_question(
@@ -364,7 +531,7 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
             q,
             resolved_user_id,
             quiz.doc_id,
-            quiz.kb_id,
+            effective_kb_id,
             kb_member_to_rep=kb_member_to_rep,
         )
         for kp_id in kp_ids:
@@ -379,6 +546,15 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
                 mastery_deltas[kp_id] = (previous[0], new_lv)
             else:
                 mastery_deltas[kp_id] = (old_lv, new_lv)
+    if total > 0 and not mastery_deltas:
+        logger.warning(
+            "Quiz submit produced no mastery updates quiz_id=%s user_id=%s doc_id=%s kb_id=%s total=%s",
+            payload.quiz_id,
+            resolved_user_id,
+            quiz.doc_id,
+            quiz.kb_id,
+            total,
+        )
 
     mastery_updates: list[MasteryUpdate] = []
     if mastery_deltas:
@@ -440,7 +616,7 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
         if "quiz_attempts" in msg and ("user_id" in msg and "quiz_id" in msg):
             raise HTTPException(status_code=409, detail="Quiz already submitted") from exc
         raise
-    invalidate_learning_path_result_cache(db, quiz.kb_id)
+    invalidate_learning_path_result_cache(db, effective_kb_id)
 
     return QuizSubmitResponse(
         score=score,

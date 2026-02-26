@@ -23,6 +23,7 @@ from app.schemas import (
     RecommendationNextStep,
     RecommendationsResponse,
 )
+from app.services.aggregate_mastery import list_kb_aggregate_mastery_points
 from app.services.learner_profile import (
     get_or_create_profile,
     get_weak_concepts_by_mastery,
@@ -247,20 +248,17 @@ def get_recommendations(
     }
 
     keypoints_by_doc: dict[str, list[dict]] = defaultdict(list)
-    for doc_id, text, mastery_level in (
-        db.query(Keypoint.doc_id, Keypoint.text, Keypoint.mastery_level)
-        .filter(
-            Keypoint.user_id == resolved_user_id,
-            Keypoint.doc_id.in_(doc_ids),
-        )
-        .all()
-    ):
-        keypoints_by_doc[doc_id].append(
-            {
-                "text": (text or "").strip(),
-                "mastery_level": float(mastery_level or 0.0),
-            }
-        )
+    for point in list_kb_aggregate_mastery_points(db, resolved_user_id, kb.id):
+        for source_doc_id in point.source_doc_ids:
+            if source_doc_id not in doc_ids:
+                continue
+            keypoints_by_doc[source_doc_id].append(
+                {
+                    "text": str(point.text or "").strip(),
+                    "mastery_level": float(point.mastery_level or 0.0),
+                    "attempt_count": int(point.attempt_count or 0),
+                }
+            )
 
     try:
         (

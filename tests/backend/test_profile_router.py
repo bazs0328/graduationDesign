@@ -1,6 +1,8 @@
 """Tests for profile router (GET profile, GET difficulty-plan)."""
 
-from app.models import Keypoint
+from unittest.mock import patch
+
+from app.models import Document, Keypoint, KnowledgeBase, User
 
 
 def test_get_profile_returns_200_and_schema(client, seeded_session):
@@ -122,3 +124,84 @@ def test_get_profile_weak_concepts_derive_from_mastery_level(client, db_session,
     assert "特征值分解" in data["weak_concepts"]
     assert "线性变换" not in data["weak_concepts"]
     assert "未学习默认项" not in data["weak_concepts"]
+
+
+def test_get_profile_mastery_metrics_use_aggregate_keypoints(client, db_session):
+    user_id = "profile_agg_user"
+    kb_id = "profile_agg_kb"
+    doc1 = "profile-aggregate-doc-1"
+    doc2 = "profile-aggregate-doc-2"
+
+    db_session.add(User(id=user_id, username=user_id, password_hash="hash", name="User"))
+    db_session.add(KnowledgeBase(id=kb_id, user_id=user_id, name="KB"))
+    db_session.add(
+        Document(
+            id=doc1,
+            user_id=user_id,
+            kb_id=kb_id,
+            filename="profile-aggregate-1.txt",
+            file_type="txt",
+            text_path=f"/tmp/{doc1}.txt",
+            num_chunks=1,
+            num_pages=1,
+            char_count=100,
+            status="ready",
+        )
+    )
+    db_session.add(
+        Document(
+            id=doc2,
+            user_id=user_id,
+            kb_id=kb_id,
+            filename="profile-aggregate-2.txt",
+            file_type="txt",
+            text_path=f"/tmp/{doc2}.txt",
+            num_chunks=1,
+            num_pages=1,
+            char_count=100,
+            status="ready",
+        )
+    )
+    db_session.add_all(
+        [
+            Keypoint(
+                id="kp-profile-agg-1",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc1,
+                text="聚合概念A",
+                mastery_level=0.0,
+                attempt_count=1,
+                correct_count=0,
+            ),
+            Keypoint(
+                id="kp-profile-agg-2",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc2,
+                text="聚合概念A",
+                mastery_level=0.9,
+                attempt_count=3,
+                correct_count=3,
+            ),
+            Keypoint(
+                id="kp-profile-agg-3",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc1,
+                text="聚合概念B",
+                mastery_level=0.1,
+                attempt_count=1,
+                correct_count=0,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    with patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("no vector")):
+        resp = client.get(f"/api/profile?user_id={user_id}")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert float(data["mastery_avg"]) == 0.5
+    assert float(data["mastery_completion_rate"]) == 0.5

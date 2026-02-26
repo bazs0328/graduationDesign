@@ -20,6 +20,30 @@ vi.mock('@/api', async (importOriginal) => {
 })
 
 const kbFixture = { id: 'kb-1', name: 'Default' }
+const docsFixture = [
+  { id: 'doc-1', filename: 'Doc A.pdf', kb_id: 'kb-1' },
+  { id: 'doc-2', filename: 'Doc B.pdf', kb_id: 'kb-1' },
+]
+const groupedKeypointsFixture = [
+  {
+    id: 'gkp-1',
+    text: '概念A',
+    member_count: 2,
+    source_doc_ids: ['doc-1'],
+  },
+  {
+    id: 'gkp-2',
+    text: '概念B',
+    member_count: 1,
+    source_doc_ids: ['doc-2'],
+  },
+  {
+    id: 'gkp-3',
+    text: '共享概念',
+    member_count: 3,
+    source_doc_ids: ['doc-1', 'doc-2'],
+  },
+]
 
 function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0))
@@ -43,6 +67,70 @@ async function mountAppWithRouter() {
   await flushPromises()
   await nextTick()
   return { wrapper, router }
+}
+
+function mockQuizFocusApi({
+  docs = docsFixture,
+  groupedKeypoints = groupedKeypointsFixture,
+} = {}) {
+  apiGet.mockImplementation((path) => {
+    if (path.startsWith('/api/kb')) return Promise.resolve([kbFixture])
+    if (path.startsWith('/api/profile')) return Promise.resolve({ ability_level: 'intermediate' })
+    if (path.startsWith('/api/chat/sessions')) return Promise.resolve([])
+    if (path.startsWith('/api/docs')) return Promise.resolve(docs)
+    if (path.startsWith('/api/keypoints/kb/')) {
+      return Promise.resolve({
+        keypoints: groupedKeypoints,
+        grouped: true,
+        raw_count: groupedKeypoints.length,
+        group_count: groupedKeypoints.length,
+      })
+    }
+    if (path.startsWith('/api/progress')) {
+      return Promise.resolve({
+        total_docs: 1,
+        total_quizzes: 0,
+        total_attempts: 0,
+        total_questions: 0,
+        total_summaries: 0,
+        total_keypoints: 0,
+        avg_score: 0,
+        last_activity: null,
+      })
+    }
+    if (path.startsWith('/api/activity')) return Promise.resolve({ items: [] })
+    if (path.startsWith('/api/recommendations')) return Promise.resolve({ items: [] })
+    return Promise.resolve({})
+  })
+}
+
+function getQuizSelects(wrapper) {
+  const selects = wrapper.findAll('select')
+  return {
+    kb: selects.find((sel) => sel.text().includes('Default')) || selects.at(0),
+    doc: selects.find((sel) => sel.text().includes('不限定（整库测验）')),
+    focus: selects.find((sel) => sel.text().includes('知识点')),
+  }
+}
+
+function getOptionTexts(selectWrapper) {
+  if (!selectWrapper?.exists?.()) return []
+  return selectWrapper.findAll('option').map((opt) => opt.text())
+}
+
+async function openQuizAndSelectKb(wrapper, router, kbId = 'kb-1') {
+  await router.push('/quiz')
+  await flushPromises()
+  await nextTick()
+  await nextTick()
+
+  const { kb } = getQuizSelects(wrapper)
+  expect(kb?.exists()).toBe(true)
+  await kb.setValue(kbId)
+  await flushPromises()
+  await nextTick()
+  await flushPromises()
+  await nextTick()
 }
 
 beforeEach(() => {
@@ -335,5 +423,136 @@ describe('Quiz wrong-answer explain link', () => {
     expect(html).toContain('知识点掌握度变化')
     expect(html).toContain('以下知识点反馈已按知识库口径去重合并统计')
     expect(html).toContain('概念名称可能与单文档表述不同，但会映射到同一知识点')
+  })
+})
+
+describe('Quiz focus concept scoping', () => {
+  it('shows KB aggregated focus options and narrows them by selected document', async () => {
+    mockQuizFocusApi()
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await openQuizAndSelectKb(wrapper, router)
+
+    let { doc, focus } = getQuizSelects(wrapper)
+    expect(doc?.exists()).toBe(true)
+    expect(focus?.exists()).toBe(true)
+
+    let options = getOptionTexts(focus)
+    expect(options).toContain('请选择知识点')
+    expect(options).toContain('概念A')
+    expect(options).toContain('概念B')
+    expect(options).toContain('共享概念')
+
+    await doc.setValue('doc-1')
+    await nextTick()
+
+    ;({ focus } = getQuizSelects(wrapper))
+    options = getOptionTexts(focus)
+    expect(options).toContain('概念A')
+    expect(options).toContain('共享概念')
+    expect(options).not.toContain('概念B')
+  })
+
+  it('removes selected focus concepts that fall outside the new document scope', async () => {
+    mockQuizFocusApi()
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await openQuizAndSelectKb(wrapper, router)
+
+    let { doc, focus } = getQuizSelects(wrapper)
+    await doc.setValue('doc-1')
+    await nextTick()
+
+    ;({ focus } = getQuizSelects(wrapper))
+    await focus.setValue('概念A')
+    await nextTick()
+
+    const addButton = wrapper.findAll('button').find((btn) => btn.text().includes('添加'))
+    expect(addButton).toBeTruthy()
+    await addButton.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('概念A')
+
+    ;({ doc } = getQuizSelects(wrapper))
+    await doc.setValue('doc-2')
+    await flushPromises()
+    await nextTick()
+
+    const chips = wrapper.findAll('span').filter((node) => node.text() === '概念A')
+    expect(chips.length).toBe(0)
+  })
+
+  it('uses doc-specific empty label when selected document has no aggregated focus options', async () => {
+    mockQuizFocusApi({ groupedKeypoints: [] })
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await openQuizAndSelectKb(wrapper, router)
+
+    let { doc, focus } = getQuizSelects(wrapper)
+    expect(getOptionTexts(focus)).toContain('暂无可选聚合知识点')
+
+    await doc.setValue('doc-1')
+    await nextTick()
+
+    ;({ focus } = getQuizSelects(wrapper))
+    expect(getOptionTexts(focus)).toContain('该文档暂无可选聚合知识点')
+  })
+
+  it('does not raw-fallback route focus when a document is selected and focus is out of scope', async () => {
+    mockQuizFocusApi()
+    const generatePayloads = []
+    const fallbackApiPost = apiPost.getMockImplementation()
+    apiPost.mockImplementation((path, payload) => {
+      if (path === '/api/quiz/generate') {
+        generatePayloads.push(payload)
+      }
+      return fallbackApiPost(path, payload)
+    })
+
+    const { router } = await mountAppWithRouter()
+
+    await router.push('/quiz?kb_id=kb-1&doc_id=doc-1&focus=路由外部概念')
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+
+    const payload = generatePayloads.at(-1)
+    expect(payload).toBeTruthy()
+    expect(payload.kb_id).toBe('kb-1')
+    expect(payload.doc_id).toBe('doc-1')
+    expect(payload.focus_concepts).toBeUndefined()
+  })
+
+  it('keeps raw fallback route focus when no document is selected', async () => {
+    mockQuizFocusApi()
+    const generatePayloads = []
+    const fallbackApiPost = apiPost.getMockImplementation()
+    apiPost.mockImplementation((path, payload) => {
+      if (path === '/api/quiz/generate') {
+        generatePayloads.push(payload)
+      }
+      return fallbackApiPost(path, payload)
+    })
+
+    const { router } = await mountAppWithRouter()
+
+    await router.push('/quiz?kb_id=kb-1&focus=路由外部概念')
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+
+    const payload = generatePayloads.at(-1)
+    expect(payload).toBeTruthy()
+    expect(payload.kb_id).toBe('kb-1')
+    expect(payload.doc_id).toBeUndefined()
+    expect(payload.focus_concepts).toEqual(['路由外部概念'])
   })
 })

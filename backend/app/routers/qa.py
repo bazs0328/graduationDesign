@@ -16,6 +16,10 @@ from app.core.vectorstore import get_vectorstore
 from app.db import get_db
 from app.models import ChatMessage, ChatSession, Document, QARecord
 from app.schemas import QARequest, QAResponse, SourceSnippet
+from app.services.aggregate_mastery import (
+    resolve_effective_kb_id,
+    resolve_keypoint_id_to_aggregate_target,
+)
 from app.services.learner_profile import get_or_create_profile, get_weak_concepts_by_mastery
 from app.services.keypoint_dedup import (
     build_keypoint_cluster_index,
@@ -31,6 +35,7 @@ from app.services.qa import (
     prepare_qa_answer,
     stream_qa_answer,
 )
+from app.utils.chroma_filters import build_chroma_eq_filter
 
 logger = logging.getLogger(__name__)
 
@@ -555,12 +560,18 @@ def _update_mastery_from_qa(
 ) -> None:
     """Match the user's question to keypoints and record a study interaction."""
     from app.models import Keypoint
-    
+    effective_kb_id = resolve_effective_kb_id(
+        db, user_id, doc_id=doc_id, kb_id=kb_id
+    )
+    kb_member_to_rep: dict[str, str] | None = None
+
     # 优先：如果指定了 focus_keypoint_text（从学习路径跳转），直接查找匹配的知识点
     if focus_keypoint_text and focus_keypoint_text.strip():
         focus_text = focus_keypoint_text.strip()
-        if kb_id and not doc_id:
-            matched_rep = find_kb_representative_by_text(db, user_id, kb_id, focus_text)
+        if effective_kb_id:
+            matched_rep = find_kb_representative_by_text(
+                db, user_id, effective_kb_id, focus_text
+            )
             if matched_rep:
                 result = record_study_interaction(db, matched_rep.id)
                 if result:
@@ -590,17 +601,30 @@ def _update_mastery_from_qa(
                     break
         
         if matched_kp:
-            result = record_study_interaction(db, matched_kp.id)
+            target_id = str(matched_kp.id)
+            if effective_kb_id:
+                if kb_member_to_rep is None:
+                    kb_member_to_rep = build_keypoint_cluster_index(
+                        cluster_kb_keypoints(db, user_id, effective_kb_id)
+                    )
+                target_id = resolve_keypoint_id_to_aggregate_target(
+                    db,
+                    user_id,
+                    target_id,
+                    doc_id=doc_id,
+                    kb_id=effective_kb_id,
+                    member_to_rep=kb_member_to_rep,
+                )
+            result = record_study_interaction(db, target_id)
             if result:
-                logger.info(f"QA mastery updated for keypoint {matched_kp.id} (focus match)")
+                logger.info(f"QA mastery updated for keypoint {target_id} (focus match)")
             return
     
     # 回退：使用向量搜索匹配问题文本到知识点
-    filter_dict: dict = {"type": "keypoint"}
     if doc_id:
-        filter_dict["doc_id"] = doc_id
+        filter_dict = build_chroma_eq_filter(type="keypoint", doc_id=doc_id)
     elif kb_id:
-        filter_dict["kb_id"] = kb_id
+        filter_dict = build_chroma_eq_filter(type="keypoint", kb_id=kb_id)
     else:
         return
 
@@ -615,10 +639,9 @@ def _update_mastery_from_qa(
 
     updated_count = 0
     updated_ids: set[str] = set()
-    kb_member_to_rep: dict[str, str] | None = None
-    if kb_id and not doc_id:
+    if effective_kb_id:
         kb_member_to_rep = build_keypoint_cluster_index(
-            cluster_kb_keypoints(db, user_id, kb_id)
+            cluster_kb_keypoints(db, user_id, effective_kb_id)
         )
     for doc_result, score in results:
         if score > 1.0:

@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 
 from app.core.users import ensure_user
 from app.db import get_db
-from app.models import Keypoint
 from app.schemas import DifficultyPlan, LearnerProfileOut
+from app.services.aggregate_mastery import list_user_aggregate_mastery_points
 from app.services.learner_profile import (
     generate_difficulty_plan,
     get_or_create_profile,
@@ -20,10 +20,8 @@ def get_profile(user_id: str | None = None, db: Session = Depends(get_db)):
     resolved_user_id = ensure_user(db, user_id)
     profile = get_or_create_profile(db, resolved_user_id)
     mastery_values = [
-        float(row[0] or 0.0)
-        for row in db.query(Keypoint.mastery_level)
-        .filter(Keypoint.user_id == resolved_user_id)
-        .all()
+        float(point.mastery_level or 0.0)
+        for point in list_user_aggregate_mastery_points(db, resolved_user_id)
     ]
     return LearnerProfileOut(
         user_id=profile.user_id,

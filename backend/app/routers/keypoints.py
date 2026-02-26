@@ -15,7 +15,12 @@ from app.schemas import (
     KeypointsRequest,
     KeypointsResponse,
 )
-from app.services.keypoint_dedup import KeypointCluster, cluster_kb_keypoints
+from app.services.aggregate_mastery import resolve_keypoint_id_to_aggregate_target
+from app.services.keypoint_dedup import (
+    KeypointCluster,
+    cluster_kb_keypoints,
+    find_kb_representative_by_text,
+)
 from app.services.keypoints import extract_keypoints, save_keypoints_to_db
 from app.services.learning_path import (
     invalidate_dependency_cache,
@@ -102,6 +107,54 @@ def _cluster_to_keypoint_item(cluster: KeypointCluster) -> KeypointItemV2:
     )
 
 
+def _record_study_keypoint_interaction(
+    db: Session,
+    *,
+    user_id: str,
+    doc: Document,
+    keypoints: list[Keypoint],
+    study_keypoint_text: str | None,
+) -> bool:
+    """Record study interaction, preferring KB aggregate representative in KB scenes."""
+    study_text = str(study_keypoint_text or "").strip()
+    if not study_text:
+        return False
+
+    target_id: str | None = None
+    if doc.kb_id:
+        matched_rep = find_kb_representative_by_text(db, user_id, str(doc.kb_id), study_text)
+        if matched_rep:
+            target_id = str(matched_rep.id)
+    if not target_id:
+        for kp in keypoints:
+            if str(kp.text or "").strip() == study_text:
+                target_id = str(kp.id)
+                break
+    if not target_id:
+        return False
+    if doc.kb_id:
+        target_id = resolve_keypoint_id_to_aggregate_target(
+            db,
+            user_id,
+            target_id,
+            doc_id=doc.id,
+            kb_id=str(doc.kb_id),
+        )
+
+    result = record_study_interaction(db, target_id)
+    if not result:
+        return False
+    old_level, new_level = result
+    if new_level == old_level:
+        return False
+
+    for kp in keypoints:
+        if str(kp.id) == target_id:
+            kp.mastery_level = new_level
+            break
+    return True
+
+
 @router.post("/keypoints", response_model=KeypointsResponse)
 async def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(get_db)):
     resolved_user_id = ensure_user(db, payload.user_id)
@@ -123,19 +176,13 @@ async def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(ge
             .all()
         )
         if existing:
-            # Record study interaction if study_keypoint_text is provided
-            mastery_changed = False
-            if payload.study_keypoint_text:
-                study_text = payload.study_keypoint_text.strip()
-                for kp in existing:
-                    if kp.text.strip() == study_text:
-                        result = record_study_interaction(db, kp.id)
-                        if result:
-                            # Update the keypoint object with new mastery_level
-                            old_level, new_level = result
-                            kp.mastery_level = new_level
-                            mastery_changed = new_level != old_level
-                        break
+            mastery_changed = _record_study_keypoint_interaction(
+                db,
+                user_id=resolved_user_id,
+                doc=doc,
+                keypoints=existing,
+                study_keypoint_text=payload.study_keypoint_text,
+            )
             if mastery_changed:
                 invalidate_learning_path_result_cache(db, doc.kb_id)
                 db.commit()
@@ -165,19 +212,13 @@ async def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(ge
                 overwrite=False,
             )
             invalidate_dependency_cache(db, doc.kb_id)
-            # Record study interaction if study_keypoint_text is provided
-            mastery_changed = False
-            if payload.study_keypoint_text:
-                study_text = payload.study_keypoint_text.strip()
-                for kp in keypoints:
-                    if kp.text.strip() == study_text:
-                        result = record_study_interaction(db, kp.id)
-                        if result:
-                            # Update the keypoint object with new mastery_level
-                            old_level, new_level = result
-                            kp.mastery_level = new_level
-                            mastery_changed = new_level != old_level
-                        break
+            mastery_changed = _record_study_keypoint_interaction(
+                db,
+                user_id=resolved_user_id,
+                doc=doc,
+                keypoints=keypoints,
+                study_keypoint_text=payload.study_keypoint_text,
+            )
             if mastery_changed:
                 invalidate_learning_path_result_cache(db, doc.kb_id)
                 db.commit()
@@ -217,16 +258,13 @@ async def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(ge
     invalidate_dependency_cache(db, doc.kb_id)
 
     # Record study interaction if study_keypoint_text is provided
-    if payload.study_keypoint_text:
-        study_text = payload.study_keypoint_text.strip()
-        for kp in keypoints:
-            if kp.text.strip() == study_text:
-                result = record_study_interaction(db, kp.id)
-                if result:
-                    # Update the keypoint object with new mastery_level
-                    _, new_level = result
-                    kp.mastery_level = new_level
-                break
+    _record_study_keypoint_interaction(
+        db,
+        user_id=resolved_user_id,
+        doc=doc,
+        keypoints=keypoints,
+        study_keypoint_text=payload.study_keypoint_text,
+    )
 
     store = [
         {

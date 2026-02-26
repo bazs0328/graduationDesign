@@ -4,8 +4,10 @@ import asyncio
 import json
 import logging
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import app.services.keypoints as kp
+from app.utils.chroma_filters import build_chroma_eq_filter
 
 
 def test_postprocess_keypoints_dedupes_numbering_and_whitespace_variants():
@@ -178,4 +180,51 @@ def test_extract_keypoints_uses_relaxed_fallback_when_strict_final_filters_every
         "keypoints.extract.final_summary" in record.message
         and "'postprocess_relaxed_fallback': True" in record.message
         for record in caplog.records
+    )
+
+
+def test_match_keypoints_by_concepts_uses_chroma_and_filter(monkeypatch):
+    vectorstore = Mock()
+    vectorstore.similarity_search_with_score.return_value = []
+    monkeypatch.setattr(kp, "get_vectorstore", lambda user_id: vectorstore)
+
+    result = kp.match_keypoints_by_concepts("u1", "doc-1", ["矩阵"])
+
+    assert result == []
+    vectorstore.similarity_search_with_score.assert_called_once()
+    _, kwargs = vectorstore.similarity_search_with_score.call_args
+    assert kwargs["filter"] == build_chroma_eq_filter(doc_id="doc-1", type="keypoint")
+
+
+def test_match_keypoints_by_kb_uses_chroma_and_filter(monkeypatch):
+    vectorstore = Mock()
+    vectorstore.similarity_search_with_score.return_value = []
+    monkeypatch.setattr(kp, "get_vectorstore", lambda user_id: vectorstore)
+
+    result = kp.match_keypoints_by_kb("u1", "kb-1", ["矩阵"])
+
+    assert result == []
+    vectorstore.similarity_search_with_score.assert_called_once()
+    _, kwargs = vectorstore.similarity_search_with_score.call_args
+    assert kwargs["filter"] == build_chroma_eq_filter(kb_id="kb-1", type="keypoint")
+
+
+def test_save_keypoints_to_db_overwrite_deletes_vectors_with_chroma_and_filter(monkeypatch):
+    db = Mock()
+    db.query.return_value.filter.return_value.delete.return_value = 0
+    vectorstore = Mock()
+    monkeypatch.setattr(kp, "get_vectorstore", lambda user_id: vectorstore)
+
+    result = kp.save_keypoints_to_db(
+        db,
+        "u1",
+        "doc-1",
+        [],
+        kb_id="kb-1",
+        overwrite=True,
+    )
+
+    assert result == []
+    vectorstore.delete.assert_called_once_with(
+        where=build_chroma_eq_filter(doc_id="doc-1", type="keypoint")
     )

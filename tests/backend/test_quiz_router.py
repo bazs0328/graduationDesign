@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.session import Session as OrmSession
 
 from app.models import Document, Keypoint, LearnerProfile, Quiz, QuizAttempt
+from app.routers.quiz import _resolve_keypoints_for_question
 from app.services.text_extraction import ExtractionResult
 
 
@@ -65,6 +66,37 @@ def test_quiz_generate_with_doc_id_success(client, seeded_session):
     for q in data["questions"]:
         assert "question" in q and "options" in q and "answer_index" in q and "explanation" in q
         assert len(q["options"]) == 4
+
+
+def test_quiz_generate_persists_hidden_keypoint_ids_but_response_omits_them(
+    client, db_session, seeded_session
+):
+    with (
+        patch("app.routers.quiz.generate_quiz", side_effect=_mock_generate_quiz),
+        patch("app.routers.quiz._resolve_keypoints_for_question", return_value=["kp-bound-1"]),
+    ):
+        resp = client.post(
+            "/api/quiz/generate",
+            json={
+                "doc_id": seeded_session["doc_id"],
+                "user_id": seeded_session["user_id"],
+                "count": 2,
+                "difficulty": "easy",
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["questions"]
+    assert "keypoint_ids" not in data["questions"][0]
+
+    quiz_id = data["quiz_id"]
+    db_session.expire_all()
+    quiz = db_session.query(Quiz).filter(Quiz.id == quiz_id).first()
+    assert quiz is not None
+    stored_questions = json.loads(quiz.questions_json)
+    assert stored_questions
+    assert stored_questions[0]["keypoint_ids"] == ["kp-bound-1"]
 
 
 def test_quiz_generate_with_kb_id_success(client, seeded_session):
@@ -256,6 +288,105 @@ def test_quiz_submit_mastery_updates_track_final_level(client, db_session, seede
     assert update["old_level"] == pytest.approx(0.2)
     # EMA with alpha=0.3: 0.2 -> 0.44 (correct) -> 0.308 (wrong)
     assert update["new_level"] == pytest.approx(0.308, abs=1e-6)
+
+
+def test_quiz_submit_uses_hidden_keypoint_ids_without_concept_matching(
+    client, db_session, seeded_session
+):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    keypoint_id = "kp-quiz-hidden-bind-1"
+    quiz_id = "quiz-hidden-bind-1"
+
+    db_session.add(
+        Keypoint(
+            id=keypoint_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            text="矩阵秩",
+            mastery_level=0.0,
+            attempt_count=0,
+            correct_count=0,
+        )
+    )
+    db_session.add(
+        Quiz(
+            id=quiz_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            difficulty="easy",
+            question_type="mcq",
+            questions_json=json.dumps(
+                [
+                    {
+                        "question": "q1",
+                        "options": ["A", "B", "C", "D"],
+                        "answer_index": 0,
+                        "explanation": "e1",
+                        "concepts": [],
+                        "keypoint_ids": [keypoint_id],
+                    }
+                ]
+            ),
+        )
+    )
+    db_session.commit()
+
+    with patch("app.routers.quiz.match_keypoints_by_concepts") as mock_match_by_concepts:
+        resp = client.post(
+            "/api/quiz/submit",
+            json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["mastery_updates"]) == 1
+    assert data["mastery_updates"][0]["keypoint_id"] == keypoint_id
+    mock_match_by_concepts.assert_not_called()
+
+    db_session.expire_all()
+    keypoint = db_session.query(Keypoint).filter(Keypoint.id == keypoint_id).first()
+    assert keypoint is not None
+    assert int(keypoint.attempt_count or 0) == 1
+    assert float(keypoint.mastery_level or 0.0) > 0.0
+
+
+def test_resolve_keypoints_for_question_falls_back_to_question_then_explanation_text(
+    db_session,
+):
+    q = {
+        "question": "请解释矩阵秩的含义",
+        "options": ["A", "B", "C", "D"],
+        "answer_index": 0,
+        "explanation": "矩阵秩表示线性无关行（列）向量的最大个数",
+        "concepts": ["概念未命中"],
+    }
+
+    with patch(
+        "app.routers.quiz.match_keypoints_by_concepts",
+        side_effect=[[], [], ["kp-fallback-exp"]],
+    ) as mock_match:
+        resolved = _resolve_keypoints_for_question(
+            db_session,
+            q,
+            user_id="u1",
+            doc_id="doc-1",
+            kb_id=None,
+        )
+
+    assert resolved == ["kp-fallback-exp"]
+    assert mock_match.call_count == 3
+    first_call = mock_match.call_args_list[0]
+    second_call = mock_match.call_args_list[1]
+    third_call = mock_match.call_args_list[2]
+    assert first_call.args[:3] == ("u1", "doc-1", ["概念未命中"])
+    assert second_call.args[:3] == ("u1", "doc-1", ["请解释矩阵秩的含义"])
+    assert second_call.kwargs.get("top_k") == 1
+    assert third_call.args[:3] == ("u1", "doc-1", ["矩阵秩表示线性无关行（列）向量的最大个数"])
+    assert third_call.kwargs.get("top_k") == 1
 
 
 def test_quiz_submit_next_recommendation_focus_uses_mastery_concepts(
@@ -503,6 +634,101 @@ def test_quiz_submit_kb_concept_matching_collapses_to_representative_keypoint(
 
     with (
         patch("app.routers.quiz.match_keypoints_by_kb", return_value=[dup_id, rep_id, dup_id]),
+        patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("no vector")),
+    ):
+        resp = client.post(
+            "/api/quiz/submit",
+            json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["mastery_updates"]) == 1
+    assert data["mastery_updates"][0]["keypoint_id"] == rep_id
+
+    db_session.expire_all()
+    rep = db_session.query(Keypoint).filter(Keypoint.id == rep_id).first()
+    dup = db_session.query(Keypoint).filter(Keypoint.id == dup_id).first()
+    assert rep is not None and dup is not None
+    assert int(rep.attempt_count or 0) == 1
+    assert int(dup.attempt_count or 0) == 0
+
+
+def test_quiz_submit_doc_context_still_collapses_to_kb_representative_keypoint(
+    client, db_session, seeded_session
+):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc1 = seeded_session["doc_id"]
+    doc2 = "quiz-doc-dedup-doc-2"
+    quiz_id = "quiz-doc-dedup-1"
+    rep_id = "quiz-doc-dedup-kp-1"
+    dup_id = "quiz-doc-dedup-kp-2"
+    base = datetime.utcnow()
+
+    db_session.add(
+        Document(
+            id=doc2,
+            user_id=user_id,
+            kb_id=kb_id,
+            filename="dedup-2.txt",
+            file_type="txt",
+            text_path=f"/tmp/{doc2}.txt",
+            num_chunks=1,
+            num_pages=1,
+            char_count=100,
+            status="ready",
+        )
+    )
+    db_session.add_all(
+        [
+            Keypoint(
+                id=rep_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc2,
+                text="1. 文档模式聚合概念",
+                mastery_level=0.0,
+                attempt_count=0,
+                correct_count=0,
+                created_at=base,
+            ),
+            Keypoint(
+                id=dup_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc1,
+                text="文档模式聚合概念",
+                mastery_level=0.0,
+                attempt_count=0,
+                correct_count=0,
+                created_at=base + timedelta(seconds=1),
+            ),
+            Quiz(
+                id=quiz_id,
+                user_id=user_id,
+                kb_id=None,
+                doc_id=doc1,
+                difficulty="easy",
+                question_type="mcq",
+                questions_json=json.dumps(
+                    [
+                        {
+                            "question": "q1",
+                            "options": ["A", "B", "C", "D"],
+                            "answer_index": 0,
+                            "explanation": "e1",
+                            "concepts": ["文档模式聚合概念"],
+                        }
+                    ]
+                ),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    with (
+        patch("app.routers.quiz.match_keypoints_by_concepts", return_value=[dup_id]),
         patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("no vector")),
     ):
         resp = client.post(

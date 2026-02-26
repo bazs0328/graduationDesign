@@ -1254,7 +1254,8 @@ function buildAutoQaRouteKey(parsed) {
   ].join('|')
 }
 
-async function clearTransientQaRouteParams() {
+async function clearTransientQaRouteParams(options = {}) {
+  const { clearFocus = false } = options
   const nextQuery = { ...(route.query || {}) }
   let changed = false
   for (const key of ['qa_mode', 'qa_autosend', 'qa_question', 'qa_from']) {
@@ -1262,6 +1263,10 @@ async function clearTransientQaRouteParams() {
       delete nextQuery[key]
       changed = true
     }
+  }
+  if (clearFocus && Object.prototype.hasOwnProperty.call(nextQuery, 'focus')) {
+    delete nextQuery.focus
+    changed = true
   }
   if (!changed) return
   await router.replace({ path: route.path, query: nextQuery })
@@ -1293,7 +1298,9 @@ async function maybeAutoAskFromRoute() {
   try {
     await askQuestion()
   } finally {
-    await clearTransientQaRouteParams()
+    await clearTransientQaRouteParams({
+      clearFocus: parsed.qaFrom === 'quiz_wrong',
+    })
   }
 }
 

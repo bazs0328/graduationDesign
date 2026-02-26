@@ -240,7 +240,7 @@
               :key="point?.id || idx"
               :data-target-keypoint="isTargetKeypoint(point) ? 'true' : undefined"
               class="p-5 bg-background border rounded-xl hover:border-primary/30 transition-all group"
-              :class="isTargetKeypoint(point) ? 'border-primary ring-2 ring-primary/30 bg-primary/5' : masteryBorderClass(point)"
+              :class="isTargetKeypoint(point) ? 'border-primary ring-2 ring-primary/30 bg-primary/5' : ''"
             >
               <div class="space-y-4">
                 <!-- Header: Number + Title -->
@@ -264,34 +264,6 @@
                   {{ point.explanation }}
                 </p>
 
-                <!-- Mastery Progress -->
-                <div v-if="getMasteryLevel(point) !== null" class="space-y-2 pl-11">
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="text-xs font-semibold text-muted-foreground">掌握度</span>
-                    <span class="text-xs font-bold" :class="masteryBadgeClass(point).includes('bg-green') ? 'text-green-500' : masteryBadgeClass(point).includes('bg-yellow') ? 'text-yellow-500' : 'text-red-500'">
-                      {{ masteryPercent(point) }}%
-                    </span>
-                  </div>
-                  <div class="w-full h-2 bg-muted rounded-full overflow-hidden">
-                    <div
-                      class="h-full transition-all duration-500"
-                      :class="masteryBadgeClass(point).includes('bg-green') ? 'bg-green-500' : masteryBadgeClass(point).includes('bg-yellow') ? 'bg-yellow-500' : 'bg-red-500'"
-                      :style="{ width: `${masteryPercent(point)}%` }"
-                    ></div>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <span
-                      class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border"
-                      :class="masteryBadgeClass(point)"
-                    >
-                      {{ masteryLabel(point) }}
-                    </span>
-                    <span v-if="typeof point !== 'string' && point.attempt_count > 0" class="text-[10px] text-muted-foreground">
-                      已尝试 {{ point.attempt_count }} 次
-                    </span>
-                  </div>
-                </div>
-
                 <!-- Source Info -->
                 <div v-if="typeof point !== 'string' && (point.source || point.page || point.chunk)" class="flex items-center gap-2 pt-2 pl-11 border-t border-border/50">
                   <span class="text-[10px] font-bold uppercase text-primary/60">来源：</span>
@@ -307,7 +279,7 @@
                 </div>
 
                 <!-- View Details Link -->
-                <div v-if="getMasteryLevel(point) !== null" class="pt-2 pl-11 border-t border-border/50">
+                <div v-if="hasSelectedDocKb" class="pt-2 pl-11 border-t border-border/50">
                   <button
                     class="text-xs text-primary hover:underline font-medium"
                     @click="goToProgress(point)"
@@ -360,13 +332,6 @@ import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import SourcePreviewModal from '../components/ui/SourcePreviewModal.vue'
 import { renderMarkdown } from '../utils/markdown'
 import { buildRouteContextQuery, parseRouteContext } from '../utils/routeContext'
-import {
-  masteryLabel as _masteryLabel,
-  masteryPercent as _masteryPercent,
-  masteryBadgeClass as _masteryBadgeClass,
-  masteryBorderClass as _masteryBorderClass,
-  isWeakMastery as _isWeakMastery,
-} from '../utils/mastery'
 
 const { showToast } = useToast()
 const appContext = useAppContextStore()
@@ -525,33 +490,6 @@ function scrollToTargetKeypoint() {
       targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
   })
-}
-
-function getMasteryLevel(point) {
-  if (!point || typeof point !== 'object') return null
-  const level = Number(point.mastery_level)
-  return Number.isFinite(level) ? Math.max(0, Math.min(level, 1)) : null
-}
-
-function masteryLabel(point) {
-  const lv = getMasteryLevel(point)
-  return lv === null ? '' : _masteryLabel(lv)
-}
-function masteryPercent(point) {
-  const lv = getMasteryLevel(point)
-  return lv === null ? 0 : _masteryPercent(lv)
-}
-function masteryBadgeClass(point) {
-  const lv = getMasteryLevel(point)
-  return lv === null ? '' : _masteryBadgeClass(lv)
-}
-function masteryBorderClass(point) {
-  const lv = getMasteryLevel(point)
-  return lv === null ? '' : _masteryBorderClass(lv)
-}
-function isWeakMastery(point) {
-  const lv = getMasteryLevel(point)
-  return lv !== null && _isWeakMastery(lv)
 }
 
 function closeSourcePreview() {

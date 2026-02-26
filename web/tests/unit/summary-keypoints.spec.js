@@ -66,6 +66,23 @@ beforeEach(() => {
   apiGet.mockImplementation((path) => {
     if (path.startsWith('/api/kb')) return Promise.resolve([kbFixture])
     if (path.startsWith('/api/docs')) return Promise.resolve([docFixture])
+    if (path.startsWith('/api/keypoints/doc-1?')) {
+      return Promise.resolve({
+        doc_id: 'doc-1',
+        cached: true,
+        keypoints: [
+          {
+            id: 'kp-refresh-1',
+            text: 'k1',
+            explanation: 'explanation for k1',
+            page: 1,
+            mastery_level: 0.6,
+            attempt_count: 2,
+            correct_count: 1,
+          }
+        ]
+      })
+    }
     if (path.startsWith('/api/keypoints/kb/')) {
       return Promise.resolve({
         grouped: true,
@@ -197,10 +214,12 @@ describe('Summary/Keypoints payloads', () => {
     const html = wrapper.html()
     expect(html).toContain('k1')
     expect(html).toContain('explanation for k1')
-    expect(html).toContain('p.1')
+    expect(html).toContain('文档片段')
     expect(html).toContain('单文档视图')
     expect(html).toContain('当前展示的是该文档提取结果')
     expect(html).toContain('查看 KB 学习路径')
+    expect(html).not.toContain('掌握度')
+    expect(html).not.toContain('已尝试')
   })
 
   it('loads and renders kb grouped keypoints panel on demand', async () => {
@@ -247,5 +266,46 @@ describe('Summary/Keypoints payloads', () => {
     expect(html).toContain('矩阵.pdf')
     expect(html).toContain('线代讲义.pdf')
     expect(html).toContain('查看来源定位（2）')
+    expect(html).not.toContain('掌握度')
+  })
+
+  it('does not refresh keypoints on page re-activation when Summary no longer shows mastery', async () => {
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await router.push('/summary')
+    await flushPromises()
+    await nextTick()
+    await nextTick()
+
+    const docSelect = wrapper.find('select')
+    await docSelect.setValue('doc-1')
+    await nextTick()
+
+    const keypointsBtn = wrapper
+      .findAll('button')
+      .find((btn) => btn.text().includes('提取要点'))
+    expect(keypointsBtn).toBeTruthy()
+    await keypointsBtn.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const postKeypointsCallsBefore = apiPost.mock.calls.filter(([path]) => path === '/api/keypoints').length
+    expect(postKeypointsCallsBefore).toBe(1)
+
+    await router.push('/qa')
+    await flushPromises()
+    await nextTick()
+
+    await router.push('/summary')
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+
+    const keypointGetCall = apiGet.mock.calls.find(([path]) => path.startsWith('/api/keypoints/doc-1?'))
+    expect(keypointGetCall).toBeFalsy()
+
+    const postKeypointsCallsAfter = apiPost.mock.calls.filter(([path]) => path === '/api/keypoints').length
+    expect(postKeypointsCallsAfter).toBe(1)
   })
 })

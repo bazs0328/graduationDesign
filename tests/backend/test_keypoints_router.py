@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from app.models import Document, Keypoint, KnowledgeBase, User
+from app.utils.chroma_filters import build_chroma_eq_filter
 
 
 def _seed_kb_with_docs(
@@ -178,7 +179,7 @@ def test_get_keypoints_by_kb_grouped_semantic_dedup(client, db_session):
 
     def _search(query, k, filter):  # noqa: A002
         assert k == 6
-        assert filter == {"kb_id": kb_id, "type": "keypoint"}
+        assert filter == build_chroma_eq_filter(kb_id=kb_id, type="keypoint")
         if query == "矩阵秩定义":
             return [
                 (

@@ -213,8 +213,8 @@ describe('Q&A', () => {
     const html = wrapper.html()
     expect(apiSsePost).toHaveBeenCalled()
     expect(html).toContain(qaResponse.answer)
-    expect(html).toContain('doc p.1 c.0')
-    expect(html).toContain('本次回答来源')
+    expect(html).toContain('参考来源（1）')
+    expect(html).toContain('doc')
     expect(html).toContain('来源可能来自该知识库下多个文档片段')
     expect(html).toContain('回答生成完成')
   })
@@ -298,6 +298,7 @@ describe('Q&A', () => {
       path: '/qa',
       query: {
         kb_id: 'kb-1',
+        focus: '矩阵定义',
         qa_mode: 'explain',
         qa_autosend: '1',
         qa_question: '请讲解这道错题',
@@ -313,6 +314,7 @@ describe('Q&A', () => {
       '/api/qa/stream',
       expect.objectContaining({
         kb_id: 'kb-1',
+        focus: '矩阵定义',
         mode: 'explain',
         question: '请讲解这道错题'
       }),
@@ -321,5 +323,25 @@ describe('Q&A', () => {
     expect(wrapper.html()).toContain('讲解模式')
     expect(router.currentRoute.value.query.qa_mode).toBeUndefined()
     expect(router.currentRoute.value.query.qa_question).toBeUndefined()
+    expect(router.currentRoute.value.query.focus).toBeUndefined()
+  })
+
+  it('keeps focus query for normal QA entry without autosend', async () => {
+    const { router } = await mountAppWithRouter()
+
+    await router.push({
+      path: '/qa',
+      query: {
+        kb_id: 'kb-1',
+        focus: '矩阵定义',
+      },
+    })
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+
+    expect(apiSsePost).not.toHaveBeenCalled()
+    expect(router.currentRoute.value.query.focus).toBe('矩阵定义')
   })
 })

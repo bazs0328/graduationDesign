@@ -12,6 +12,7 @@ from app.core.llm import get_llm
 from app.core.vectorstore import get_vectorstore
 from app.models import Keypoint
 from app.services.keypoint_dedup import normalize_keypoint_text
+from app.utils.chroma_filters import build_chroma_eq_filter
 from app.utils.json_tools import safe_json_loads
 
 logger = logging.getLogger(__name__)
@@ -274,9 +275,11 @@ def save_keypoints_to_db(
         db.commit()
         try:
             vectorstore = get_vectorstore(user_id)
-            vectorstore.delete(where={"doc_id": doc_id, "type": "keypoint"})
+            vectorstore.delete(
+                where=build_chroma_eq_filter(doc_id=doc_id, type="keypoint")
+            )
         except Exception:
-            pass
+            logger.debug("keypoints.save.delete_old_vectors_failed", exc_info=True)
 
     vectorstore = get_vectorstore(user_id)
     saved: list[Keypoint] = []
@@ -333,6 +336,12 @@ def _search_keypoints_per_concept(
                 text, k=top_k_per_concept, filter=filter_dict,
             )
         except Exception:
+            logger.debug(
+                "keypoints.match.search_failed concept=%s filter=%s",
+                text,
+                filter_dict,
+                exc_info=True,
+            )
             continue
         for doc, score in results:
             meta = getattr(doc, "metadata", {}) or {}
@@ -358,7 +367,7 @@ def match_keypoints_by_concepts(
     vectorstore = get_vectorstore(user_id)
     return _search_keypoints_per_concept(
         vectorstore, concepts,
-        filter_dict={"doc_id": doc_id, "type": "keypoint"},
+        filter_dict=build_chroma_eq_filter(doc_id=doc_id, type="keypoint") or {},
         max_distance=max_distance,
         top_k_per_concept=top_k,
     )
@@ -377,7 +386,7 @@ def match_keypoints_by_kb(
     vectorstore = get_vectorstore(user_id)
     return _search_keypoints_per_concept(
         vectorstore, concepts,
-        filter_dict={"kb_id": kb_id, "type": "keypoint"},
+        filter_dict=build_chroma_eq_filter(kb_id=kb_id, type="keypoint") or {},
         max_distance=max_distance,
         top_k_per_concept=top_k,
     )

@@ -4,8 +4,9 @@ from typing import Iterable, List, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.models import Keypoint, LearnerProfile
+from app.models import LearnerProfile
 from app.schemas import DifficultyPlan, ProfileDelta
+from app.services.aggregate_mastery import list_user_aggregate_mastery_points
 from app.services.mastery import is_weak_mastery
 
 ABILITY_LEVELS = ("beginner", "intermediate", "advanced")
@@ -84,19 +85,13 @@ def get_weak_concepts_by_mastery(
     - exclude untouched zero-state keypoints (attempt_count == 0 and mastery_level == 0)
     - deduplicate by text, keep lower-mastery / more-attempted items first
     """
-    rows = (
-        db.query(Keypoint.text, Keypoint.mastery_level, Keypoint.attempt_count)
-        .filter(Keypoint.user_id == user_id)
-        .all()
-    )
-
     candidates = []
-    for text, mastery_level, attempt_count in rows:
-        concept = str(text or "").strip()
+    for point in list_user_aggregate_mastery_points(db, user_id):
+        concept = str(point.text or "").strip()
         if not concept:
             continue
-        mastery = float(mastery_level or 0.0)
-        attempts = int(attempt_count or 0)
+        mastery = float(point.mastery_level or 0.0)
+        attempts = int(point.attempt_count or 0)
         if attempts == 0 and mastery <= 0.0:
             continue
         if not is_weak_mastery(mastery):
