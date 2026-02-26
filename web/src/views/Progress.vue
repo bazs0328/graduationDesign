@@ -299,8 +299,19 @@
             </div>
 
             <!-- ECharts graph -->
-            <div class="border border-border rounded-lg bg-background p-2" style="height: 396px">
-              <LearningPathGraph :option="pathChartOption" :height="380" />
+            <div class="border border-border rounded-lg bg-background p-2">
+              <div class="overflow-auto rounded-md" :style="{ height: `${pathChartViewportHeight}px` }">
+                <div
+                  class="min-w-full"
+                  :style="{ width: `${pathChartCanvasWidth}px`, height: `${pathChartCanvasHeight}px` }"
+                >
+                  <LearningPathGraph
+                    :option="pathChartOption"
+                    :width="pathChartCanvasWidth"
+                    :height="pathChartCanvasHeight"
+                  />
+                </div>
+              </div>
             </div>
 
             <!-- Legend -->
@@ -490,6 +501,11 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import { MASTERY_MASTERED, masteryPercent } from '../utils/mastery'
 import { renderMarkdown } from '../utils/markdown'
 import { buildRouteContextQuery, normalizeDifficulty } from '../utils/routeContext'
+import {
+  LEARNING_PATH_CHART_LAYOUT,
+  buildLearningPathChartLayout,
+  learningPathEdgeKey,
+} from '../utils/learningPathChartLayout'
 
 const { showToast } = useToast()
 const LearnerProfileCard = defineAsyncComponent({
@@ -1268,49 +1284,61 @@ function learningPathNodeBorderColor(item) {
 }
 
 // -- Learning path chart --
+const pathChartLayout = computed(() => buildLearningPathChartLayout(
+  learningPath.value,
+  learningPathEdges.value,
+))
+
+const pathChartCanvasWidth = computed(() => (
+  pathChartLayout.value.canvasWidth || LEARNING_PATH_CHART_LAYOUT.minCanvasWidth
+))
+
+const pathChartCanvasHeight = computed(() => (
+  pathChartLayout.value.canvasHeight || LEARNING_PATH_CHART_LAYOUT.minCanvasHeight
+))
+
+const pathChartViewportHeight = computed(() => (
+  pathChartLayout.value.viewportHeight || LEARNING_PATH_CHART_LAYOUT.minViewportHeight
+))
+
 const pathChartOption = computed(() => {
   if (!learningPath.value.length) return {}
 
-  const chartHeight = 380
-  const levelGap = 220
-  const rowGap = 86
-  const topPadding = 60
-  const leftPadding = 80
-  const bandTop = 28
-  const bandWidth = 170
-  const bandHeight = chartHeight - 44
-  const headerPillTop = 4
-  const headerPillHeight = 20
-  const separatorTop = 28
-  const separatorBottom = chartHeight - 16
-  const levelValues = [...new Set(
-    learningPath.value.map((item) => Math.max(0, Number(item.path_level) || 0)),
-  )].sort((a, b) => a - b)
-  const levelIndexMap = {}
-  levelValues.forEach((level, idx) => { levelIndexMap[level] = idx })
-  const levelCounts = {}
-  for (const item of learningPath.value) {
-    const level = Math.max(0, Number(item.path_level) || 0)
-    levelCounts[level] = (levelCounts[level] || 0) + 1
-  }
+  const layout = pathChartLayout.value
+  const chartHeight = pathChartCanvasHeight.value
+  const {
+    leftPadding,
+    topPadding,
+    columnGap,
+    bandTop,
+    bandWidth,
+    headerPillTop,
+    headerPillHeight,
+    separatorBottomPadding,
+  } = LEARNING_PATH_CHART_LAYOUT
+  const bandHeight = Math.max(0, chartHeight - (bandTop + separatorBottomPadding))
+  const separatorTop = bandTop
+  const separatorBottom = chartHeight - separatorBottomPadding
+  const levelValues = layout.levelValues || []
+  const levelCounts = layout.levelCounts || {}
+  const nodePositions = layout.nodePositions || {}
+  const headerPills = layout.headerPills || []
+  const edgeCurvenessByKey = layout.edgeCurvenessByKey || {}
 
-  const rowCounts = {}
   const nodes = learningPath.value.map((item) => {
     const stageId = item.stage || 'foundation'
     const pathLevel = Math.max(0, Number(item.path_level) || 0)
-    const rowIdx = rowCounts[pathLevel] || 0
-    rowCounts[pathLevel] = rowIdx + 1
-    const levelIdx = levelIndexMap[pathLevel] ?? 0
     const isMastered = item.mastery_level >= MASTERY_MASTERED
     const isBlocked = isLearningPathItemBlocked(item)
     const baseSize = 24 + Math.round((item.importance || 0.5) * 18)
     const prereqLabels = unmetPrereqLabels(item)
     const nodeStepText = String(item.step || '')
+    const nodeMeta = nodePositions[item.keypoint_id] || { x: leftPadding, y: topPadding }
     return {
       id: item.keypoint_id,
       name: item.text.length > 20 ? `${item.text.slice(0, 20)}…` : item.text,
-      x: leftPadding + levelIdx * levelGap + (item.milestone ? 12 : 0),
-      y: topPadding + rowIdx * rowGap,
+      x: nodeMeta.x,
+      y: nodeMeta.y,
       symbol: item.milestone ? 'diamond' : 'circle',
       symbolSize: item.milestone ? baseSize + 6 : baseSize,
       itemStyle: {
@@ -1354,13 +1382,13 @@ const pathChartOption = computed(() => {
         target: edge.to_id,
         lineStyle: {
           color: targetBlocked ? '#f59e0b' : '#94a3b8',
-          width: 1.2 + confidence * 1.6,
-          curveness: 0.06,
-          opacity: targetBlocked ? 0.85 : 0.65,
+          width: 1.6 + confidence * 1.8,
+          curveness: edgeCurvenessByKey[learningPathEdgeKey(edge.from_id, edge.to_id)] ?? 0,
+          opacity: targetBlocked ? 0.9 : 0.75,
           type: targetBlocked ? 'dashed' : 'solid',
         },
         symbol: ['none', 'arrow'],
-        symbolSize: [0, 8],
+        symbolSize: [0, 10],
       }
     })
 
@@ -1369,7 +1397,7 @@ const pathChartOption = computed(() => {
     silent: true,
     z: -2,
     shape: {
-      x: leftPadding - (bandWidth / 2) + idx * levelGap,
+      x: leftPadding - (bandWidth / 2) + idx * columnGap,
       y: bandTop,
       width: bandWidth,
       height: bandHeight,
@@ -1384,8 +1412,8 @@ const pathChartOption = computed(() => {
 
   const separatorGraphics = levelValues
     .slice(1)
-    .map((level, idx) => {
-      const boundaryX = leftPadding + ((idx + 1) * levelGap) - (levelGap / 2)
+    .map((_, idx) => {
+      const boundaryX = leftPadding + ((idx + 1) * columnGap) - (columnGap / 2)
       return {
         type: 'line',
         silent: true,
@@ -1404,20 +1432,16 @@ const pathChartOption = computed(() => {
       }
     })
 
-  const headerGraphics = levelValues.flatMap((level, idx) => {
-    const count = levelCounts[level] || 0
-    const title = `${level === 0 ? '先修起点' : `先修层级 ${level}`} · ${count}项`
-    const pillWidth = Math.max(92, (title.length * 8) + 18)
-    const pillX = leftPadding + (idx * levelGap) - (pillWidth / 2)
+  const headerGraphics = headerPills.flatMap((pill) => {
     return [
       {
         type: 'rect',
         silent: true,
         z: 2,
         shape: {
-          x: pillX,
+          x: pill.x,
           y: headerPillTop,
-          width: pillWidth,
+          width: pill.width,
           height: headerPillHeight,
           r: 10,
         },
@@ -1433,10 +1457,10 @@ const pathChartOption = computed(() => {
         type: 'text',
         silent: true,
         z: 3,
-        left: pillX + 9,
-        top: headerPillTop + 4,
+        left: pill.x + 9,
+        top: headerPillTop + 5,
         style: {
-          text: title,
+          text: pill.title,
           fill: '#475569',
           fontSize: 12,
           fontWeight: 700,
@@ -1453,12 +1477,13 @@ const pathChartOption = computed(() => {
     series: [{
       type: 'graph',
       layout: 'none',
-      roam: true,
+      // Keep nodes aligned with static `graphic` level bands; scrolling is handled by the outer container.
+      roam: false,
       draggable: false,
       data: nodes,
       links,
       edgeSymbol: ['none', 'arrow'],
-      edgeSymbolSize: [0, 8],
+      edgeSymbolSize: [0, 10],
       emphasis: {
         focus: 'adjacency',
         lineStyle: { width: 2.5 },

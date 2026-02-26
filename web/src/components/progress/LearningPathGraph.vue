@@ -1,5 +1,5 @@
 <template>
-  <VChart class="w-full" :style="{ height: `${normalizedHeight}px`, display: 'block' }" :option="option || {}" autoresize />
+  <VChart :style="chartStyle" :option="option || {}" autoresize />
 </template>
 
 <script setup>
@@ -21,7 +21,17 @@ const props = defineProps({
     type: Number,
     default: 380,
   },
+  width: {
+    type: Number,
+    default: 0,
+  },
 })
 
 const normalizedHeight = computed(() => Math.max(120, Number(props.height) || 380))
+const normalizedWidth = computed(() => Math.max(0, Number(props.width) || 0))
+const chartStyle = computed(() => ({
+  width: normalizedWidth.value > 0 ? `${normalizedWidth.value}px` : '100%',
+  height: `${normalizedHeight.value}px`,
+  display: 'block',
+}))
 </script>
