@@ -1,4 +1,9 @@
 import { useToast } from './composables/useToast'
+import {
+  clearAuthSession,
+  getAccessToken,
+  getCurrentUserFromSession,
+} from './composables/useAuthSession'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
@@ -12,7 +17,7 @@ function buildAuthHeaders(path, headersLike) {
   const isAuth = path.includes('/api/auth')
   const headers = new Headers(headersLike || undefined)
   if (!isAuth) {
-    const token = localStorage.getItem('gradtutor_access_token')
+    const token = getAccessToken()
     if (token) {
       headers.set('Authorization', `Bearer ${token}`)
     }
@@ -224,28 +229,11 @@ export async function authLogin(username, password) {
 }
 
 export function getCurrentUser() {
-  const userId = localStorage.getItem('gradtutor_user_id')
-  const username = localStorage.getItem('gradtutor_username')
-  const name = localStorage.getItem('gradtutor_name')
-  const token = localStorage.getItem('gradtutor_access_token')
-  if (!userId) return null
-  return { user_id: userId, username: username || userId, name: name || username || userId, access_token: token }
+  return getCurrentUserFromSession()
 }
 
 export function logout() {
-  const appCtxKeys = []
-  for (let idx = 0; idx < localStorage.length; idx += 1) {
-    const key = localStorage.key(idx)
-    if (key && key.startsWith('gradtutor_app_ctx_v1:')) {
-      appCtxKeys.push(key)
-    }
-  }
-  appCtxKeys.forEach((key) => localStorage.removeItem(key))
-  localStorage.removeItem('gradtutor_user_id')
-  localStorage.removeItem('gradtutor_username')
-  localStorage.removeItem('gradtutor_name')
-  localStorage.removeItem('gradtutor_user')
-  localStorage.removeItem('gradtutor_access_token')
+  clearAuthSession()
   const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent || '' : ''
   if (!/jsdom/i.test(userAgent)) {
     window.location.href = '/login'
@@ -382,4 +370,24 @@ export async function buildLearningPath(userId, kbId, force = false) {
   const params = new URLSearchParams({ kb_id: kbId, force: String(force) })
   if (userId) params.set('user_id', userId)
   return apiPost(`/api/learning-path/build?${params}`)
+}
+
+export async function getSettings(options = {}) {
+  const params = new URLSearchParams()
+  if (options.userId) params.set('user_id', options.userId)
+  if (options.kbId) params.set('kb_id', options.kbId)
+  const query = params.toString()
+  return apiGet(`/api/settings${query ? `?${query}` : ''}`)
+}
+
+export async function patchUserSettings(payload) {
+  return apiPatch('/api/settings/user', payload)
+}
+
+export async function patchKbSettings(kbId, payload) {
+  return apiPatch(`/api/settings/kb/${encodeURIComponent(kbId)}`, payload)
+}
+
+export async function resetSettings(payload) {
+  return apiPost('/api/settings/reset', payload)
 }

@@ -21,16 +21,27 @@
         <div class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
           <div class="flex items-center gap-3">
             <FileText class="w-6 h-6 text-primary" />
-            <h2 class="text-xl font-bold">选择文档</h2>
+            <h2 class="text-xl font-bold">选择范围</h2>
           </div>
-          <div class="space-y-2">
-            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">选择文档</label>
-            <SkeletonBlock v-if="busy.init" type="list" :lines="3" />
-            <select v-else v-model="selectedDocId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary">
-              <option disabled value="">请选择</option>
-              <option v-for="doc in docs" :key="doc.id" :value="doc.id">{{ doc.filename }}</option>
-            </select>
-          </div>
+          <SkeletonBlock v-if="busy.init" type="list" :lines="4" />
+          <KnowledgeScopePicker
+            v-else
+            :kb-id="selectedKbId"
+            :doc-id="selectedDocId"
+            :kbs="kbs"
+            :docs="docs"
+            :kb-loading="appContext.kbsLoading"
+            :docs-loading="busy.docs"
+            mode="kb-and-required-doc"
+            kb-label="目标知识库"
+            doc-label="目标文档"
+            @update:kb-id="selectedKbId = $event"
+            @update:doc-id="selectedDocId = $event"
+          >
+            <p class="text-[11px] text-muted-foreground">
+              摘要与要点生成作用于单文档；你可以先选知识库，再选具体文档。
+            </p>
+          </KnowledgeScopePicker>
           <div class="flex flex-col gap-2 pt-2">
             <label class="flex items-center gap-2 text-sm cursor-pointer">
               <input
@@ -323,8 +334,10 @@ import { ref, onMounted, onActivated, watch, computed, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { FileText, Sparkles, Layers } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
+import { useKbDocuments } from '../composables/useKbDocuments'
 import { useToast } from '../composables/useToast'
 import { useAppContextStore } from '../stores/appContext'
+import KnowledgeScopePicker from '../components/context/KnowledgeScopePicker.vue'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
@@ -340,12 +353,17 @@ appContext.hydrate()
 const router = useRouter()
 const route = useRoute()
 const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
-const docs = ref([])
 const kbs = computed(() => appContext.kbs)
+const selectedKbId = computed({
+  get: () => appContext.selectedKbId,
+  set: (value) => appContext.setSelectedKbId(value),
+})
 const selectedDocId = computed({
   get: () => appContext.selectedDocId,
   set: (value) => appContext.setSelectedDocId(value),
 })
+const kbDocs = useKbDocuments({ userId: resolvedUserId, kbId: selectedKbId })
+const docs = kbDocs.docs
 const summary = ref('')
 const summaryCached = ref(false)
 const keypoints = ref([])
@@ -372,7 +390,8 @@ const sourcePreview = ref({
 const busy = ref({
   summary: false,
   keypoints: false,
-  init: false
+  init: false,
+  docs: false,
 })
 
 const renderedSummary = computed(() => {
@@ -384,9 +403,9 @@ const hasSelectedDocKb = computed(() => Boolean(selectedDoc.value?.kb_id))
 const selectedDocKbId = computed(() => selectedDoc.value?.kb_id || '')
 
 const selectedKbName = computed(() => {
-  const doc = selectedDoc.value
-  if (!doc) return '未知'
-  const kb = kbs.value.find(k => k.id === doc.kb_id)
+  const kbId = selectedDoc.value?.kb_id || selectedKbId.value
+  if (!kbId) return '未知'
+  const kb = kbs.value.find(k => k.id === kbId)
   return kb ? kb.name : '未知'
 })
 const entryDocContextId = computed(() => parseRouteContext(route.query).docId)
@@ -601,11 +620,23 @@ async function refreshKbGroupedKeypoints() {
   await loadKbGroupedKeypoints({ force: true })
 }
 
-async function refreshDocs() {
+async function refreshDocsInKb(options = {}) {
   try {
-    docs.value = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    await kbDocs.refresh(options)
   } catch {
     // error toast handled globally
+  }
+}
+
+async function resolveDocKbIdByDocId(docId) {
+  const queryDocId = String(docId || '').trim()
+  if (!queryDocId) return ''
+  try {
+    const rows = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}`)
+    const found = Array.isArray(rows) ? rows.find((row) => row?.id === queryDocId) : null
+    return found?.kb_id || ''
+  } catch {
+    return ''
   }
 }
 
@@ -686,13 +717,23 @@ async function syncFromRoute(options = {}) {
       // error toast handled globally
     }
 
-    if (options.refreshDocs === true) {
-      await refreshDocs()
+    if (selectedKbId.value) {
+      await refreshDocsInKb({ force: options.refreshDocs === true })
+    } else if (options.refreshDocs === true) {
+      docs.value = []
     }
     normalizeDocSelection()
 
     const queryDocId = entryDocContextId.value
     if (!queryDocId) return
+    if (!docs.value.some((doc) => doc.id === queryDocId)) {
+      const routeDocKbId = await resolveDocKbIdByDocId(queryDocId)
+      if (routeDocKbId && routeDocKbId !== selectedKbId.value) {
+        selectedKbId.value = routeDocKbId
+        await refreshDocsInKb({ force: true })
+        normalizeDocSelection()
+      }
+    }
     if (!docs.value.some((doc) => doc.id === queryDocId)) return
 
     if (selectedDocId.value !== queryDocId) {
@@ -716,25 +757,34 @@ onMounted(async () => {
     } catch {
       // error toast handled globally
     }
-    await refreshDocs()
-    normalizeDocSelection()
-    await syncFromRoute({ refreshDocs: false })
+    await syncFromRoute({ refreshDocs: true })
   } finally {
     busy.value.init = false
   }
 })
 
 onActivated(async () => {
-  await syncFromRoute({ ensureKbs: !appContext.kbs.length })
+  await syncFromRoute({ ensureKbs: !appContext.kbs.length, refreshDocs: true })
 })
 
 watch(
   () => route.fullPath,
   async () => {
     if (busy.value.init) return
-    await syncFromRoute()
+    await syncFromRoute({ refreshDocs: true })
   }
 )
+
+watch(selectedKbId, async (nextKbId, prevKbId) => {
+  if (nextKbId === prevKbId) return
+  if (syncingRouteContext.value) return
+  await refreshDocsInKb({ force: true })
+  normalizeDocSelection()
+})
+
+watch(kbDocs.loading, (loading) => {
+  busy.value.docs = !!loading
+}, { immediate: true })
 
 watch(selectedDocKbId, (nextKbId, prevKbId) => {
   if (nextKbId === prevKbId) return

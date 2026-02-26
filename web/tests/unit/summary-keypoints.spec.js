@@ -36,6 +36,33 @@ function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
+function getSummarySelects(wrapper) {
+  const selects = wrapper.findAll('select')
+  return {
+    kb: selects.at(0),
+    doc: selects.find((sel) => sel.text().includes('请选择文档') || sel.text().includes('sample.txt')),
+  }
+}
+
+async function openSummaryAndSelectDoc(wrapper, router, { kbId = 'kb-1', docId = 'doc-1' } = {}) {
+  await router.push('/summary')
+  await flushPromises()
+  await nextTick()
+  await nextTick()
+
+  let { kb } = getSummarySelects(wrapper)
+  expect(kb?.exists()).toBe(true)
+  await kb.setValue(kbId)
+  await flushPromises()
+  await nextTick()
+
+  let { doc } = getSummarySelects(wrapper)
+  expect(doc?.exists()).toBe(true)
+  await doc.setValue(docId)
+  await flushPromises()
+  await nextTick()
+}
+
 async function mountAppWithRouter() {
   localStorage.setItem('gradtutor_user_id', 'test')
   localStorage.setItem('gradtutor_user', 'test')
@@ -143,16 +170,7 @@ beforeEach(() => {
 describe('Summary/Keypoints payloads', () => {
   it('sends boolean force on summarize', async () => {
     const { wrapper, router } = await mountAppWithRouter()
-
-    await router.push('/summary')
-    await flushPromises()
-    await nextTick()
-    await nextTick()
-
-    const docSelect = wrapper.find('select')
-    expect(docSelect.exists()).toBe(true)
-    await docSelect.setValue('doc-1')
-    await nextTick()
+    await openSummaryAndSelectDoc(wrapper, router)
 
     const summarizeBtn = wrapper
       .findAll('button')
@@ -168,16 +186,7 @@ describe('Summary/Keypoints payloads', () => {
 
   it('sends boolean force on keypoints', async () => {
     const { wrapper, router } = await mountAppWithRouter()
-
-    await router.push('/summary')
-    await flushPromises()
-    await nextTick()
-    await nextTick()
-
-    const docSelect = wrapper.find('select')
-    expect(docSelect.exists()).toBe(true)
-    await docSelect.setValue('doc-1')
-    await nextTick()
+    await openSummaryAndSelectDoc(wrapper, router)
 
     const keypointsBtn = wrapper
       .findAll('button')
@@ -193,16 +202,7 @@ describe('Summary/Keypoints payloads', () => {
 
   it('renders keypoints with text, explanation, and source', async () => {
     const { wrapper, router } = await mountAppWithRouter()
-
-    await router.push('/summary')
-    await flushPromises()
-    await nextTick()
-    await nextTick()
-
-    const docSelect = wrapper.find('select')
-    expect(docSelect.exists()).toBe(true)
-    await docSelect.setValue('doc-1')
-    await nextTick()
+    await openSummaryAndSelectDoc(wrapper, router)
 
     const keypointsBtn = wrapper
       .findAll('button')
@@ -224,15 +224,7 @@ describe('Summary/Keypoints payloads', () => {
 
   it('loads and renders kb grouped keypoints panel on demand', async () => {
     const { wrapper, router } = await mountAppWithRouter()
-
-    await router.push('/summary')
-    await flushPromises()
-    await nextTick()
-    await nextTick()
-
-    const docSelect = wrapper.find('select')
-    await docSelect.setValue('doc-1')
-    await nextTick()
+    await openSummaryAndSelectDoc(wrapper, router)
 
     const keypointsBtn = wrapper
       .findAll('button')
@@ -271,15 +263,7 @@ describe('Summary/Keypoints payloads', () => {
 
   it('does not refresh keypoints on page re-activation when Summary no longer shows mastery', async () => {
     const { wrapper, router } = await mountAppWithRouter()
-
-    await router.push('/summary')
-    await flushPromises()
-    await nextTick()
-    await nextTick()
-
-    const docSelect = wrapper.find('select')
-    await docSelect.setValue('doc-1')
-    await nextTick()
+    await openSummaryAndSelectDoc(wrapper, router)
 
     const keypointsBtn = wrapper
       .findAll('button')

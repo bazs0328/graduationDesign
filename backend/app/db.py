@@ -83,12 +83,21 @@ def ensure_schema():
                 )
             )
             conn.commit()
+        if "preferences_json" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN preferences_json TEXT"))
+            conn.commit()
         result = conn.execute(text("PRAGMA table_info(users)"))
         cols = {row[1] for row in result}
         if "username" in cols and "password_hash" in cols:
             conn.execute(
                 text("UPDATE users SET username = id WHERE username = '' OR username IS NULL")
             )
+            conn.commit()
+
+        result = conn.execute(text("PRAGMA table_info(knowledge_bases)"))
+        cols = {row[1] for row in result}
+        if "preferences_json" not in cols:
+            conn.execute(text("ALTER TABLE knowledge_bases ADD COLUMN preferences_json TEXT"))
             conn.commit()
 
         result = conn.execute(text("PRAGMA table_info(documents)"))

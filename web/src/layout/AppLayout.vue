@@ -44,15 +44,15 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { Sun, Moon, PanelLeft } from 'lucide-vue-next'
 import AppSidebar from './AppSidebar.vue'
 import { getCurrentUser } from '../api'
+import { useTheme } from '../composables/useTheme'
 
-const THEME_STORAGE_KEY = 'gradtutor_theme'
 const route = useRoute()
-const isDark = ref(readThemeFromDom())
+const { isDark, toggleTheme } = useTheme()
 
 const displayName = computed(() => {
   const user = getCurrentUser()
@@ -62,30 +62,6 @@ const displayName = computed(() => {
 const currentRouteName = computed(() => {
   return route.meta?.title || route.name || '控制台'
 })
-
-function readThemeFromDom() {
-  if (typeof document === 'undefined') return false
-  return document.documentElement.classList.contains('dark')
-}
-
-function applyTheme(theme) {
-  if (typeof document === 'undefined') return
-  const resolved = theme === 'dark' ? 'dark' : 'light'
-  const root = document.documentElement
-  root.classList.toggle('dark', resolved === 'dark')
-  root.classList.toggle('light', resolved === 'light')
-}
-
-function toggleTheme() {
-  const nextTheme = isDark.value ? 'light' : 'dark'
-  isDark.value = nextTheme === 'dark'
-  applyTheme(nextTheme)
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, nextTheme)
-  } catch {
-    // ignore localStorage access errors
-  }
-}
 
 function toggleSidebarDrawer() {
   if (typeof window === 'undefined') return

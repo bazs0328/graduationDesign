@@ -29,24 +29,41 @@
           </div>
 
           <div class="space-y-4">
-            <div class="space-y-2">
-              <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">目标知识库</label>
-              <select v-model="selectedKbId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
-                <option disabled value="">请选择</option>
-                <option v-for="kb in kbs" :key="kb.id" :value="kb.id">{{ kb.name || kb.id }}</option>
-              </select>
-            </div>
-
-            <div v-if="selectedKbId" class="space-y-2">
-              <div class="flex items-center gap-2">
-                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">限定文档（可选）</label>
-                <span v-if="busy.docs" class="text-[10px] text-muted-foreground">加载中...</span>
+            <KnowledgeScopePicker
+              :kb-id="selectedKbId"
+              :doc-id="selectedDocId"
+              :kbs="kbs"
+              :docs="docsInKb"
+              :kb-loading="appContext.kbsLoading"
+              :docs-loading="busy.docs"
+              mode="kb-and-optional-doc"
+              kb-label="目标知识库"
+              doc-label="限定文档（可选）"
+              @update:kb-id="selectedKbId = $event"
+              @update:doc-id="selectedDocId = $event"
+            >
+              <div class="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                <span>题量/难度默认值来自设置中心，可在此页临时调整。</span>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 font-semibold hover:bg-accent disabled:opacity-50"
+                    :disabled="settingsStore.savingUser"
+                    @click="saveCurrentQuizDefaults"
+                  >
+                    {{ settingsStore.savingUser ? '保存中…' : '保存为默认' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 font-semibold hover:bg-accent"
+                    @click="router.push('/settings')"
+                  >
+                    <SlidersHorizontal class="w-3 h-3" />
+                    设置
+                  </button>
+                </div>
               </div>
-              <select v-model="selectedDocId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
-                <option value="">不限定（整库测验）</option>
-                <option v-for="doc in docsInKb" :key="doc.id" :value="doc.id">{{ doc.filename }}</option>
-              </select>
-            </div>
+            </KnowledgeScopePicker>
 
             <div v-if="selectedKbId" class="space-y-2">
               <div class="flex items-center justify-between gap-2">
@@ -414,21 +431,25 @@
 <script setup>
 import { ref, onMounted, onActivated, computed, watch, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { PenTool, Sparkles, CheckCircle2, XCircle } from 'lucide-vue-next'
+import { PenTool, Sparkles, CheckCircle2, XCircle, SlidersHorizontal } from 'lucide-vue-next'
 import { apiGet, apiGetBlob, apiPost } from '../api'
 import AnimatedNumber from '../components/ui/AnimatedNumber.vue'
 import { useToast } from '../composables/useToast'
+import { useKbDocuments } from '../composables/useKbDocuments'
 import { useAppContextStore } from '../stores/appContext'
+import { useSettingsStore } from '../stores/settings'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import ImageLightboxModal from '../components/ui/ImageLightboxModal.vue'
 import LoadingOverlay from '../components/ui/LoadingOverlay.vue'
+import KnowledgeScopePicker from '../components/context/KnowledgeScopePicker.vue'
 import { masteryLabel, masteryPercent, masteryBadgeClass, masteryBorderClass } from '../utils/mastery'
 import { renderMarkdown, renderMarkdownInline } from '../utils/markdown'
 import { buildRouteContextQuery, normalizeDifficulty, parseRouteContext } from '../utils/routeContext'
 
 const { showToast } = useToast()
 const appContext = useAppContextStore()
+const settingsStore = useSettingsStore()
 appContext.hydrate()
 const router = useRouter()
 const route = useRoute()
@@ -443,7 +464,9 @@ const selectedDocId = computed({
   get: () => appContext.selectedDocId,
   set: (value) => appContext.setSelectedDocId(value),
 })
-const docsInKb = ref([])
+const kbDocs = useKbDocuments({ userId: resolvedUserId, kbId: selectedKbId })
+const docsInKb = kbDocs.docs
+const docsInKbLoading = kbDocs.loading
 const quiz = ref(null)
 const quizAnswers = ref({})
 const quizResult = ref(null)
@@ -542,6 +565,59 @@ const imagePreviewState = ref({
   caption: '',
   title: '图片预览',
 })
+const effectiveQuizSettings = computed(() => settingsStore.effectiveSettings?.quiz || {})
+
+function applyQuizDefaultsFromSettings() {
+  const quizDefaults = effectiveQuizSettings.value || {}
+  if (Number.isFinite(Number(quizDefaults.count_default))) {
+    quizCount.value = Math.max(1, Math.min(20, Number(quizDefaults.count_default)))
+  }
+  if (typeof quizDefaults.auto_adapt_default === 'boolean') {
+    autoAdapt.value = quizDefaults.auto_adapt_default
+  }
+  if (['easy', 'medium', 'hard'].includes(quizDefaults.difficulty_default)) {
+    quizDifficulty.value = quizDefaults.difficulty_default
+  }
+}
+
+async function loadQuizViewSettings(force = false) {
+  try {
+    await settingsStore.load({
+      userId: resolvedUserId.value,
+      kbId: selectedKbId.value || '',
+      force,
+    })
+    applyQuizDefaultsFromSettings()
+  } catch {
+    // error toast handled globally
+  }
+}
+
+async function saveCurrentQuizDefaults() {
+  try {
+    if (!settingsStore.systemStatus) {
+      await loadQuizViewSettings(true)
+    }
+    settingsStore.setUserDraftSection('quiz', {
+      count_default: Math.max(1, Math.min(20, Number(quizCount.value) || 5)),
+      auto_adapt_default: Boolean(autoAdapt.value),
+      difficulty_default: ['easy', 'medium', 'hard'].includes(quizDifficulty.value)
+        ? quizDifficulty.value
+        : 'medium',
+    })
+    await settingsStore.saveUser(resolvedUserId.value)
+    if (selectedKbId.value) {
+      await settingsStore.load({
+        userId: resolvedUserId.value,
+        kbId: selectedKbId.value,
+        force: true,
+      })
+    }
+    showToast('已保存当前测验配置为默认设置', 'success')
+  } catch {
+    // error toast handled globally
+  }
+}
 
 function closeQuestionImagePreview() {
   imagePreviewState.value = {
@@ -778,22 +854,15 @@ function maybeAdoptRouteFocusConcept(focusText) {
 
 async function refreshDocsInKb() {
   if (!selectedKbId.value) {
-    docsInKb.value = []
+    kbDocs.reset()
     busy.value.docs = false
     if (selectedDocId.value) selectedDocId.value = ''
     return
   }
-  busy.value.docs = true
   try {
-    const rows = await apiGet(
-      `/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(selectedKbId.value)}`
-    )
-    docsInKb.value = Array.isArray(rows) ? rows : []
+    await kbDocs.refresh()
   } catch {
-    docsInKb.value = []
     // error toast handled globally
-  } finally {
-    busy.value.docs = false
   }
   if (selectedDocId.value && !docsInKb.value.some((doc) => doc.id === selectedDocId.value)) {
     selectedDocId.value = ''
@@ -986,12 +1055,12 @@ onMounted(async () => {
   } catch {
     // error toast handled globally
   }
-  await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions()])
+  await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions(), loadQuizViewSettings(true)])
   await syncFromRoute({ autoGenerate: true })
 })
 
 onActivated(async () => {
-  await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions()])
+  await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions(), loadQuizViewSettings()])
   await syncFromRoute({
     ensureKbs: !appContext.kbs.length,
     autoGenerate: true,
@@ -1007,7 +1076,7 @@ onBeforeUnmount(() => {
 watch(
   () => route.fullPath,
   async () => {
-    await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions()])
+    await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions(), loadQuizViewSettings()])
     await syncFromRoute({ autoGenerate: true })
   }
 )
@@ -1017,8 +1086,12 @@ watch(selectedKbId, async () => {
   quizFocusOptions.value = []
   quizFocusSearch.value = ''
   quizFocusCandidate.value = ''
-  await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions()])
+  await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions(), loadQuizViewSettings(true)])
 })
+
+watch(docsInKbLoading, (loading) => {
+  busy.value.docs = !!loading
+}, { immediate: true })
 
 watch(selectedDocId, () => {
   pruneQuizFocusConceptsToCurrentDocScope()

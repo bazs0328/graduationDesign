@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { hasAccessToken } from '../composables/useAuthSession'
 
 export const routes = [
   {
@@ -42,6 +43,12 @@ export const routes = [
     name: 'Progress',
     meta: { title: '进度' },
     component: () => import('../views/Progress.vue')
+  },
+  {
+    path: '/settings',
+    name: 'Settings',
+    meta: { title: '设置中心' },
+    component: () => import('../views/Settings.vue')
   }
 ]
 
@@ -51,7 +58,7 @@ const router = createRouter({
 })
 
 router.beforeEach((to, from, next) => {
-  const isLoggedIn = !!localStorage.getItem('gradtutor_access_token')
+  const isLoggedIn = hasAccessToken()
   if (to.path !== '/login' && !isLoggedIn) {
     next('/login')
   } else if (to.path === '/login' && isLoggedIn) {

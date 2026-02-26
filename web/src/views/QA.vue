@@ -195,22 +195,41 @@
               <Sparkles class="w-3.5 h-3.5 text-primary" />
               回答模式
             </div>
-            <div class="inline-flex rounded-lg border border-border bg-background p-1">
+            <div class="flex items-center gap-2">
+              <div class="inline-flex rounded-lg border border-border bg-background p-1">
+                <button
+                  class="px-3 py-1.5 rounded-md text-xs font-semibold transition-colors"
+                  :class="qaMode === 'normal' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'"
+                  :disabled="busy.qa"
+                  @click="qaMode = 'normal'"
+                >
+                  标准回答
+                </button>
+                <button
+                  class="px-3 py-1.5 rounded-md text-xs font-semibold transition-colors"
+                  :class="qaMode === 'explain' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'"
+                  :disabled="busy.qa"
+                  @click="qaMode = 'explain'"
+                >
+                  分步讲解
+                </button>
+              </div>
               <button
-                class="px-3 py-1.5 rounded-md text-xs font-semibold transition-colors"
-                :class="qaMode === 'normal' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'"
-                :disabled="busy.qa"
-                @click="qaMode = 'normal'"
+                type="button"
+                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-2 text-xs font-semibold hover:bg-accent transition-colors disabled:opacity-50"
+                :disabled="busy.qa || settingsStore.savingUser"
+                @click="saveCurrentQaModeAsDefault"
               >
-                普通问答
+                {{ settingsStore.savingUser ? '保存中…' : '保存为默认' }}
               </button>
               <button
-                class="px-3 py-1.5 rounded-md text-xs font-semibold transition-colors"
-                :class="qaMode === 'explain' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'"
+                type="button"
+                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-2 text-xs font-semibold hover:bg-accent transition-colors"
                 :disabled="busy.qa"
-                @click="qaMode = 'explain'"
+                @click="router.push('/settings')"
               >
-                讲解模式
+                <SlidersHorizontal class="w-3.5 h-3.5" />
+                设置
               </button>
             </div>
           </div>
@@ -249,25 +268,23 @@
           <template v-if="busy.init">
             <SkeletonBlock type="list" :lines="3" />
           </template>
-          <template v-else>
-            <div class="space-y-2">
-              <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">选择知识库</label>
-              <select v-model="selectedKbId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
-                <option disabled value="">请选择</option>
-                <option v-for="kb in kbs" :key="kb.id" :value="kb.id">{{ kb.name || kb.id }}</option>
-              </select>
-            </div>
-            <div class="space-y-2" v-if="selectedKbId">
-              <div class="flex items-center gap-2">
-                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">限定文档 (可选)</label>
-                <LoadingSpinner v-if="busy.docs" size="sm" />
-              </div>
-              <select v-model="selectedDocId" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm">
-                <option value="">不限定（整库问答）</option>
-                <option v-for="doc in docsInKb" :key="doc.id" :value="doc.id">{{ doc.filename }}</option>
-              </select>
-            </div>
-          </template>
+          <KnowledgeScopePicker
+            v-else
+            :kb-id="selectedKbId"
+            :doc-id="selectedDocId"
+            :kbs="kbs"
+            :docs="docsInKb"
+            :kb-loading="appContext.kbsLoading"
+            :docs-loading="busy.docs"
+            mode="kb-and-optional-doc"
+            doc-label="限定文档（可选）"
+            @update:kb-id="selectedKbId = $event"
+            @update:doc-id="selectedDocId = $event"
+          >
+            <p class="text-[11px] text-muted-foreground">
+              常用问答偏好可在设置中心配置；这里保留页面内临时切换。
+            </p>
+          </KnowledgeScopePicker>
         </div>
 
         <div class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-3">
@@ -506,27 +523,30 @@
 <script setup>
 import { ref, onMounted, onActivated, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MessageSquare, Send, Trash2, Database, FileText, Sparkles, User, Bot } from 'lucide-vue-next'
+import { MessageSquare, Send, Trash2, Database, FileText, Sparkles, User, Bot, SlidersHorizontal } from 'lucide-vue-next'
 import { apiDelete, apiGet, apiPatch, apiPost, apiSsePost } from '../api'
 import { useToast } from '../composables/useToast'
+import { useKbDocuments } from '../composables/useKbDocuments'
 import { useAppContextStore } from '../stores/appContext'
+import { useSettingsStore } from '../stores/settings'
 import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import SourcePreviewModal from '../components/ui/SourcePreviewModal.vue'
+import KnowledgeScopePicker from '../components/context/KnowledgeScopePicker.vue'
 import { parseExplainMarkdownSections } from '../utils/qaExplain'
 import { renderMarkdown } from '../utils/markdown'
 import { parseRouteContext } from '../utils/routeContext'
 
 const { showToast } = useToast()
 const appContext = useAppContextStore()
+const settingsStore = useSettingsStore()
 appContext.hydrate()
 const router = useRouter()
 const route = useRoute()
 
 const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
 const kbs = computed(() => appContext.kbs)
-const docsInKb = ref([])
 const sessions = ref([])
 const sessionCacheMap = ref({})
 const sessionsTotal = ref(0)
@@ -541,6 +561,9 @@ const selectedDocId = computed({
   get: () => appContext.selectedDocId,
   set: (value) => appContext.setSelectedDocId(value),
 })
+const kbDocs = useKbDocuments({ userId: resolvedUserId, kbId: selectedKbId })
+const docsInKb = kbDocs.docs
+const docsInKbLoading = kbDocs.loading
 const selectedSessionId = ref('')
 const sessionTitleInput = ref('')
 const qaInput = ref('')
@@ -733,6 +756,7 @@ const qaFlowPanelBadgeClass = computed(() => {
   }
   return 'border-border text-muted-foreground'
 })
+const effectiveQaSettings = computed(() => settingsStore.effectiveSettings?.qa || {})
 
 function normalizeAbilityLevel(level) {
   const normalized = (level || '').toString().trim().toLowerCase()
@@ -749,6 +773,43 @@ function getLevelMeta(level) {
 function normalizeQaMode(mode) {
   const normalized = String(mode || '').trim().toLowerCase()
   return normalized === 'explain' ? 'explain' : 'normal'
+}
+
+function applyQaModeFromSettings() {
+  qaMode.value = normalizeQaMode(effectiveQaSettings.value?.mode)
+}
+
+async function loadQaViewSettings(force = false) {
+  try {
+    await settingsStore.load({
+      userId: resolvedUserId.value,
+      kbId: selectedKbId.value || '',
+      force,
+    })
+    applyQaModeFromSettings()
+  } catch {
+    // error toast handled globally
+  }
+}
+
+async function saveCurrentQaModeAsDefault() {
+  try {
+    if (!settingsStore.systemStatus) {
+      await loadQaViewSettings(true)
+    }
+    settingsStore.setUserDraftSection('qa', { mode: normalizeQaMode(qaMode.value) })
+    await settingsStore.saveUser(resolvedUserId.value)
+    if (selectedKbId.value) {
+      await settingsStore.load({
+        userId: resolvedUserId.value,
+        kbId: selectedKbId.value,
+        force: true,
+      })
+    }
+    showToast('已保存当前回答模式为默认设置', 'success')
+  } catch {
+    // error toast handled globally
+  }
 }
 
 function createQaFlowState() {
@@ -899,6 +960,14 @@ function buildQaPayload(question, activeSessionId) {
     user_id: resolvedUserId.value,
     mode: normalizeQaMode(qaMode.value),
   }
+  const topK = Number(effectiveQaSettings.value?.top_k)
+  if (Number.isFinite(topK) && topK > 0) {
+    payload.top_k = topK
+  }
+  const fetchK = Number(effectiveQaSettings.value?.fetch_k)
+  if (Number.isFinite(fetchK) && fetchK > 0) {
+    payload.fetch_k = fetchK
+  }
   if (activeSessionId) {
     payload.session_id = activeSessionId
   }
@@ -966,17 +1035,14 @@ function handleQaEmptyPrimary() {
 
 async function refreshDocsInKb() {
   if (!selectedKbId.value) {
-    docsInKb.value = []
+    kbDocs.reset()
     busy.value.docs = false
     return
   }
-  busy.value.docs = true
   try {
-    docsInKb.value = await apiGet(`/api/docs?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(selectedKbId.value)}`)
+    await kbDocs.refresh()
   } catch {
     // error toast handled globally
-  } finally {
-    busy.value.docs = false
   }
 }
 
@@ -1555,7 +1621,7 @@ onMounted(async () => {
     } catch {
       // error toast handled globally
     }
-    await Promise.all([refreshAbilityLevel(), refreshSessions()])
+    await Promise.all([refreshAbilityLevel(), refreshSessions(), loadQaViewSettings(true)])
     await syncFromRoute({ refreshDocs: false })
     if (selectedKbId.value) {
       await refreshDocsInKb()
@@ -1569,6 +1635,7 @@ onMounted(async () => {
 })
 
 onActivated(async () => {
+  await loadQaViewSettings()
   await syncFromRoute({
     ensureKbs: !appContext.kbs.length,
     refreshDocs: false,
@@ -1591,9 +1658,13 @@ watch(selectedKbId, async () => {
     resetQaFlow()
   }
   selectedDocId.value = ''
-  await refreshDocsInKb()
+  await Promise.all([refreshDocsInKb(), loadQaViewSettings(true)])
   applyDocContextSelection()
 })
+
+watch(docsInKbLoading, (loading) => {
+  busy.value.docs = !!loading
+}, { immediate: true })
 
 watch(selectedDocId, () => {
   if (!syncingFromSession.value && selectedSessionId.value) {

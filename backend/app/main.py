@@ -25,6 +25,7 @@ from app.routers import (
     quiz,
     profile,
     recommendations,
+    settings as settings_router,
     summary,
 )
 
@@ -86,6 +87,7 @@ def create_app() -> FastAPI:
     app.include_router(recommendations.router, prefix="/api")
     app.include_router(learning_path.router, prefix="/api")
     app.include_router(progress.router, prefix="/api")
+    app.include_router(settings_router.router, prefix="/api")
 
     return app
 

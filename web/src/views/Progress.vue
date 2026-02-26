@@ -36,10 +36,15 @@
                 <span>正在刷新统计...</span>
               </span>
             </div>
-            <select v-model="selectedKbId" class="bg-background border border-input rounded-lg px-4 py-2 outline-none focus:ring-2 focus:ring-primary text-sm min-w-[200px]">
-              <option disabled value="">选择知识库…</option>
-              <option v-for="kb in kbs" :key="kb.id" :value="kb.id">{{ kb.name }}</option>
-            </select>
+            <KbSelector
+              class="min-w-[200px]"
+              :model-value="selectedKbId"
+              :kbs="kbs"
+              label=""
+              placeholder="选择知识库…"
+              :loading="appContext.kbsLoading"
+              @update:model-value="selectedKbId = $event"
+            />
           </div>
 
           <div v-if="showKbStatsSkeleton" class="py-2">
@@ -503,6 +508,7 @@ import {
 import { apiGet, getProfile, buildLearningPath } from '../api'
 import { useToast } from '../composables/useToast'
 import { useAppContextStore } from '../stores/appContext'
+import KbSelector from '../components/context/KbSelector.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import { MASTERY_MASTERED, masteryPercent } from '../utils/mastery'

@@ -78,6 +78,7 @@ import {
   MessageSquare,
   PenTool,
   BarChart2,
+  SlidersHorizontal,
   ChevronLeft,
   ChevronRight,
   X
@@ -125,7 +126,8 @@ const navItems = [
   { name: '摘要', path: '/summary', icon: FileText },
   { name: '问答', path: '/qa', icon: MessageSquare },
   { name: '测验', path: '/quiz', icon: PenTool },
-  { name: '进度', path: '/progress', icon: BarChart2 }
+  { name: '进度', path: '/progress', icon: BarChart2 },
+  { name: '设置', path: '/settings', icon: SlidersHorizontal }
 ]
 
 watch(() => route.fullPath, () => {

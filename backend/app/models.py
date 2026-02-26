@@ -12,6 +12,7 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
     name = Column(String, nullable=True)
+    preferences_json = Column(Text, nullable=True)  # User-level UX/behavior preferences
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -22,6 +23,7 @@ class KnowledgeBase(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
+    preferences_json = Column(Text, nullable=True)  # KB-level overrides for user preferences
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

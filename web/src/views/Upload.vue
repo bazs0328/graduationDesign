@@ -15,10 +15,15 @@
               <SkeletonBlock type="list" :lines="2" />
             </div>
             <div v-else class="flex gap-2 flex-wrap">
-              <select v-model="selectedKbId" class="flex-1 bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary">
-                <option disabled value="">请选择</option>
-                <option v-for="kb in kbs" :key="kb.id" :value="kb.id">{{ kb.name }}</option>
-              </select>
+              <KbSelector
+                class="flex-1"
+                :model-value="selectedKbId"
+                :kbs="kbs"
+                label=""
+                placeholder="请选择"
+                :loading="appContext.kbsLoading"
+                @update:model-value="selectedKbId = $event"
+              />
               <input
                 type="text"
                 v-model="kbNameInput"
@@ -60,6 +65,11 @@
             </div>
             <p v-if="selectedKbId" class="text-xs text-muted-foreground">
               删除非空知识库时会二次确认是否级联删除其下文档。
+            </p>
+            <p class="text-xs text-muted-foreground">
+              系统级解析参数（如 OCR / PDF 解析）由管理员维护；问答与测验常用偏好可在
+              <router-link to="/settings" class="font-semibold text-primary hover:underline">设置中心</router-link>
+              调整。
             </p>
           </div>
 
@@ -390,6 +400,7 @@ import { useAppContextStore } from '../stores/appContext'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
+import KbSelector from '../components/context/KbSelector.vue'
 
 const { showToast } = useToast()
 const appContext = useAppContextStore()

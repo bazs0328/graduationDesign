@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -21,6 +21,98 @@ class AuthResponse(BaseModel):
     name: Optional[str] = None
     access_token: str
     token_type: str = "bearer"
+
+
+class QASettings(BaseModel):
+    mode: Optional[Literal["normal", "explain"]] = None
+    retrieval_preset: Optional[Literal["fast", "balanced", "deep"]] = None
+    top_k: Optional[int] = Field(default=None, ge=1, le=20)
+    fetch_k: Optional[int] = Field(default=None, ge=1, le=50)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class QuizSettings(BaseModel):
+    count_default: Optional[int] = Field(default=None, ge=1, le=20)
+    auto_adapt_default: Optional[bool] = None
+    difficulty_default: Optional[Literal["easy", "medium", "hard"]] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class UISettings(BaseModel):
+    show_advanced_controls: Optional[bool] = None
+    density: Optional[Literal["comfortable", "compact"]] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class UploadSettings(BaseModel):
+    post_upload_suggestions: Optional[bool] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class UserSettingsPayload(BaseModel):
+    qa: Optional[QASettings] = None
+    quiz: Optional[QuizSettings] = None
+    ui: Optional[UISettings] = None
+    upload: Optional[UploadSettings] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class KbSettingsPayload(BaseModel):
+    qa: Optional[QASettings] = None
+    quiz: Optional[QuizSettings] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SettingsPatchRequest(BaseModel):
+    user_id: Optional[str] = None
+    qa: Optional[QASettings] = None
+    quiz: Optional[QuizSettings] = None
+    ui: Optional[UISettings] = None
+    upload: Optional[UploadSettings] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SettingsResetRequest(BaseModel):
+    scope: Literal["user", "kb"]
+    kb_id: Optional[str] = None
+    user_id: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SettingsSystemStatus(BaseModel):
+    llm_provider: str
+    embedding_provider: str
+    qa_defaults_from_env: Dict[str, Any] = {}
+    ocr_enabled: bool
+    pdf_parser_mode: str
+    auth_require_login: bool
+    secrets_configured: Dict[str, bool] = {}
+    version_info: Dict[str, Any] = {}
+
+
+class SettingsMeta(BaseModel):
+    qa_modes: List[str] = []
+    retrieval_presets: List[str] = []
+    quiz_difficulty_options: List[str] = []
+    preset_map: Dict[str, Dict[str, int]] = {}
+    ranges: Dict[str, Dict[str, int]] = {}
+    defaults: Dict[str, Any] = {}
+
+
+class SettingsResponse(BaseModel):
+    system_status: SettingsSystemStatus
+    user_defaults: UserSettingsPayload
+    kb_overrides: Optional[KbSettingsPayload] = None
+    effective: UserSettingsPayload
+    meta: SettingsMeta
 
 
 class DocumentOut(BaseModel):

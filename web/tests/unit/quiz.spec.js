@@ -108,7 +108,14 @@ function getQuizSelects(wrapper) {
   const selects = wrapper.findAll('select')
   return {
     kb: selects.find((sel) => sel.text().includes('Default')) || selects.at(0),
-    doc: selects.find((sel) => sel.text().includes('不限定（整库测验）')),
+    doc: selects.find((sel) => {
+      const text = sel.text()
+      return (
+        text.includes('不限定（整库测验）')
+        || text.includes('不限定（整库）')
+        || text.includes('请选择文档')
+      )
+    }),
     focus: selects.find((sel) => sel.text().includes('知识点')),
   }
 }

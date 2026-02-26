@@ -114,13 +114,14 @@ import { Sun, Moon } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useAppContextStore } from '../stores/appContext'
 import { authRegister, authLogin } from '../api'
+import { setAuthSessionFromResponse } from '../composables/useAuthSession'
+import { useTheme } from '../composables/useTheme'
 import Button from '../components/ui/Button.vue'
 
 const router = useRouter()
 const appContext = useAppContextStore()
-const THEME_STORAGE_KEY = 'gradtutor_theme'
 const isLogin = ref(true)
-const isDark = ref(readThemeFromDom())
+const { isDark, toggleTheme } = useTheme()
 const username = ref('')
 const password = ref('')
 const passwordConfirm = ref('')
@@ -130,30 +131,6 @@ const errorMessage = ref('')
 const errors = reactive({ username: '', password: '', passwordConfirm: '' })
 const touched = reactive({ username: false, password: false, passwordConfirm: false })
 const hasTriedSubmit = ref(false)
-
-function readThemeFromDom() {
-  if (typeof document === 'undefined') return false
-  return document.documentElement.classList.contains('dark')
-}
-
-function applyTheme(theme) {
-  if (typeof document === 'undefined') return
-  const resolved = theme === 'dark' ? 'dark' : 'light'
-  const root = document.documentElement
-  root.classList.toggle('dark', resolved === 'dark')
-  root.classList.toggle('light', resolved === 'light')
-}
-
-function toggleTheme() {
-  const nextTheme = isDark.value ? 'light' : 'dark'
-  isDark.value = nextTheme === 'dark'
-  applyTheme(nextTheme)
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, nextTheme)
-  } catch {
-    // ignore localStorage access errors
-  }
-}
 
 function buildValidationState({ forceVisible = false } = {}) {
   const nextErrors = { username: '', password: '', passwordConfirm: '' }
@@ -248,15 +225,7 @@ async function submit() {
     const res = isLogin.value
       ? await authLogin(username.value.trim(), password.value)
       : await authRegister(username.value.trim(), password.value, name.value.trim() || null)
-    localStorage.setItem('gradtutor_user_id', res.user_id)
-    localStorage.setItem('gradtutor_username', res.username)
-    localStorage.setItem('gradtutor_name', res.name || '')
-    localStorage.setItem('gradtutor_user', res.user_id)
-    if (res.access_token) {
-      localStorage.setItem('gradtutor_access_token', res.access_token)
-    } else {
-      localStorage.removeItem('gradtutor_access_token')
-    }
+    setAuthSessionFromResponse(res)
     appContext.hydrate()
     router.push('/')
   } catch (err) {

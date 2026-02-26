@@ -320,7 +320,7 @@ describe('Q&A', () => {
       }),
       expect.any(Object)
     )
-    expect(wrapper.html()).toContain('讲解模式')
+    expect(wrapper.html()).toContain('分步讲解')
     expect(router.currentRoute.value.query.qa_mode).toBeUndefined()
     expect(router.currentRoute.value.query.qa_question).toBeUndefined()
     expect(router.currentRoute.value.query.focus).toBeUndefined()
