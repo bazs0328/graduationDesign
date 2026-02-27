@@ -172,3 +172,12 @@ class KeypointDependency(Base):
     relation = Column(String, default="prerequisite")
     confidence = Column(Float, default=1.0)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LearningPathOrderAnchor(Base):
+    __tablename__ = "learning_path_order_anchors"
+
+    user_id = Column(String, ForeignKey("users.id"), primary_key=True, index=True)
+    kb_id = Column(String, ForeignKey("knowledge_bases.id"), primary_key=True, index=True)
+    keypoint_ids_json = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

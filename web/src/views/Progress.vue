@@ -81,7 +81,12 @@
                 <span>正在加载推荐...</span>
               </span>
             </div>
-            <button @click="fetchRecommendations" class="p-2 hover:bg-accent rounded-lg transition-colors" :disabled="busy.recommendations">
+            <button
+              @click="fetchRecommendations"
+              class="p-2 hover:bg-accent rounded-lg transition-colors"
+              :disabled="busy.recommendations"
+              aria-label="刷新推荐"
+            >
               <RefreshCw class="w-5 h-5" :class="{ 'animate-spin': busy.recommendations }" />
             </button>
           </div>
@@ -197,14 +202,15 @@
                 <RefreshCw class="w-4 h-4 animate-spin" />
                 <span>正在加载学习路径...</span>
               </span>
-              <span v-else-if="busy.pathBuild" class="text-sm text-muted-foreground flex items-center gap-2">
-                <RefreshCw class="w-4 h-4 animate-spin" />
-                <span>正在重建学习路径...</span>
-              </span>
             </div>
             <div class="flex items-center gap-2">
-              <button @click="rebuildPath" class="p-2 hover:bg-accent rounded-lg transition-colors" :disabled="busy.pathBuild || busy.pathLoad">
-                <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': busy.pathBuild || busy.pathLoad }" />
+              <button
+                @click="refreshPath"
+                class="p-2 hover:bg-accent rounded-lg transition-colors"
+                :disabled="busy.pathLoad"
+                aria-label="刷新学习路径"
+              >
+                <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': busy.pathLoad }" />
               </button>
             </div>
           </div>
@@ -413,7 +419,7 @@
 
           <!-- Empty state -->
           <EmptyState
-            v-else-if="!busy.pathLoad && !busy.pathBuild"
+            v-else-if="!busy.pathLoad"
             :icon="GitBranch"
             title="先生成知识点，再构建学习路径"
             description="学习路径依赖知识点数据与掌握度信息。为文档提取要点后，系统才能分析依赖关系并规划学习顺序。"
@@ -505,8 +511,7 @@ import {
   GitBranch,
   ChevronDown,
 } from 'lucide-vue-next'
-import { apiGet, getProfile, buildLearningPath } from '../api'
-import { useToast } from '../composables/useToast'
+import { apiGet, getProfile } from '../api'
 import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import KbSelector from '../components/context/KbSelector.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
@@ -520,7 +525,6 @@ import {
   learningPathEdgeKey,
 } from '../utils/learningPathChartLayout'
 
-const { showToast } = useToast()
 const LearnerProfileCard = defineAsyncComponent({
   loader: () => import('../components/LearnerProfileCard.vue'),
   loadingComponent: SkeletonBlock,
@@ -582,7 +586,6 @@ const busy = ref({
   activity: false,
   recommendations: false,
   pathLoad: false,
-  pathBuild: false,
   activityMore: false,
 })
 
@@ -651,7 +654,7 @@ const showRecommendationsRefreshIndicator = computed(() => (
 ))
 const showLearningPathSkeleton = computed(() => (
   !!selectedKbId.value
-  && (busy.value.pathLoad || busy.value.pathBuild)
+  && busy.value.pathLoad
   && !learningPathLoadedForSelectedKb.value
   && !hasLearningPathContentForSelectedKb.value
 ))
@@ -1129,18 +1132,9 @@ async function fetchLearningPath(options = {}) {
   }
 }
 
-async function rebuildPath() {
+async function refreshPath() {
   if (!selectedKbId.value) return
-  busy.value.pathBuild = true
-  try {
-    await buildLearningPath(resolvedUserId.value, selectedKbId.value, true)
-    showToast('学习路径已重建', 'success')
-    await fetchLearningPath()
-  } catch {
-    // error toast handled globally
-  } finally {
-    busy.value.pathBuild = false
-  }
+  await fetchLearningPath()
 }
 
 function activityLabel(item) {

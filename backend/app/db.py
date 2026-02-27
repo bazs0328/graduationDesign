@@ -42,6 +42,7 @@ def _ensure_sqlite_indexes(conn) -> None:
         "CREATE INDEX IF NOT EXISTS idx_keypoints_user_doc_id ON keypoints(user_id, doc_id)",
         "CREATE INDEX IF NOT EXISTS idx_keypoints_v2_user_doc ON keypoints_v2(user_id, doc_id)",
         "CREATE INDEX IF NOT EXISTS idx_keypoints_v2_user_kb_doc_created_id ON keypoints_v2(user_id, kb_id, doc_id, created_at, id)",
+        "CREATE INDEX IF NOT EXISTS idx_learning_path_order_anchors_user_kb ON learning_path_order_anchors(user_id, kb_id)",
         "CREATE INDEX IF NOT EXISTS idx_qa_records_user_id ON qa_records(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_qa_records_doc_id ON qa_records(doc_id)",
         "CREATE INDEX IF NOT EXISTS idx_qa_records_user_doc_id ON qa_records(user_id, doc_id)",
@@ -273,6 +274,37 @@ def ensure_schema():
             if "updated_at" not in cols:
                 conn.execute(
                     text("ALTER TABLE keypoints_v2 ADD COLUMN updated_at DATETIME")
+                )
+            conn.commit()
+
+        # -- learning_path_order_anchors table --
+        result = conn.execute(text("PRAGMA table_info(learning_path_order_anchors)"))
+        cols = {row[1] for row in result}
+        if not cols:
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS learning_path_order_anchors ("
+                    "user_id VARCHAR NOT NULL, "
+                    "kb_id VARCHAR NOT NULL, "
+                    "keypoint_ids_json TEXT NOT NULL, "
+                    "updated_at DATETIME, "
+                    "PRIMARY KEY(user_id, kb_id), "
+                    "FOREIGN KEY(user_id) REFERENCES users(id), "
+                    "FOREIGN KEY(kb_id) REFERENCES knowledge_bases(id)"
+                    ")"
+                )
+            )
+            conn.commit()
+        else:
+            if "keypoint_ids_json" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE learning_path_order_anchors ADD COLUMN keypoint_ids_json TEXT NOT NULL DEFAULT '[]'"
+                    )
+                )
+            if "updated_at" not in cols:
+                conn.execute(
+                    text("ALTER TABLE learning_path_order_anchors ADD COLUMN updated_at DATETIME")
                 )
             conn.commit()
 

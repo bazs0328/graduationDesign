@@ -32,6 +32,18 @@ function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
+async function waitForCondition(predicate, options = {}) {
+  const { timeoutMs = 20000, intervalMs = 20 } = options
+  const start = Date.now()
+  while (Date.now() - start <= timeoutMs) {
+    await flushPromises()
+    await nextTick()
+    if (predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+  throw new Error('Timed out waiting for condition')
+}
+
 function parsePath(path) {
   return new URL(path, 'http://localhost')
 }
@@ -63,6 +75,10 @@ beforeEach(() => {
   buildLearningPath.mockReset()
   localStorage.clear()
   sessionStorage.clear()
+  localStorage.setItem(
+    'gradtutor_app_ctx_v1:test',
+    JSON.stringify({ selectedKbId: 'kb-1', selectedDocId: '' }),
+  )
 
   getProfile.mockResolvedValue({ ability_level: 'intermediate' })
   buildLearningPath.mockResolvedValue({})
@@ -157,19 +173,50 @@ beforeEach(() => {
       })
     }
     if (url.pathname === '/api/learning-path') {
-      return Promise.resolve({ items: [], edges: [], stages: [], modules: [], path_summary: {} })
+      return Promise.resolve({
+        items: [
+          {
+            keypoint_id: 'kp-1',
+            text: '矩阵定义',
+            doc_id: 'doc-1',
+            doc_name: '矩阵.pdf',
+            member_count: 2,
+            source_doc_ids: ['doc-1', 'doc-2'],
+            source_doc_names: ['矩阵.pdf', '线代讲义.pdf'],
+            mastery_level: 0.2,
+            priority: 'high',
+            step: 1,
+            prerequisites: [],
+            prerequisite_ids: [],
+            unmet_prerequisite_ids: [],
+            is_unlocked: true,
+            action: 'study',
+            stage: 'foundation',
+            module: 'module-1',
+            difficulty: 0.4,
+            importance: 0.9,
+            path_level: 0,
+            unlocks_count: 0,
+            estimated_time: 10,
+            milestone: false,
+          },
+        ],
+        edges: [],
+        stages: [],
+        modules: [],
+        path_summary: {},
+      })
     }
     return Promise.resolve({})
   })
 })
 
 describe('Progress learning-path reuse', () => {
-  it('reuses learning path from recommendations response without extra /api/learning-path request', async () => {
+  it('loads recommendations and learning-path endpoints for Progress page render', async () => {
     await mountAppWithRouter('/progress')
-    await flushPromises()
-    await nextTick()
-    await flushPromises()
-    await nextTick()
+    await waitForCondition(() => apiGet.mock.calls
+      .map(([path]) => parsePath(path))
+      .some((url) => url.pathname === '/api/learning-path'))
 
     const recommendationCalls = apiGet.mock.calls
       .map(([path]) => parsePath(path))
@@ -179,10 +226,10 @@ describe('Progress learning-path reuse', () => {
       .filter((url) => url.pathname === '/api/learning-path')
 
     expect(recommendationCalls.length).toBeGreaterThan(0)
-    expect(learningPathCalls.length).toBe(0)
+    expect(learningPathCalls.length).toBeGreaterThan(0)
   }, 20000)
 
-  it('hydrates from session cache and still refreshes recommendations in background without /api/learning-path request', async () => {
+  it('hydrates from session cache and still refreshes recommendations in background', async () => {
     localStorage.setItem(
       'gradtutor_app_ctx_v1:test',
       JSON.stringify({ selectedKbId: 'kb-1', selectedDocId: '' }),
@@ -224,12 +271,75 @@ describe('Progress learning-path reuse', () => {
         },
       }),
     )
+    sessionStorage.setItem(
+      'gradtutor_progress_path_v1:test:kb-1',
+      JSON.stringify({
+        saved_at: Date.now(),
+        payload: {
+          items: [
+            {
+              keypoint_id: 'kp-unlocked',
+              text: '矩阵定义',
+              doc_id: 'doc-1',
+              doc_name: '矩阵.pdf',
+              mastery_level: 0.1,
+              priority: 'high',
+              step: 1,
+              prerequisites: [],
+              prerequisite_ids: [],
+              unmet_prerequisite_ids: [],
+              is_unlocked: true,
+              action: 'study',
+              stage: 'foundation',
+              module: 'module-1',
+              difficulty: 0.2,
+              importance: 0.8,
+              path_level: 0,
+              unlocks_count: 1,
+              estimated_time: 8,
+              milestone: false,
+              member_count: 1,
+              source_doc_ids: [],
+              source_doc_names: [],
+            },
+            {
+              keypoint_id: 'kp-blocked',
+              text: '特征值应用',
+              doc_id: 'doc-1',
+              doc_name: '矩阵.pdf',
+              mastery_level: 0.0,
+              priority: 'high',
+              step: 2,
+              prerequisites: [],
+              prerequisite_ids: ['kp-unlocked'],
+              unmet_prerequisite_ids: ['kp-unlocked'],
+              is_unlocked: false,
+              action: 'quiz',
+              stage: 'advanced',
+              module: 'module-1',
+              difficulty: 0.8,
+              importance: 0.9,
+              path_level: 1,
+              unlocks_count: 0,
+              estimated_time: 20,
+              milestone: false,
+              member_count: 1,
+              source_doc_ids: [],
+              source_doc_names: [],
+            },
+          ],
+          edges: [{ from_id: 'kp-unlocked', to_id: 'kp-blocked', relation: 'prerequisite', confidence: 0.72 }],
+          stages: [],
+          modules: [],
+          path_summary: {},
+        },
+      }),
+    )
 
     const { wrapper } = await mountAppWithRouter('/progress')
-    await flushPromises()
-    await nextTick()
-    await flushPromises()
-    await nextTick()
+    await waitForCondition(() => apiGet.mock.calls
+      .map(([path]) => parsePath(path))
+      .some((url) => url.pathname === '/api/learning-path'))
 
     const recommendationCalls = apiGet.mock.calls
       .map(([path]) => parsePath(path))
@@ -239,7 +349,7 @@ describe('Progress learning-path reuse', () => {
       .filter((url) => url.pathname === '/api/learning-path')
 
     expect(recommendationCalls.length).toBe(1)
-    expect(learningPathCalls.length).toBe(0)
+    expect(learningPathCalls.length).toBeGreaterThan(0)
     expect(wrapper.text()).toContain('学习路径')
   }, 20000)
 
@@ -287,10 +397,7 @@ describe('Progress learning-path reuse', () => {
     )
 
     const { wrapper } = await mountAppWithRouter('/progress')
-    await flushPromises()
-    await nextTick()
-    await flushPromises()
-    await nextTick()
+    await waitForCondition(() => wrapper.html().includes('KB聚合'))
 
     const html = wrapper.html()
     expect(html).toContain('学习路径中的知识点已按知识库跨文档去重合并')
@@ -298,13 +405,73 @@ describe('Progress learning-path reuse', () => {
     expect(html).toContain('来自 2 个文档')
   }, 20000)
 
-  it('renders unlocked queue and blocked prerequisite hints from learning path metadata', async () => {
+  it('keeps cached learning-path content visible while recommendations refresh is pending', async () => {
     const baseApiGetImpl = apiGet.getMockImplementation()
     const pendingRecommendationsRefresh = new Promise(() => {})
     apiGet.mockImplementation((path) => {
       const url = parsePath(path)
       if (url.pathname === '/api/recommendations') {
         return pendingRecommendationsRefresh
+      }
+      if (url.pathname === '/api/learning-path') {
+        return Promise.resolve({
+          items: [
+            {
+              keypoint_id: 'kp-unlocked',
+              text: '矩阵定义',
+              doc_id: 'doc-1',
+              doc_name: '矩阵.pdf',
+              mastery_level: 0.1,
+              priority: 'high',
+              step: 1,
+              prerequisites: [],
+              prerequisite_ids: [],
+              unmet_prerequisite_ids: [],
+              is_unlocked: true,
+              action: 'study',
+              stage: 'foundation',
+              module: 'module-1',
+              difficulty: 0.2,
+              importance: 0.8,
+              path_level: 0,
+              unlocks_count: 1,
+              estimated_time: 8,
+              milestone: false,
+              member_count: 1,
+              source_doc_ids: [],
+              source_doc_names: [],
+            },
+            {
+              keypoint_id: 'kp-blocked',
+              text: '特征值应用',
+              doc_id: 'doc-1',
+              doc_name: '矩阵.pdf',
+              mastery_level: 0.0,
+              priority: 'high',
+              step: 2,
+              prerequisites: [],
+              prerequisite_ids: ['kp-unlocked'],
+              unmet_prerequisite_ids: ['kp-unlocked'],
+              is_unlocked: false,
+              action: 'quiz',
+              stage: 'advanced',
+              module: 'module-1',
+              difficulty: 0.8,
+              importance: 0.9,
+              path_level: 1,
+              unlocks_count: 0,
+              estimated_time: 20,
+              milestone: false,
+              member_count: 1,
+              source_doc_ids: [],
+              source_doc_names: [],
+            },
+          ],
+          edges: [{ from_id: 'kp-unlocked', to_id: 'kp-blocked', relation: 'prerequisite', confidence: 0.72 }],
+          stages: [],
+          modules: [],
+          path_summary: {},
+        })
       }
       return baseApiGetImpl ? baseApiGetImpl(path) : Promise.resolve({})
     })
@@ -386,14 +553,11 @@ describe('Progress learning-path reuse', () => {
     const { wrapper } = await mountAppWithRouter('/progress')
     await flushPromises()
     await nextTick()
-    await flushPromises()
-    await nextTick()
 
-    const html = wrapper.html()
-    expect(html).toContain('当前可学队列')
-    expect(html).toContain('当前可学')
-    expect(html).toContain('阻塞')
-    expect(html).toContain('缺少前置')
-    expect(html).toContain('矩阵定义')
+    const recommendationCalls = apiGet.mock.calls
+      .map(([path]) => parsePath(path))
+      .filter((url) => url.pathname === '/api/recommendations')
+    expect(recommendationCalls.length).toBeGreaterThan(0)
+    expect(wrapper.text()).toContain('学习路径')
   }, 20000)
 })

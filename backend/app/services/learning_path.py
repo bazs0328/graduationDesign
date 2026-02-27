@@ -1,11 +1,13 @@
 """Cross-document learning path with stages, modules and milestones."""
 
+import json
 import logging
 import re
 import time
 from collections import defaultdict, deque
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime
 from threading import Lock
 from typing import Any, Callable, Optional
 from uuid import uuid4
@@ -14,7 +16,12 @@ from langchain_core.prompts import ChatPromptTemplate
 from sqlalchemy.orm import Session
 
 from app.core.llm import get_llm
-from app.models import Keypoint, KeypointDependency, LearnerProfile
+from app.models import (
+    Keypoint,
+    KeypointDependency,
+    LearnerProfile,
+    LearningPathOrderAnchor,
+)
 from app.schemas import (
     LearningPathEdge,
     LearningPathItem,
@@ -142,6 +149,80 @@ def _set_cached_learning_path_result(
             deepcopy(payload),
         )
         _prune_learning_path_result_cache(now)
+
+
+def _normalize_order_anchor_ids(raw_ids: Any) -> list[str]:
+    if not isinstance(raw_ids, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_ids:
+        value = str(raw or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _load_order_anchor_ids(
+    db: Session,
+    user_id: str,
+    kb_id: str,
+) -> Optional[list[str]]:
+    row = (
+        db.query(LearningPathOrderAnchor)
+        .filter(
+            LearningPathOrderAnchor.user_id == user_id,
+            LearningPathOrderAnchor.kb_id == kb_id,
+        )
+        .first()
+    )
+    if not row:
+        return None
+    try:
+        payload = safe_json_loads(row.keypoint_ids_json)
+    except Exception:
+        logger.warning(
+            "Learning-path order anchor JSON parse failed for user=%s kb=%s",
+            user_id,
+            kb_id,
+            exc_info=True,
+        )
+        return None
+    return _normalize_order_anchor_ids(payload)
+
+
+def _save_order_anchor_ids(
+    db: Session,
+    user_id: str,
+    kb_id: str,
+    keypoint_ids: list[str],
+) -> None:
+    normalized = _normalize_order_anchor_ids(keypoint_ids)
+    payload = json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))
+    row = (
+        db.query(LearningPathOrderAnchor)
+        .filter(
+            LearningPathOrderAnchor.user_id == user_id,
+            LearningPathOrderAnchor.kb_id == kb_id,
+        )
+        .first()
+    )
+    if row is None:
+        row = LearningPathOrderAnchor(
+            user_id=user_id,
+            kb_id=kb_id,
+            keypoint_ids_json=payload,
+            updated_at=datetime.utcnow(),
+        )
+    else:
+        if row.keypoint_ids_json == payload:
+            return
+        row.keypoint_ids_json = payload
+        row.updated_at = datetime.utcnow()
+    db.add(row)
+    db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -686,6 +767,9 @@ def build_dependency_graph(
     force: bool = False,
 ) -> list[KeypointDependency]:
     """Build or retrieve cached dependency graph for a KB."""
+    _, keypoints, _, doc_map = _load_clustered_kb_keypoints(db, user_id, kb_id)
+    kp_ids = {kp.id for kp in keypoints}
+
     existing = (
         db.query(KeypointDependency)
         .filter(KeypointDependency.kb_id == kb_id)
@@ -693,21 +777,39 @@ def build_dependency_graph(
     )
     if not force and existing:
         if all(_dependency_relation_is_current(dep.relation) for dep in existing):
-            return existing
+            existing_node_ids = {
+                node_id
+                for dep in existing
+                for node_id in (dep.from_keypoint_id, dep.to_keypoint_id)
+            }
+            stale_node_ids = sorted(existing_node_ids - kp_ids)
+            if not stale_node_ids:
+                return existing
+            logger.info(
+                "Rebuilding dependency graph for kb=%s because stale node ids were found: %s",
+                kb_id,
+                ",".join(stale_node_ids[:8]),
+            )
+            force = True
+        else:
+            logger.info(
+                "Rebuilding legacy dependency graph for kb=%s (version=%s)",
+                kb_id,
+                DEPENDENCY_GRAPH_VERSION,
+            )
+            force = True
+    elif force and existing:
         logger.info(
-            "Rebuilding legacy dependency graph for kb=%s (version=%s)",
+            "Force rebuilding dependency graph for kb=%s (version=%s)",
             kb_id,
             DEPENDENCY_GRAPH_VERSION,
         )
-        force = True
 
-    _, keypoints, _, doc_map = _load_clustered_kb_keypoints(db, user_id, kb_id)
     if not keypoints:
         if force and existing:
             _save_dependencies(db, kb_id, [], True)
         return []
 
-    kp_ids = {kp.id for kp in keypoints}
     rule_candidates = _infer_rule_dependency_edges(keypoints, doc_map)
     llm_candidates: list[_DependencyEdgeCandidate] = []
     llm_failed = False
@@ -862,6 +964,115 @@ def _prioritized_topological_order(
     remaining.sort(key=rank_key)
     ordered.extend(remaining)
     return ordered
+
+
+def _bounded_local_insert_order(
+    *,
+    all_ids: list[str],
+    topo_order: list[str],
+    edges: list[tuple[str, str]],
+    anchor_ids: Optional[list[str]],
+    old_item_max_shift: int = 2,
+) -> list[str]:
+    """Build a stable display order from an anchor, allowing bounded local shifts."""
+    if not all_ids:
+        return []
+    if not topo_order:
+        return list(all_ids)
+
+    all_id_set = set(all_ids)
+    topo_order = [nid for nid in topo_order if nid in all_id_set]
+    if not topo_order:
+        return list(all_ids)
+
+    normalized_anchor = _normalize_order_anchor_ids(anchor_ids or [])
+    if not normalized_anchor:
+        return list(topo_order)
+    old_kept = [nid for nid in normalized_anchor if nid in all_id_set]
+    if not old_kept:
+        return list(topo_order)
+
+    if len(old_kept) == len(all_id_set) and set(old_kept) == all_id_set:
+        return old_kept
+
+    prereq_map: dict[str, list[str]] = defaultdict(list)
+    outgoing_map: dict[str, list[str]] = defaultdict(list)
+    for from_id, to_id in edges:
+        if from_id not in all_id_set or to_id not in all_id_set:
+            continue
+        prereq_map[to_id].append(from_id)
+        outgoing_map[from_id].append(to_id)
+
+    topo_index = {nid: idx for idx, nid in enumerate(topo_order)}
+    old_set = set(old_kept)
+    old_base_index = {nid: idx for idx, nid in enumerate(old_kept)}
+    order = list(old_kept)
+    new_ids = [nid for nid in topo_order if nid not in old_set]
+
+    for new_id in new_ids:
+        pos_map = {nid: idx for idx, nid in enumerate(order)}
+        dep_low = 0
+        for prereq_id in prereq_map.get(new_id, []):
+            if prereq_id in pos_map:
+                dep_low = max(dep_low, pos_map[prereq_id] + 1)
+
+        dep_high = len(order)
+        for outgoing_id in outgoing_map.get(new_id, []):
+            if outgoing_id in pos_map:
+                dep_high = min(dep_high, pos_map[outgoing_id])
+
+        dep_low = max(0, min(dep_low, len(order)))
+        dep_high = max(0, min(dep_high, len(order)))
+        if dep_low > dep_high:
+            logger.warning(
+                "Learning-path insertion dependency interval collapsed for kb ordering, new_id=%s dep_low=%d dep_high=%d; forcing fallback placement",
+                new_id,
+                dep_low,
+                dep_high,
+            )
+            dep_high = dep_low
+
+        target = sum(
+            1
+            for node_id in order
+            if topo_index.get(node_id, 10**9) < topo_index.get(new_id, 10**9)
+        )
+        target = max(0, min(target, len(order)))
+
+        shift_guard_low = 0
+        for old_id, base_idx in old_base_index.items():
+            current_idx = pos_map.get(old_id)
+            if current_idx is None:
+                continue
+            current_shift = current_idx - base_idx
+            if current_shift >= old_item_max_shift:
+                shift_guard_low = max(shift_guard_low, current_idx + 1)
+
+        bounded_low = max(dep_low, shift_guard_low)
+        bounded_high = dep_high
+
+        if bounded_low <= bounded_high:
+            insert_idx = min(max(target, bounded_low), bounded_high)
+        else:
+            insert_idx = min(max(target, dep_low), dep_high)
+            logger.info(
+                "Learning-path local shift bound overridden for new_id=%s because dependency constraints were stricter (bounded_low=%d bounded_high=%d dep_low=%d dep_high=%d)",
+                new_id,
+                bounded_low,
+                bounded_high,
+                dep_low,
+                dep_high,
+            )
+
+        order.insert(insert_idx, new_id)
+
+    seen: set[str] = set(order)
+    for node_id in topo_order:
+        if node_id in seen:
+            continue
+        seen.add(node_id)
+        order.append(node_id)
+    return order
 
 
 def _heuristic_difficulty(
@@ -1458,8 +1669,12 @@ def generate_learning_path(
     ability_level = profile.ability_level if profile and profile.ability_level else "intermediate"
 
     kp_map = {kp.id: kp for kp in keypoints}
+    all_ids = [kp.id for kp in keypoints]
+    all_id_set = set(all_ids)
+    anchor_ids = _load_order_anchor_ids(db, user_id, kb_id)
+    keypoint_set_changed = anchor_ids is not None and set(anchor_ids) != all_id_set
 
-    deps = build_dependency_graph(db, user_id, kb_id, force=force)
+    deps = build_dependency_graph(db, user_id, kb_id, force=force or keypoint_set_changed)
     edge_records = [
         (
             dep.from_keypoint_id,
@@ -1469,6 +1684,7 @@ def generate_learning_path(
         for dep in deps
         if dep.from_keypoint_id in kp_map and dep.to_keypoint_id in kp_map
     ]
+    edge_records.sort(key=lambda item: (item[0], item[1], item[2]))
     edge_tuples = _remove_cycles([(from_id, to_id) for from_id, to_id, _ in edge_records])
     valid_pairs = set(edge_tuples)
     edge_records = [
@@ -1476,6 +1692,7 @@ def generate_learning_path(
         for from_id, to_id, confidence in edge_records
         if (from_id, to_id) in valid_pairs
     ]
+    edge_records.sort(key=lambda item: (item[0], item[1], item[2]))
     edge_confidence_map = {
         (from_id, to_id): confidence for from_id, to_id, confidence in edge_records
     }
@@ -1486,7 +1703,6 @@ def generate_learning_path(
         prereq_map[to_id].append(from_id)
         outgoing_map[from_id].append(to_id)
 
-    all_ids = [kp.id for kp in keypoints]
     sorted_ids = _topological_sort(all_ids, edge_tuples)
     base_order_idx = {kp_id: idx for idx, kp_id in enumerate(sorted_ids)}
     depth_map = _compute_depths(sorted_ids, prereq_map)
@@ -1569,20 +1785,22 @@ def generate_learning_path(
             "source_doc_names": cluster.source_doc_names,
         }
 
-    def _display_rank_key(node_id: str) -> tuple[Any, ...]:
-        meta = runtime_meta.get(node_id, {})
-        kp = kp_map.get(node_id)
-        return (
-            0 if meta.get("is_unlocked", True) else 1,
-            int(meta.get("path_level", 0)),
-            -int(meta.get("unlocks_count", 0)),
-            -float(meta.get("importance", 0.0)),
-            float(meta.get("mastery", 0.0)),
-            _keypoint_local_sort_tuple(kp) if kp is not None else ("", 10**9, 10**9, "9999", node_id),
-            str(node_id),
+    display_ids = _bounded_local_insert_order(
+        all_ids=all_ids,
+        topo_order=sorted_ids,
+        edges=edge_tuples,
+        anchor_ids=anchor_ids,
+        old_item_max_shift=2,
+    )
+    try:
+        _save_order_anchor_ids(db, user_id, kb_id, display_ids)
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "Failed to persist learning-path order anchor; continuing with in-memory result user=%s kb=%s",
+            user_id,
+            kb_id,
         )
-
-    display_ids = _prioritized_topological_order(all_ids, edge_tuples, _display_rank_key)
 
     items: list[LearningPathItem] = []
     for step, kp_id in enumerate(display_ids, start=1):

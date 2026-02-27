@@ -1,7 +1,14 @@
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
-from app.models import Document, Keypoint, KeypointDependency, KnowledgeBase, User
+from app.models import (
+    Document,
+    Keypoint,
+    KeypointDependency,
+    KnowledgeBase,
+    LearningPathOrderAnchor,
+    User,
+)
 from app.services import learning_path as learning_path_service
 from app.services.learning_path import (
     build_dependency_graph,
@@ -429,3 +436,181 @@ def test_build_dependency_graph_rebuilds_legacy_relation_version(db_session):
     assert invoke_mock.called
     assert len(deps) == 1
     assert all(dep.relation == learning_path_service.DEPENDENCY_RELATION for dep in deps)
+
+
+def test_generate_learning_path_keeps_step_stable_when_keypoint_set_unchanged(db_session):
+    user_id = "lp_stable_user"
+    kb_id = "lp_stable_kb"
+    doc_id = "lp_stable_doc"
+    _seed_single_doc_three_keypoints_fixture(db_session, user_id=user_id, kb_id=kb_id, doc_id=doc_id)
+    invalidate_learning_path_result_cache(None, kb_id)
+
+    dep_payload = {
+        "edges": [
+            {"from_id": f"{doc_id}-kp-1", "to_id": f"{doc_id}-kp-2"},
+            {"from_id": f"{doc_id}-kp-2", "to_id": f"{doc_id}-kp-3"},
+        ]
+    }
+    stage_hints_first = {
+        f"{doc_id}-kp-1": {"stage_hint": "foundation", "difficulty": 0.2, "importance": 0.3},
+        f"{doc_id}-kp-2": {"stage_hint": "intermediate", "difficulty": 0.5, "importance": 0.6},
+        f"{doc_id}-kp-3": {"stage_hint": "advanced", "difficulty": 0.8, "importance": 0.9},
+    }
+    stage_hints_second = {
+        f"{doc_id}-kp-1": {"stage_hint": "foundation", "difficulty": 0.9, "importance": 0.1},
+        f"{doc_id}-kp-2": {"stage_hint": "intermediate", "difficulty": 0.1, "importance": 0.9},
+        f"{doc_id}-kp-3": {"stage_hint": "advanced", "difficulty": 0.4, "importance": 0.2},
+    }
+
+    with (
+        patch("app.services.learning_path._infer_rule_dependency_edges", return_value=[]),
+        patch("app.services.learning_path._invoke_prompt_json", return_value=dep_payload),
+        patch(
+            "app.services.learning_path._infer_stage_hints",
+            side_effect=[stage_hints_first, stage_hints_second],
+        ),
+        patch("app.services.learning_path._infer_milestones", return_value=set()),
+    ):
+        first_items, _edges, _stages, _modules, _summary = generate_learning_path(
+            db_session, user_id, kb_id, limit=20, force=True
+        )
+
+        third = (
+            db_session.query(Keypoint)
+            .filter(Keypoint.id == f"{doc_id}-kp-3")
+            .first()
+        )
+        assert third is not None
+        third.mastery_level = 0.99
+        db_session.add(third)
+        db_session.commit()
+        invalidate_learning_path_result_cache(None, kb_id)
+
+        second_items, _edges2, _stages2, _modules2, _summary2 = generate_learning_path(
+            db_session, user_id, kb_id, limit=20
+        )
+
+    first_step_map = {item.keypoint_id: item.step for item in first_items}
+    second_step_map = {item.keypoint_id: item.step for item in second_items}
+    assert first_step_map == second_step_map
+
+    anchor = (
+        db_session.query(LearningPathOrderAnchor)
+        .filter(
+            LearningPathOrderAnchor.user_id == user_id,
+            LearningPathOrderAnchor.kb_id == kb_id,
+        )
+        .first()
+    )
+    assert anchor is not None
+
+
+def test_generate_learning_path_limits_old_item_shift_when_keypoints_added(db_session):
+    user_id = "lp_shift_user"
+    kb_id = "lp_shift_kb"
+    doc_id = "lp_shift_doc"
+    _seed_single_doc_three_keypoints_fixture(db_session, user_id=user_id, kb_id=kb_id, doc_id=doc_id)
+    invalidate_learning_path_result_cache(None, kb_id)
+
+    with (
+        patch("app.services.learning_path._infer_rule_dependency_edges", return_value=[]),
+        patch("app.services.learning_path._invoke_prompt_json", side_effect=RuntimeError("llm down")),
+        patch("app.services.learning_path._infer_stage_hints", return_value={}),
+        patch("app.services.learning_path._infer_milestones", return_value=set()),
+    ):
+        first_items, _edges, _stages, _modules, _summary = generate_learning_path(
+            db_session, user_id, kb_id, limit=30, force=True
+        )
+
+        db_session.add_all(
+            [
+                Keypoint(
+                    id="0-new-1",
+                    user_id=user_id,
+                    kb_id=kb_id,
+                    doc_id=doc_id,
+                    text="新概念 A",
+                    explanation=None,
+                    mastery_level=0.1,
+                    attempt_count=0,
+                    correct_count=0,
+                ),
+                Keypoint(
+                    id="0-new-2",
+                    user_id=user_id,
+                    kb_id=kb_id,
+                    doc_id=doc_id,
+                    text="新概念 B",
+                    explanation=None,
+                    mastery_level=0.1,
+                    attempt_count=0,
+                    correct_count=0,
+                ),
+                Keypoint(
+                    id="0-new-3",
+                    user_id=user_id,
+                    kb_id=kb_id,
+                    doc_id=doc_id,
+                    text="新概念 C",
+                    explanation=None,
+                    mastery_level=0.1,
+                    attempt_count=0,
+                    correct_count=0,
+                ),
+            ]
+        )
+        db_session.commit()
+        invalidate_learning_path_result_cache(None, kb_id)
+
+        second_items, _edges2, _stages2, _modules2, _summary2 = generate_learning_path(
+            db_session, user_id, kb_id, limit=30
+        )
+
+    old_order = [item.keypoint_id for item in first_items]
+    new_pos = {item.keypoint_id: item.step - 1 for item in second_items}
+    old_shifts = [new_pos[kp_id] - old_idx for old_idx, kp_id in enumerate(old_order)]
+    assert old_shifts
+    assert max(old_shifts) <= 2
+
+
+def test_generate_learning_path_preserves_relative_order_after_keypoint_deletion(db_session):
+    user_id = "lp_delete_user"
+    kb_id = "lp_delete_kb"
+    doc_id = "lp_delete_doc"
+    _seed_single_doc_three_keypoints_fixture(db_session, user_id=user_id, kb_id=kb_id, doc_id=doc_id)
+    invalidate_learning_path_result_cache(None, kb_id)
+
+    with (
+        patch("app.services.learning_path._infer_rule_dependency_edges", return_value=[]),
+        patch("app.services.learning_path._invoke_prompt_json", side_effect=RuntimeError("llm down")),
+        patch("app.services.learning_path._infer_stage_hints", return_value={}),
+        patch("app.services.learning_path._infer_milestones", return_value=set()),
+    ):
+        first_items, _edges, _stages, _modules, _summary = generate_learning_path(
+            db_session, user_id, kb_id, limit=20, force=True
+        )
+
+        db_session.query(Keypoint).filter(Keypoint.id == f"{doc_id}-kp-2").delete()
+        db_session.commit()
+        invalidate_learning_path_result_cache(None, kb_id)
+
+        second_items, _edges2, _stages2, _modules2, _summary2 = generate_learning_path(
+            db_session, user_id, kb_id, limit=20
+        )
+
+    kept_old = [kp_id for kp_id in [item.keypoint_id for item in first_items] if kp_id != f"{doc_id}-kp-2"]
+    kept_new = [item.keypoint_id for item in second_items]
+    assert kept_new == kept_old
+
+
+def test_bounded_local_insert_order_allows_shift_override_for_dependency_conflict():
+    order = learning_path_service._bounded_local_insert_order(
+        all_ids=["n1", "n2", "n3", "nx", "o1", "o2", "o3"],
+        topo_order=["n1", "n2", "n3", "nx", "o1", "o2", "o3"],
+        edges=[("nx", "o1")],
+        anchor_ids=["o1", "o2", "o3"],
+        old_item_max_shift=2,
+    )
+    assert order.index("nx") < order.index("o1")
+    shifts = {old_id: order.index(old_id) - idx for idx, old_id in enumerate(["o1", "o2", "o3"])}
+    assert max(shifts.values()) > 2

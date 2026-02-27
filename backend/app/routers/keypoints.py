@@ -25,7 +25,6 @@ from app.services.keypoint_dedup import (
 from app.services.keypoints import extract_keypoints, save_keypoints_to_db
 from app.services.learning_path import (
     get_unlocked_keypoint_ids,
-    invalidate_dependency_cache,
     invalidate_learning_path_result_cache,
 )
 from app.services.mastery import record_study_interaction
@@ -213,7 +212,7 @@ async def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(ge
                 kb_id=doc.kb_id,
                 overwrite=False,
             )
-            invalidate_dependency_cache(db, doc.kb_id)
+            invalidate_learning_path_result_cache(db, doc.kb_id)
             mastery_changed = _record_study_keypoint_interaction(
                 db,
                 user_id=resolved_user_id,
@@ -256,8 +255,8 @@ async def generate_keypoints(payload: KeypointsRequest, db: Session = Depends(ge
         kb_id=doc.kb_id,
         overwrite=payload.force,
     )
-    # Invalidate learning-path dependency cache so it rebuilds with new keypoints
-    invalidate_dependency_cache(db, doc.kb_id)
+    # Keep dependency edges until next path request; only clear in-process path result cache now.
+    invalidate_learning_path_result_cache(db, doc.kb_id)
 
     # Record study interaction if study_keypoint_text is provided
     _record_study_keypoint_interaction(
