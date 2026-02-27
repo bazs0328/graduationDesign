@@ -8,8 +8,9 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.session import Session as OrmSession
 
-from app.models import Document, Keypoint, LearnerProfile, Quiz, QuizAttempt
+from app.models import Document, Keypoint, KeypointDependency, LearnerProfile, Quiz, QuizAttempt
 from app.routers.quiz import _resolve_keypoints_for_question
+from app.services.learning_path import DEPENDENCY_RELATION
 from app.services.text_extraction import ExtractionResult
 
 
@@ -119,6 +120,123 @@ def test_quiz_generate_with_kb_id_success(client, seeded_session):
     assert len(data["questions"]) == 2
     for q in data["questions"]:
         assert "question" in q and "options" in q and "answer_index" in q and "explanation" in q
+
+
+def test_quiz_generate_rejects_locked_focus_concepts(client, db_session, seeded_session):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    prereq_id = "quiz-focus-lock-prereq"
+    target_id = "quiz-focus-lock-target"
+
+    db_session.add_all(
+        [
+            Keypoint(
+                id=prereq_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="基础概念",
+                mastery_level=0.2,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            Keypoint(
+                id=target_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="进阶概念",
+                mastery_level=0.1,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            KeypointDependency(
+                id="quiz-focus-lock-dep",
+                kb_id=kb_id,
+                from_keypoint_id=prereq_id,
+                to_keypoint_id=target_id,
+                relation=DEPENDENCY_RELATION,
+                confidence=0.9,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    with patch(
+        "app.routers.quiz.generate_quiz",
+        side_effect=AssertionError("generate_quiz should not be called for locked focus concepts"),
+    ):
+        resp = client.post(
+            "/api/quiz/generate",
+            json={
+                "kb_id": kb_id,
+                "user_id": user_id,
+                "count": 2,
+                "difficulty": "easy",
+                "focus_concepts": ["进阶概念"],
+            },
+        )
+
+    assert resp.status_code == 409
+    assert "locked" in resp.json().get("detail", "").lower()
+
+
+def test_quiz_generate_allows_unlocked_focus_concepts(client, db_session, seeded_session):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    prereq_id = "quiz-focus-unlock-prereq"
+    target_id = "quiz-focus-unlock-target"
+
+    db_session.add_all(
+        [
+            Keypoint(
+                id=prereq_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="已掌握基础概念",
+                mastery_level=0.85,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            Keypoint(
+                id=target_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="可测验进阶概念",
+                mastery_level=0.1,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            KeypointDependency(
+                id="quiz-focus-unlock-dep",
+                kb_id=kb_id,
+                from_keypoint_id=prereq_id,
+                to_keypoint_id=target_id,
+                relation=DEPENDENCY_RELATION,
+                confidence=0.9,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    with patch("app.routers.quiz.generate_quiz", side_effect=_mock_generate_quiz):
+        resp = client.post(
+            "/api/quiz/generate",
+            json={
+                "kb_id": kb_id,
+                "user_id": user_id,
+                "count": 2,
+                "difficulty": "easy",
+                "focus_concepts": ["可测验进阶概念"],
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.json().get("quiz_id")
 
 
 def test_quiz_generate_with_style_prompt_only(client, seeded_session):

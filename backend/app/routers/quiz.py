@@ -37,8 +37,15 @@ from app.services.keypoints import (
     match_keypoints_by_concepts,
     match_keypoints_by_kb,
 )
-from app.services.keypoint_dedup import collapse_kb_keypoint_ids_to_representatives
-from app.services.learning_path import invalidate_learning_path_result_cache
+from app.services.keypoint_dedup import (
+    collapse_kb_keypoint_ids_to_representatives,
+    cluster_kb_keypoints,
+    normalize_keypoint_text,
+)
+from app.services.learning_path import (
+    get_unlocked_keypoint_ids,
+    invalidate_learning_path_result_cache,
+)
 from app.services.mastery import record_quiz_result
 from app.services.quiz import filter_quiz_questions_quality, generate_quiz
 from app.services.text_extraction import extract_text
@@ -55,6 +62,96 @@ def _has_quiz_input(payload: QuizGenerateRequest) -> bool:
         (payload.doc_id and payload.doc_id.strip())
         or (payload.kb_id and payload.kb_id.strip())
         or (payload.reference_questions and payload.reference_questions.strip())
+    )
+
+
+def _normalize_focus_concepts(values: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in values or []:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        key = normalize_keypoint_text(text) or text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(text)
+    return normalized
+
+
+def _ensure_focus_concepts_unlocked(
+    db: Session,
+    user_id: str,
+    kb_id: str,
+    focus_concepts: list[str] | None,
+) -> None:
+    normalized_focus = _normalize_focus_concepts(focus_concepts)
+    if not normalized_focus:
+        return
+
+    clusters = cluster_kb_keypoints(db, user_id, kb_id)
+    if not clusters:
+        return
+    representative_keypoints = [cluster.representative_keypoint for cluster in clusters]
+    cluster_map = {cluster.representative_id: cluster for cluster in clusters}
+    unlocked_ids = get_unlocked_keypoint_ids(
+        db,
+        user_id,
+        kb_id,
+        keypoints=representative_keypoints,
+        cluster_map=cluster_map,
+    )
+
+    representative_by_exact_text: dict[str, Keypoint] = {}
+    representative_by_normalized_text: dict[str, Keypoint] = {}
+    for cluster in clusters:
+        representative = cluster.representative_keypoint
+        rep_text = str(representative.text or "").strip()
+        if rep_text and rep_text not in representative_by_exact_text:
+            representative_by_exact_text[rep_text] = representative
+        normalized_rep_text = normalize_keypoint_text(rep_text)
+        if normalized_rep_text and normalized_rep_text not in representative_by_normalized_text:
+            representative_by_normalized_text[normalized_rep_text] = representative
+        for member in cluster.members:
+            member_text = str(member.keypoint.text or "").strip()
+            if member_text and member_text not in representative_by_exact_text:
+                representative_by_exact_text[member_text] = representative
+            normalized_member_text = normalize_keypoint_text(member_text)
+            if (
+                normalized_member_text
+                and normalized_member_text not in representative_by_normalized_text
+            ):
+                representative_by_normalized_text[normalized_member_text] = representative
+
+    blocked_labels: list[str] = []
+    blocked_seen: set[str] = set()
+    for concept in normalized_focus:
+        representative = representative_by_exact_text.get(concept)
+        if representative is None:
+            representative = representative_by_normalized_text.get(
+                normalize_keypoint_text(concept)
+            )
+        if not representative:
+            continue
+        representative_id = str(representative.id or "")
+        if not representative_id or representative_id in unlocked_ids:
+            continue
+
+        label = str(representative.text or concept).strip() or concept
+        key = normalize_keypoint_text(label) or label.lower()
+        if key in blocked_seen:
+            continue
+        blocked_seen.add(key)
+        blocked_labels.append(label)
+
+    if not blocked_labels:
+        return
+    blocked_preview = "、".join(blocked_labels[:5])
+    blocked_suffix = "" if len(blocked_labels) <= 5 else " 等"
+    raise HTTPException(
+        status_code=409,
+        detail=f"Focus concepts are locked by learning path prerequisites: {blocked_preview}{blocked_suffix}",
     )
 
 
@@ -130,10 +227,7 @@ def _build_kb_member_to_rep_index(
     kb_id: str,
 ) -> dict[str, str]:
     """Build a KB member->representative index once for dedup-aware mastery updates."""
-    from app.services.keypoint_dedup import (
-        build_keypoint_cluster_index,
-        cluster_kb_keypoints,
-    )
+    from app.services.keypoint_dedup import build_keypoint_cluster_index
 
     return build_keypoint_cluster_index(cluster_kb_keypoints(db, user_id, kb_id))
 
@@ -262,6 +356,20 @@ def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    effective_kb_id = resolve_effective_kb_id(
+        db,
+        resolved_user_id,
+        doc_id=payload.doc_id,
+        kb_id=payload.kb_id,
+    )
+    if effective_kb_id and payload.focus_concepts:
+        _ensure_focus_concepts_unlocked(
+            db,
+            resolved_user_id,
+            effective_kb_id,
+            payload.focus_concepts,
+        )
+
     try:
         if payload.auto_adapt and payload.difficulty is None:
             profile = get_or_create_profile(db, resolved_user_id)
@@ -310,12 +418,6 @@ def create_quiz(payload: QuizGenerateRequest, db: Session = Depends(get_db)):
                 reference_questions=payload.reference_questions,
             )
             difficulty_label = difficulty
-        effective_kb_id = resolve_effective_kb_id(
-            db,
-            resolved_user_id,
-            doc_id=payload.doc_id,
-            kb_id=payload.kb_id,
-        )
         _prebind_quiz_question_keypoints(
             db,
             questions,

@@ -1368,6 +1368,67 @@ def _build_path_summary(
 # ---------------------------------------------------------------------------
 
 
+def get_unlocked_keypoint_ids(
+    db: Session,
+    user_id: str,
+    kb_id: str,
+    *,
+    keypoints: list[Keypoint] | None = None,
+    cluster_map: dict[str, Any] | None = None,
+) -> set[str]:
+    """
+    Return representative keypoint ids that are currently unlocked by prerequisite mastery.
+
+    This helper relies on the persisted dependency graph only. If a KB has no current
+    dependency graph yet, all keypoints are treated as unlocked.
+    """
+    if keypoints is None or cluster_map is None:
+        _, keypoints, cluster_map, _ = _load_clustered_kb_keypoints(db, user_id, kb_id)
+    if not keypoints:
+        return set()
+
+    kp_map = {kp.id: kp for kp in keypoints}
+    deps = (
+        db.query(KeypointDependency)
+        .filter(KeypointDependency.kb_id == kb_id)
+        .all()
+    )
+    current_deps = [dep for dep in deps if _dependency_relation_is_current(dep.relation)]
+    if not current_deps:
+        return set(kp_map.keys())
+
+    prereq_map: dict[str, list[str]] = defaultdict(list)
+    for dep in current_deps:
+        from_id = str(dep.from_keypoint_id or "")
+        to_id = str(dep.to_keypoint_id or "")
+        if (
+            not from_id
+            or not to_id
+            or from_id == to_id
+            or from_id not in kp_map
+            or to_id not in kp_map
+        ):
+            continue
+        prereq_map[to_id].append(from_id)
+
+    unlocked: set[str] = set()
+    for kp_id in kp_map:
+        blocked = False
+        for prereq_id in prereq_map.get(kp_id, []):
+            prereq_cluster = cluster_map.get(prereq_id)
+            prereq_mastery = (
+                prereq_cluster.mastery_level_max
+                if prereq_cluster is not None
+                else float(kp_map[prereq_id].mastery_level or 0.0)
+            )
+            if prereq_mastery < MASTERY_PREREQ_THRESHOLD:
+                blocked = True
+                break
+        if not blocked:
+            unlocked.add(kp_id)
+    return unlocked
+
+
 def generate_learning_path(
     db: Session,
     user_id: str,

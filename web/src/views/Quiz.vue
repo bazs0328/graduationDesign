@@ -706,6 +706,7 @@ async function refreshQuizFocusOptions() {
     const params = new URLSearchParams()
     params.set('user_id', resolvedUserId.value)
     params.set('grouped', 'true')
+    params.set('only_unlocked', 'true')
     const res = await apiGet(`/api/keypoints/kb/${encodeURIComponent(requestKbId)}?${params.toString()}`)
     if (selectedKbId.value !== requestKbId) return
     quizFocusOptions.value = normalizeQuizFocusOptions(Array.isArray(res?.keypoints) ? res.keypoints : [])

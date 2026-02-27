@@ -4,7 +4,8 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from app.models import Document, Keypoint, KnowledgeBase, User
+from app.models import Document, Keypoint, KeypointDependency, KnowledgeBase, User
+from app.services.learning_path import DEPENDENCY_RELATION
 from app.utils.chroma_filters import build_chroma_eq_filter
 
 
@@ -210,6 +211,69 @@ def test_get_keypoints_by_kb_grouped_semantic_dedup(client, db_session):
     assert item["id"] == "kp-grouped-sem-1"
     assert item["attempt_count"] == 3
     assert item["mastery_level"] == 0.5
+
+
+def test_get_keypoints_by_kb_grouped_only_unlocked_filters_blocked_items(client, db_session):
+    user_id = "kp_grouped_unlock_user"
+    kb_id = "kp_grouped_unlock_kb"
+    doc_id = "kp_grouped_unlock_doc"
+    _seed_kb_with_docs(
+        db_session,
+        user_id=user_id,
+        kb_id=kb_id,
+        docs=[(doc_id, "unlock.txt")],
+    )
+    db_session.add_all(
+        [
+            Keypoint(
+                id="kp-grouped-unlock-prereq",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="基础知识点",
+                mastery_level=0.1,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            Keypoint(
+                id="kp-grouped-unlock-target",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="进阶知识点",
+                mastery_level=0.1,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            KeypointDependency(
+                id="kp-grouped-unlock-dep",
+                kb_id=kb_id,
+                from_keypoint_id="kp-grouped-unlock-prereq",
+                to_keypoint_id="kp-grouped-unlock-target",
+                relation=DEPENDENCY_RELATION,
+                confidence=0.9,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    with patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("boom")):
+        full_resp = client.get(
+            f"/api/keypoints/kb/{kb_id}",
+            params={"user_id": user_id, "grouped": "true"},
+        )
+        unlocked_resp = client.get(
+            f"/api/keypoints/kb/{kb_id}",
+            params={"user_id": user_id, "grouped": "true", "only_unlocked": "true"},
+        )
+
+    assert full_resp.status_code == 200
+    full_items = full_resp.json()["keypoints"]
+    assert {item["text"] for item in full_items} == {"基础知识点", "进阶知识点"}
+
+    assert unlocked_resp.status_code == 200
+    unlocked_items = unlocked_resp.json()["keypoints"]
+    assert {item["text"] for item in unlocked_items} == {"基础知识点"}
 
 
 def test_post_keypoints_with_study_keypoint_text_persists_mastery_update(client, db_session):

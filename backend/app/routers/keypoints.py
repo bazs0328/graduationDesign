@@ -18,11 +18,13 @@ from app.schemas import (
 from app.services.aggregate_mastery import resolve_keypoint_id_to_aggregate_target
 from app.services.keypoint_dedup import (
     KeypointCluster,
+    build_keypoint_cluster_index,
     cluster_kb_keypoints,
     find_kb_representative_by_text,
 )
 from app.services.keypoints import extract_keypoints, save_keypoints_to_db
 from app.services.learning_path import (
+    get_unlocked_keypoint_ids,
     invalidate_dependency_cache,
     invalidate_learning_path_result_cache,
 )
@@ -320,6 +322,7 @@ def get_keypoints_by_kb(
     kb_id: str,
     user_id: Optional[str] = None,
     grouped: bool = False,
+    only_unlocked: bool = False,
     db: Session = Depends(get_db),
 ):
     """Get keypoints for a knowledge base with mastery stats."""
@@ -328,6 +331,17 @@ def get_keypoints_by_kb(
 
     if grouped:
         clusters = cluster_kb_keypoints(db, resolved_user_id, kb.id)
+        if only_unlocked and clusters:
+            representative_keypoints = [cluster.representative_keypoint for cluster in clusters]
+            cluster_map = {cluster.representative_id: cluster for cluster in clusters}
+            unlocked_ids = get_unlocked_keypoint_ids(
+                db,
+                resolved_user_id,
+                kb.id,
+                keypoints=representative_keypoints,
+                cluster_map=cluster_map,
+            )
+            clusters = [cluster for cluster in clusters if cluster.representative_id in unlocked_ids]
         items = [_cluster_to_keypoint_item(cluster) for cluster in clusters]
         raw_count = sum(cluster.member_count for cluster in clusters)
         return KeypointsResponse(
@@ -345,6 +359,24 @@ def get_keypoints_by_kb(
         .order_by(Keypoint.created_at.asc())
         .all()
     )
+    if only_unlocked and keypoints:
+        clusters = cluster_kb_keypoints(db, resolved_user_id, kb.id)
+        if clusters:
+            representative_keypoints = [cluster.representative_keypoint for cluster in clusters]
+            cluster_map = {cluster.representative_id: cluster for cluster in clusters}
+            member_to_rep = build_keypoint_cluster_index(clusters)
+            unlocked_ids = get_unlocked_keypoint_ids(
+                db,
+                resolved_user_id,
+                kb.id,
+                keypoints=representative_keypoints,
+                cluster_map=cluster_map,
+            )
+            keypoints = [
+                point
+                for point in keypoints
+                if member_to_rep.get(str(point.id), str(point.id)) in unlocked_ids
+            ]
     return KeypointsResponse(
         doc_id=kb.id,
         keypoints=_to_keypoint_items(keypoints),
