@@ -144,8 +144,14 @@ def ensure_schema():
 
         result = conn.execute(text("PRAGMA table_info(quizzes)"))
         cols = {row[1] for row in result}
+        quizzes_changed = False
         if "kb_id" not in cols:
             conn.execute(text("ALTER TABLE quizzes ADD COLUMN kb_id VARCHAR"))
+            quizzes_changed = True
+        if "paper_meta_json" not in cols:
+            conn.execute(text("ALTER TABLE quizzes ADD COLUMN paper_meta_json TEXT"))
+            quizzes_changed = True
+        if quizzes_changed:
             conn.commit()
 
         result = conn.execute(text("PRAGMA table_info(learner_profiles)"))

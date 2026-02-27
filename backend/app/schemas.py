@@ -292,6 +292,49 @@ class QAResponse(BaseModel):
     mode: Optional[str] = None
 
 
+QuizQuestionType = Literal[
+    "single_choice",
+    "multiple_choice",
+    "true_false",
+    "fill_blank",
+]
+QuizSectionDifficulty = Literal["easy", "medium", "hard", "adaptive"]
+
+
+class PaperSectionBlueprint(BaseModel):
+    section_id: str
+    type: QuizQuestionType
+    count: int = Field(default=1, ge=1, le=20)
+    score_per_question: float = Field(default=1.0, gt=0.0, le=100.0)
+    difficulty: Optional[QuizSectionDifficulty] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PaperBlueprint(BaseModel):
+    title: str = "自动组卷"
+    duration_minutes: int = Field(default=20, ge=5, le=240)
+    sections: List[PaperSectionBlueprint] = Field(default_factory=list, min_length=1, max_length=20)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PaperSectionMeta(BaseModel):
+    section_id: str
+    type: QuizQuestionType
+    requested_count: int = 0
+    generated_count: int = 0
+    score_per_question: float = 1.0
+    difficulty: Optional[QuizSectionDifficulty] = None
+
+
+class PaperMeta(BaseModel):
+    title: str = "自动组卷"
+    duration_minutes: int = 20
+    total_score: float = 0.0
+    sections: List[PaperSectionMeta] = []
+
+
 class QuizGenerateRequest(BaseModel):
     doc_id: Optional[str] = None
     kb_id: Optional[str] = None
@@ -299,29 +342,41 @@ class QuizGenerateRequest(BaseModel):
     difficulty: Optional[str] = None
     auto_adapt: bool = True
     user_id: Optional[str] = None
+    scope_concepts: Optional[List[str]] = None
     focus_concepts: Optional[List[str]] = None
     style_prompt: Optional[str] = None
     reference_questions: Optional[str] = None
+    paper_blueprint: Optional[PaperBlueprint] = None
 
 
 class QuizQuestion(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    question_id: str = ""
+    type: QuizQuestionType = "single_choice"
     question: str
-    options: List[str]
-    answer_index: int
+    options: List[str] = []
+    answer: Optional[Any] = None
+    answer_index: Optional[int] = None
+    answer_indexes: List[int] = []
+    answer_bool: Optional[bool] = None
+    answer_blanks: List[str] = []
+    blank_count: int = 1
     explanation: str
     concepts: List[str] = []
+    score: float = 1.0
+    section_id: str = "section-1"
 
 
 class QuizGenerateResponse(BaseModel):
     quiz_id: str
     questions: List[QuizQuestion]
+    paper_meta: Optional[PaperMeta] = None
 
 
 class QuizSubmitRequest(BaseModel):
     quiz_id: str
-    answers: List[Optional[int]]
+    answers: List[Any]
     user_id: Optional[str] = None
 
 
@@ -354,17 +409,42 @@ class MasteryUpdate(BaseModel):
     new_level: float
 
 
+class QuizSectionScore(BaseModel):
+    section_id: str
+    earned: float
+    total: float
+
+
+class QuizQuestionResult(BaseModel):
+    question_id: str
+    correct: bool
+    earned: float
+    total: float
+    explanation: str
+
+
+class MasteryGuardStats(BaseModel):
+    updated_count: int = 0
+    skipped_locked: int = 0
+    skipped_missing_binding: int = 0
+
+
 class QuizSubmitResponse(BaseModel):
     score: float
     correct: int
     total: int
     results: List[bool]
     explanations: List[str]
+    total_score: float = 0.0
+    earned_score: float = 0.0
+    section_scores: List[QuizSectionScore] = []
+    question_results: List[QuizQuestionResult] = []
     feedback: Optional[QuizFeedback] = None
     next_quiz_recommendation: Optional[NextQuizRecommendation] = None
     profile_delta: Optional[ProfileDelta] = None
     wrong_questions_by_concept: List[WrongQuestionGroup] = []
     mastery_updates: List[MasteryUpdate] = []
+    mastery_guard: Optional[MasteryGuardStats] = None
 
 
 class DifficultyPlan(BaseModel):

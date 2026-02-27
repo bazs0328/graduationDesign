@@ -4,7 +4,8 @@ import math
 import re
 from collections import Counter
 from difflib import SequenceMatcher
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
+from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
@@ -29,6 +30,46 @@ QUIZ_CONTEXT_MAX_K_KB = 24
 QUIZ_CONTEXT_DOCS_PER_QUESTION_DOC = 2
 QUIZ_CONTEXT_DOCS_PER_QUESTION_KB = 3
 QUIZ_CONTEXT_MAX_CHARS = 16000
+
+QUIZ_TYPE_SINGLE = "single_choice"
+QUIZ_TYPE_MULTIPLE = "multiple_choice"
+QUIZ_TYPE_TRUE_FALSE = "true_false"
+QUIZ_TYPE_FILL_BLANK = "fill_blank"
+QUIZ_TYPES = {QUIZ_TYPE_SINGLE, QUIZ_TYPE_MULTIPLE, QUIZ_TYPE_TRUE_FALSE, QUIZ_TYPE_FILL_BLANK}
+QuizQuestionType = Literal["single_choice", "multiple_choice", "true_false", "fill_blank"]
+FILL_BLANK_PLACEHOLDER_RE = re.compile(r"_{3,}|＿{3,}|\(\s*\)|（\s*）|\[\s*\]|【\s*】")
+FILL_BLANK_CANONICAL_PLACEHOLDER = "____"
+
+QUIZ_TYPE_SCHEMA_INSTRUCTIONS: dict[str, str] = {
+    QUIZ_TYPE_SINGLE: (
+        "Create {count} {difficulty} single-choice questions. "
+        "Each question must have exactly 4 options and one correct answer. "
+        "Return JSON array with fields: question, options, answer_index, explanation, concepts.\n"
+        "answer_index must be integer 0-3.\n"
+        "concepts must be a list of 1-3 key concepts tested.\n\n"
+    ),
+    QUIZ_TYPE_MULTIPLE: (
+        "Create {count} {difficulty} multiple-select questions. "
+        "Each question must have exactly 4 options and at least one correct option. "
+        "Return JSON array with fields: question, options, answer_indexes, explanation, concepts.\n"
+        "answer_indexes must be a non-empty list of unique integers in [0,1,2,3].\n"
+        "concepts must be a list of 1-3 key concepts tested.\n\n"
+    ),
+    QUIZ_TYPE_TRUE_FALSE: (
+        "Create {count} {difficulty} true/false questions. "
+        "Return JSON array with fields: question, options, answer_bool, explanation, concepts.\n"
+        "options must contain exactly two items and represent True/False choices. "
+        "answer_bool must be true or false.\n"
+        "concepts must be a list of 1-3 key concepts tested.\n\n"
+    ),
+    QUIZ_TYPE_FILL_BLANK: (
+        "Create {count} {difficulty} fill-in-the-blank questions. "
+        "Return JSON array with fields: question, answer_blanks, explanation, concepts.\n"
+        "answer_blanks must be a non-empty list of acceptable short answers (1-3 items). "
+        "Do not provide options for this type.\n"
+        "concepts must be a list of 1-3 key concepts tested.\n\n"
+    ),
+}
 
 QUIZ_SYSTEM = (
     "You are an exam writer. Generate multiple-choice questions strictly from the context. "
@@ -63,6 +104,129 @@ QUIZ_MIMIC_HUMAN_TEMPLATE = (
     "{extra_instructions}"
     "Context:\n{context}"
 )
+
+
+def _normalize_question_type(question_type: str | None) -> QuizQuestionType:
+    normalized = str(question_type or QUIZ_TYPE_SINGLE).strip().lower()
+    if normalized not in QUIZ_TYPES:
+        return QUIZ_TYPE_SINGLE
+    return normalized  # type: ignore[return-value]
+
+
+def _normalize_bool_answer(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    if text in {"true", "t", "yes", "y", "1", "正确", "对", "是"}:
+        return True
+    if text in {"false", "f", "no", "n", "0", "错误", "错", "否"}:
+        return False
+    return None
+
+
+def _normalize_answer_indexes(value: Any) -> list[int]:
+    if isinstance(value, int):
+        values = [value]
+    elif isinstance(value, list):
+        values = value
+    else:
+        return []
+    out: list[int] = []
+    seen: set[int] = set()
+    for raw in values:
+        if not isinstance(raw, int):
+            continue
+        if raw < 0 or raw > 3 or raw in seen:
+            continue
+        seen.add(raw)
+        out.append(raw)
+    return sorted(out)
+
+
+def _normalize_blank_answers(value: Any) -> list[str]:
+    if isinstance(value, str):
+        candidates = [value]
+    elif isinstance(value, list):
+        candidates = value
+    else:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in candidates:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        key = _normalize_text_for_compare(text)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+        if len(out) >= 6:
+            break
+    return out
+
+
+def _render_fill_blank_placeholders(count: int) -> str:
+    safe_count = max(1, int(count or 1))
+    return " / ".join([FILL_BLANK_CANONICAL_PLACEHOLDER] * safe_count)
+
+
+def _align_fill_blank_question(question: Any, blank_count: int) -> str:
+    expected = max(1, int(blank_count or 1))
+    text = str(question or "").strip()
+    if not text:
+        return f"Please fill in: {_render_fill_blank_placeholders(expected)}"
+
+    current_count = len(FILL_BLANK_PLACEHOLDER_RE.findall(text))
+    if current_count == expected:
+        return text
+
+    normalized_text = FILL_BLANK_PLACEHOLDER_RE.sub(FILL_BLANK_CANONICAL_PLACEHOLDER, text)
+    normalized_count = len(re.findall(r"_{3,}", normalized_text))
+    if normalized_count == expected:
+        return normalized_text
+
+    text_without_placeholders = re.sub(FILL_BLANK_PLACEHOLDER_RE, " ", text)
+    text_without_placeholders = re.sub(r"\s+", " ", text_without_placeholders).strip()
+    placeholders = _render_fill_blank_placeholders(expected)
+    if not text_without_placeholders:
+        return f"Please fill in: {placeholders}"
+    if text_without_placeholders.endswith((":", "：")):
+        return f"{text_without_placeholders}{placeholders}"
+    return f"{text_without_placeholders} ({placeholders})"
+
+
+def _build_question_type_prompt(
+    *,
+    question_type: QuizQuestionType,
+    count: int,
+    difficulty: str,
+    context: str,
+    extra_instructions: str,
+) -> list[Any]:
+    if question_type == QUIZ_TYPE_SINGLE and not extra_instructions:
+        return QUIZ_PROMPT.format_messages(count=count, difficulty=difficulty, context=context)
+
+    schema_text = QUIZ_TYPE_SCHEMA_INSTRUCTIONS.get(
+        question_type,
+        QUIZ_TYPE_SCHEMA_INSTRUCTIONS[QUIZ_TYPE_SINGLE],
+    )
+    human_msg = (
+        schema_text.format(count=count, difficulty=difficulty)
+        + (extra_instructions or "")
+        + f"Context:\n{context}"
+    )
+    return [
+        SystemMessage(content=QUIZ_MIMIC_SYSTEM),
+        HumanMessage(content=human_msg),
+    ]
 
 
 def _extract_keypoint_ids(docs) -> List[str]:
@@ -455,11 +619,15 @@ def _is_fragmented_quiz_text(text: str) -> bool:
     return False
 
 
-def _normalize_and_validate_question(q: Any) -> tuple[dict | None, str | None]:
+def _normalize_and_validate_question(
+    q: Any,
+    *,
+    question_type: QuizQuestionType,
+) -> tuple[dict | None, str | None]:
     if not isinstance(q, dict):
         return None, "invalid_type"
 
-    required_fields = ["question", "options", "answer_index", "explanation"]
+    required_fields = ["question", "explanation"]
     missing_fields = [field for field in required_fields if field not in q]
     if missing_fields:
         return None, "missing_fields"
@@ -476,31 +644,126 @@ def _normalize_and_validate_question(q: Any) -> tuple[dict | None, str | None]:
         if _is_fragmented_quiz_text(explanation):
             return None, "fragmented_explanation"
 
-    options = q.get("options")
-    if not isinstance(options, list) or len(options) != 4:
-        return None, "invalid_options"
-    normalized_options: list[str] = []
-    option_keys: set[str] = set()
-    for option in options:
-        opt_text = str(option or "").strip()
-        if not opt_text:
-            return None, "empty_option"
-        opt_key = _normalize_text_for_compare(opt_text)
-        if opt_key in option_keys:
-            return None, "duplicate_options"
-        option_keys.add(opt_key)
-        normalized_options.append(opt_text)
-
-    answer_index = q.get("answer_index")
-    if not isinstance(answer_index, int) or answer_index < 0 or answer_index >= 4:
-        return None, "invalid_answer_index"
-
     normalized = dict(q)
     normalized["question"] = question
-    normalized["options"] = normalized_options
-    normalized["answer_index"] = answer_index
     normalized["explanation"] = explanation
     normalized["concepts"] = _normalize_concepts_list(q.get("concepts"))
+    normalized["type"] = question_type
+
+    score_value = q.get("score")
+    if score_value is None:
+        score = 1.0
+    else:
+        try:
+            score = float(score_value)
+        except (TypeError, ValueError):
+            return None, "invalid_score"
+        if score <= 0:
+            return None, "invalid_score"
+    normalized["score"] = score
+
+    section_id = str(q.get("section_id") or "").strip()
+    normalized["section_id"] = section_id or "section-1"
+
+    question_id = str(q.get("question_id") or "").strip()
+    normalized["question_id"] = question_id or str(uuid4())
+
+    if question_type in {QUIZ_TYPE_SINGLE, QUIZ_TYPE_MULTIPLE}:
+        options = q.get("options")
+        if not isinstance(options, list) or len(options) != 4:
+            return None, "invalid_options"
+        normalized_options: list[str] = []
+        option_keys: set[str] = set()
+        for option in options:
+            opt_text = str(option or "").strip()
+            if not opt_text:
+                return None, "empty_option"
+            opt_key = _normalize_text_for_compare(opt_text)
+            if opt_key in option_keys:
+                return None, "duplicate_options"
+            option_keys.add(opt_key)
+            normalized_options.append(opt_text)
+        normalized["options"] = normalized_options
+    elif question_type == QUIZ_TYPE_TRUE_FALSE:
+        options = q.get("options")
+        normalized_options: list[str] = []
+        if isinstance(options, list) and len(options) >= 2:
+            normalized_options = [str(options[0] or "").strip(), str(options[1] or "").strip()]
+        if len(normalized_options) < 2 or not normalized_options[0] or not normalized_options[1]:
+            normalized_options = ["正确", "错误"]
+        normalized["options"] = normalized_options
+    else:
+        normalized["options"] = []
+
+    if question_type == QUIZ_TYPE_SINGLE:
+        answer_index = q.get("answer_index")
+        if not isinstance(answer_index, int):
+            answer_value = q.get("answer")
+            answer_index = answer_value if isinstance(answer_value, int) else None
+        if not isinstance(answer_index, int) or answer_index < 0 or answer_index >= 4:
+            return None, "invalid_answer_index"
+        normalized["answer_index"] = answer_index
+        normalized["answer"] = answer_index
+        normalized["answer_indexes"] = []
+        normalized["answer_bool"] = None
+        normalized["answer_blanks"] = []
+        normalized["blank_count"] = 1
+        return normalized, None
+
+    if question_type == QUIZ_TYPE_MULTIPLE:
+        answer_indexes = _normalize_answer_indexes(
+            q.get("answer_indexes") if q.get("answer_indexes") is not None else q.get("answer")
+        )
+        if not answer_indexes:
+            answer_index = q.get("answer_index")
+            if isinstance(answer_index, int) and 0 <= answer_index <= 3:
+                answer_indexes = [answer_index]
+        if not answer_indexes:
+            return None, "invalid_answer_indexes"
+        normalized["answer_indexes"] = answer_indexes
+        normalized["answer"] = answer_indexes
+        normalized["answer_index"] = answer_indexes[0]
+        normalized["answer_bool"] = None
+        normalized["answer_blanks"] = []
+        normalized["blank_count"] = 1
+        return normalized, None
+
+    if question_type == QUIZ_TYPE_TRUE_FALSE:
+        answer_bool = _normalize_bool_answer(
+            q.get("answer_bool") if q.get("answer_bool") is not None else q.get("answer")
+        )
+        if answer_bool is None:
+            answer_index = q.get("answer_index")
+            if isinstance(answer_index, int):
+                if answer_index == 0:
+                    answer_bool = True
+                elif answer_index == 1:
+                    answer_bool = False
+        if answer_bool is None:
+            return None, "invalid_answer_bool"
+        normalized["answer_bool"] = answer_bool
+        normalized["answer"] = answer_bool
+        normalized["answer_index"] = 0 if answer_bool else 1
+        normalized["answer_indexes"] = []
+        normalized["answer_blanks"] = []
+        normalized["blank_count"] = 1
+        return normalized, None
+
+    answer_blanks = _normalize_blank_answers(
+        q.get("answer_blanks") if q.get("answer_blanks") is not None else q.get("answer")
+    )
+    if not answer_blanks:
+        return None, "invalid_answer_blanks"
+    normalized["answer_blanks"] = answer_blanks
+    normalized["answer"] = answer_blanks
+    normalized["answer_index"] = None
+    normalized["answer_indexes"] = []
+    normalized["answer_bool"] = None
+    normalized["blank_count"] = max(1, len(answer_blanks))
+    normalized["question"] = _align_fill_blank_question(
+        normalized.get("question"),
+        normalized["blank_count"],
+    )
     return normalized, None
 
 
@@ -543,6 +806,9 @@ def _apply_quality_guardrails(
     raw_questions: list[Any],
     *,
     target_count: int,
+    question_type: QuizQuestionType = QUIZ_TYPE_SINGLE,
+    section_id: str = "section-1",
+    score_per_question: float = 1.0,
     focus_concepts: Optional[List[str]] = None,
     keypoint_ids: Optional[List[str]] = None,
     seed_questions: Optional[List[dict]] = None,
@@ -582,11 +848,25 @@ def _apply_quality_guardrails(
             seen_stems.append(stem)
 
     for raw in raw_questions or []:
-        normalized, invalid_reason = _normalize_and_validate_question(raw)
+        normalized, invalid_reason = _normalize_and_validate_question(
+            raw,
+            question_type=question_type,
+        )
         if not normalized:
             report["dropped_invalid"] += 1
             report["invalid_reasons"][invalid_reason] = report["invalid_reasons"].get(invalid_reason, 0) + 1
             continue
+
+        normalized["type"] = question_type
+        normalized["section_id"] = str(normalized.get("section_id") or section_id)
+        try:
+            normalized["score"] = float(normalized.get("score") or score_per_question)
+        except (TypeError, ValueError):
+            normalized["score"] = float(score_per_question)
+        if normalized["score"] <= 0:
+            normalized["score"] = float(score_per_question)
+        if not str(normalized.get("question_id") or "").strip():
+            normalized["question_id"] = str(uuid4())
 
         stem = _normalize_text_for_compare(normalized.get("question", ""))
         if not stem:
@@ -683,25 +963,17 @@ def _invoke_quiz_llm_once(
     difficulty: str,
     context: str,
     base_extra_instructions: str,
+    question_type: QuizQuestionType = QUIZ_TYPE_SINGLE,
 ) -> list[Any]:
     try:
-        if base_extra_instructions:
-            human_msg = QUIZ_MIMIC_HUMAN_TEMPLATE.format(
-                count=count,
-                difficulty=difficulty,
-                extra_instructions=base_extra_instructions,
-                context=context,
-            )
-            msg_list = [
-                SystemMessage(content=QUIZ_MIMIC_SYSTEM),
-                HumanMessage(content=human_msg),
-            ]
-            result = llm.invoke(msg_list)
-        else:
-            messages = QUIZ_PROMPT.format_messages(
-                count=count, difficulty=difficulty, context=context
-            )
-            result = llm.invoke(messages)
+        messages = _build_question_type_prompt(
+            question_type=question_type,
+            count=count,
+            difficulty=difficulty,
+            context=context,
+            extra_instructions=base_extra_instructions,
+        )
+        result = llm.invoke(messages)
     except Exception as e:
         logger.error(f"LLM invocation failed: {e}")
         raise ValueError(f"Failed to generate quiz questions from LLM: {str(e)}")
@@ -724,11 +996,13 @@ def filter_quiz_questions_quality(
     questions: list[Any],
     *,
     target_count: int,
+    question_type: QuizQuestionType = QUIZ_TYPE_SINGLE,
     focus_concepts: Optional[List[str]] = None,
 ) -> list[dict]:
     kept, report = _apply_quality_guardrails(
         questions,
         target_count=target_count,
+        question_type=question_type,
         focus_concepts=focus_concepts,
     )
     _log_quality_report(report, requested_count=target_count, stage="router-finalize")
@@ -745,7 +1019,11 @@ def generate_quiz(
     style_prompt: Optional[str] = None,
     reference_questions: Optional[str] = None,
     avoid_question_texts: Optional[List[str]] = None,
+    question_type: QuizQuestionType | str = QUIZ_TYPE_SINGLE,
+    section_id: str = "section-1",
+    score_per_question: float = 1.0,
 ) -> List[dict]:
+    resolved_type = _normalize_question_type(question_type)
     context, keypoint_ids = _build_context(
         user_id,
         doc_id,
@@ -778,10 +1056,14 @@ def generate_quiz(
         difficulty=difficulty,
         context=context,
         base_extra_instructions=base_extra,
+        question_type=resolved_type,
     )
     questions, report = _apply_quality_guardrails(
         raw_primary,
         target_count=count,
+        question_type=resolved_type,
+        section_id=section_id,
+        score_per_question=score_per_question,
         focus_concepts=focus_concepts,
         keypoint_ids=keypoint_ids,
         external_avoid_question_texts=avoid_question_texts,
@@ -810,6 +1092,7 @@ def generate_quiz(
                 difficulty=difficulty,
                 context=context,
                 base_extra_instructions=resample_extra,
+                question_type=resolved_type,
             )
         except ValueError as exc:
             logger.warning("Quiz resample round %s failed: %s", resample_rounds, exc)
@@ -818,6 +1101,9 @@ def generate_quiz(
         resample_kept, resample_report = _apply_quality_guardrails(
             raw_resample,
             target_count=count,
+            question_type=resolved_type,
+            section_id=section_id,
+            score_per_question=score_per_question,
             focus_concepts=focus_concepts,
             keypoint_ids=keypoint_ids,
             seed_questions=questions,
@@ -846,6 +1132,47 @@ def generate_quiz(
         )
 
     validated_questions = questions[:count]
+    for index, item in enumerate(validated_questions, start=1):
+        item["type"] = resolved_type
+        item["section_id"] = str(item.get("section_id") or section_id)
+        try:
+            item["score"] = float(item.get("score") or score_per_question)
+        except (TypeError, ValueError):
+            item["score"] = float(score_per_question)
+        if item["score"] <= 0:
+            item["score"] = float(score_per_question)
+        question_id = str(item.get("question_id") or "").strip()
+        if not question_id:
+            item["question_id"] = f"{section_id}-{index}-{uuid4().hex[:8]}"
+        item.setdefault("options", [] if resolved_type == QUIZ_TYPE_FILL_BLANK else item.get("options", []))
+        item.setdefault("answer_indexes", [])
+        item.setdefault("answer_blanks", [])
+        item.setdefault("blank_count", len(item.get("answer_blanks") or []) or 1)
+        if resolved_type == QUIZ_TYPE_SINGLE and "answer_index" in item:
+            item["answer"] = item.get("answer_index")
+        elif resolved_type == QUIZ_TYPE_MULTIPLE:
+            answer_indexes = _normalize_answer_indexes(item.get("answer_indexes") or item.get("answer"))
+            item["answer_indexes"] = answer_indexes
+            item["answer"] = answer_indexes
+            item["answer_index"] = answer_indexes[0] if answer_indexes else None
+        elif resolved_type == QUIZ_TYPE_TRUE_FALSE:
+            answer_bool = _normalize_bool_answer(item.get("answer_bool") if item.get("answer_bool") is not None else item.get("answer"))
+            if answer_bool is None:
+                answer_bool = True
+            item["answer_bool"] = answer_bool
+            item["answer"] = answer_bool
+            item["answer_index"] = 0 if answer_bool else 1
+            item["options"] = item.get("options") if isinstance(item.get("options"), list) and len(item.get("options")) >= 2 else ["正确", "错误"]
+        else:
+            blanks = _normalize_blank_answers(item.get("answer_blanks") if item.get("answer_blanks") is not None else item.get("answer"))
+            item["answer_blanks"] = blanks
+            item["answer"] = blanks
+            item["blank_count"] = max(1, len(blanks))
+            item["question"] = _align_fill_blank_question(
+                item.get("question"),
+                item["blank_count"],
+            )
+            item["options"] = []
 
     try:
         json.dumps(validated_questions)  # validate serializable

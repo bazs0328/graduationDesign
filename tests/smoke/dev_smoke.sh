@@ -297,7 +297,7 @@ fi
 
 log "Generating quiz..."
 quiz_json=$(curl -sS -H "Content-Type: application/json" \
-  -d "{\"doc_id\":\"${doc_id}\",\"user_id\":\"${USER_ID}\",\"count\":3,\"difficulty\":\"easy\"}" \
+  -d "{\"doc_id\":\"${doc_id}\",\"user_id\":\"${USER_ID}\",\"count\":4,\"difficulty\":\"medium\",\"auto_adapt\":false,\"paper_blueprint\":{\"title\":\"Smoke Mixed Paper\",\"duration_minutes\":20,\"sections\":[{\"section_id\":\"single_choice_1\",\"type\":\"single_choice\",\"count\":1,\"score_per_question\":1,\"difficulty\":\"easy\"},{\"section_id\":\"multiple_choice_1\",\"type\":\"multiple_choice\",\"count\":1,\"score_per_question\":1,\"difficulty\":\"easy\"},{\"section_id\":\"true_false_1\",\"type\":\"true_false\",\"count\":1,\"score_per_question\":1,\"difficulty\":\"easy\"},{\"section_id\":\"fill_blank_1\",\"type\":\"fill_blank\",\"count\":1,\"score_per_question\":1,\"difficulty\":\"easy\"}]}}" \
   "${API_BASE}/api/quiz/generate" || true)
 if [[ "$quiz_json" == *"detail"* ]]; then
   fail "Quiz generation failed: ${quiz_json}"
@@ -330,9 +330,33 @@ if not isinstance(questions, list) or not questions:
     print("missing_questions")
     raise SystemExit(0)
 for q in questions:
-    opts = q.get("options") if isinstance(q, dict) else None
-    if not isinstance(opts, list) or len(opts) != 4:
-        print("invalid_options")
+    if not isinstance(q, dict):
+        print("invalid_question")
+        raise SystemExit(0)
+    if not str(q.get("question_id") or "").strip():
+        print("missing_question_id")
+        raise SystemExit(0)
+    qtype = str(q.get("type") or "")
+    if qtype not in {"single_choice", "multiple_choice", "true_false", "fill_blank"}:
+        print("invalid_type")
+        raise SystemExit(0)
+    if qtype in {"single_choice", "multiple_choice"}:
+        opts = q.get("options")
+        if not isinstance(opts, list) or len(opts) != 4:
+            print("invalid_options")
+            raise SystemExit(0)
+    if qtype == "true_false":
+        opts = q.get("options")
+        if not isinstance(opts, list) or len(opts) < 2:
+            print("invalid_true_false_options")
+            raise SystemExit(0)
+    if qtype == "fill_blank":
+        blanks = q.get("answer_blanks") or q.get("answer")
+        if not isinstance(blanks, list) or len(blanks) == 0:
+            print("invalid_fill_blank_answer")
+            raise SystemExit(0)
+    if "score" not in q or "section_id" not in q:
+        print("missing_paper_fields")
         raise SystemExit(0)
 print("ok")
 PY
@@ -342,8 +366,34 @@ if [[ "$quiz_ok" != "ok" ]]; then
 fi
 
 log "Submitting quiz..."
+submit_payload=$(QUIZ_JSON="${quiz_json}" QUIZ_ID="${quiz_id}" USER_ID="${USER_ID}" python3 - <<'PY'
+import json, os
+quiz = json.loads(os.environ.get("QUIZ_JSON", "{}"))
+quiz_id = os.environ.get("QUIZ_ID", "")
+user_id = os.environ.get("USER_ID", "")
+answers = []
+for idx, q in enumerate(quiz.get("questions") or []):
+    qid = str(q.get("question_id") or f"q-{idx+1}")
+    qtype = str(q.get("type") or "single_choice")
+    if qtype == "multiple_choice":
+        value = q.get("answer_indexes") or q.get("answer") or []
+    elif qtype == "true_false":
+        value = q.get("answer_bool")
+        if value is None:
+            value = bool(q.get("answer"))
+    elif qtype == "fill_blank":
+        value = q.get("answer_blanks") or q.get("answer") or []
+    else:
+        value = q.get("answer_index")
+        if value is None:
+            value = q.get("answer")
+    answers.append({"question_id": qid, "answer": value})
+print(json.dumps({"quiz_id": quiz_id, "user_id": user_id, "answers": answers}, ensure_ascii=False))
+PY
+)
+
 submit_json=$(curl -sS -H "Content-Type: application/json" \
-  -d "{\"quiz_id\":\"${quiz_id}\",\"user_id\":\"${USER_ID}\",\"answers\":[0,0,0]}" \
+  -d "${submit_payload}" \
   "${API_BASE}/api/quiz/submit" || true)
 if [[ "$submit_json" == *"detail"* ]]; then
   fail "Quiz submit failed: ${submit_json}"

@@ -9,6 +9,7 @@
 | `backend/` | 后端 pytest 集成测试 |
 | `smoke/` | Smoke 测试脚本 |
 | `qa_regression.py` | QA 回归测试 |
+| `quiz_paper_regression.py` | 自动组卷回归脚本（题型分布/重复率/焦点命中） |
 | `loadtest_qa.sh` | QA 压测脚本 |
 
 ## 前端测试（web/tests/）

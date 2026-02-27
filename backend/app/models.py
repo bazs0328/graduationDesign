@@ -132,6 +132,7 @@ class Quiz(Base):
     difficulty = Column(String, default="medium")
     question_type = Column(String, default="mcq")
     questions_json = Column(Text, nullable=False)
+    paper_meta_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

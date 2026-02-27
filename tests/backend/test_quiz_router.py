@@ -18,20 +18,114 @@ def _mock_generate_quiz(*args, **kwargs):
     """Return a fixed list of questions in the expected schema."""
     return [
         {
-            "question": "Mock question 1?",
+            "question": "What is matrix invertibility?",
             "options": ["A", "B", "C", "D"],
             "answer_index": 0,
             "explanation": "Mock explanation 1",
             "concepts": ["概念A"],
         },
         {
-            "question": "Mock question 2?",
+            "question": "How does TCP three-way handshake start?",
             "options": ["W", "X", "Y", "Z"],
             "answer_index": 1,
             "explanation": "Mock explanation 2",
             "concepts": ["概念B"],
         },
     ]
+
+
+def _mock_generate_quiz_by_type(*args, **kwargs):
+    count = int(args[2]) if len(args) > 2 else int(kwargs.get("count", 1))
+    question_type = kwargs.get("question_type", "single_choice")
+    section_id = kwargs.get("section_id", f"{question_type}_section")
+    score = float(kwargs.get("score_per_question", 1.0))
+    avoid_question_texts = kwargs.get("avoid_question_texts") or []
+    offset = len(avoid_question_texts)
+    topic_pool = [
+        "matrix invertibility",
+        "tcp handshake",
+        "hash index",
+        "bayesian theorem",
+        "dynamic programming",
+        "cache consistency",
+        "operating-system scheduler",
+        "graph shortest path",
+        "normal form",
+        "load balancing",
+        "mutex deadlock",
+        "gradient descent",
+        "decision tree",
+        "packet retransmission",
+        "distributed lock",
+        "memory paging",
+        "b+ tree",
+        "activation function",
+        "binary search",
+        "compiler optimization",
+    ]
+    out = []
+    for idx in range(max(1, count)):
+        seq = offset + idx
+        qid = f"{section_id}-q{idx+1}"
+        topic = topic_pool[seq % len(topic_pool)]
+        concept = f"concept-{topic}"
+        if question_type == "multiple_choice":
+            out.append(
+                {
+                    "question_id": qid,
+                    "type": question_type,
+                    "question": f"多选题 {idx + 1}：在 {topic} 场景（样本 {seq + 1}）中，哪些陈述同时正确？",
+                    "options": ["A", "B", "C", "D"],
+                    "answer_indexes": [0, 2],
+                    "explanation": f"{topic} 的正确组合是 A、C。",
+                    "concepts": [concept],
+                    "score": score,
+                    "section_id": section_id,
+                }
+            )
+        elif question_type == "true_false":
+            out.append(
+                {
+                    "question_id": qid,
+                    "type": question_type,
+                    "question": f"判断题 {idx + 1}：关于 {topic} 的命题（样本 {seq + 1}）是否成立？",
+                    "options": ["正确", "错误"],
+                    "answer_bool": False,
+                    "explanation": f"{topic} 这条陈述不成立。",
+                    "concepts": [concept],
+                    "score": score,
+                    "section_id": section_id,
+                }
+            )
+        elif question_type == "fill_blank":
+            out.append(
+                {
+                    "question_id": qid,
+                    "type": question_type,
+                    "question": f"填空题 {idx + 1}：{topic} 的关键术语（样本 {seq + 1}）是 ___。",
+                    "answer_blanks": [f"term_{idx + 1}"],
+                    "blank_count": 1,
+                    "explanation": f"{topic} 的标准术语是 term_{idx + 1}。",
+                    "concepts": [concept],
+                    "score": score,
+                    "section_id": section_id,
+                }
+            )
+        else:
+            out.append(
+                {
+                    "question_id": qid,
+                    "type": "single_choice",
+                    "question": f"单选题 {idx + 1}：在 {topic} 任务（样本 {seq + 1}）中，最合理的描述是哪一项？",
+                    "options": ["可逆矩阵", "奇异矩阵", "满秩条件", "稀疏表示"],
+                    "answer_index": 0,
+                    "explanation": f"{topic} 对应正确项是第一项。",
+                    "concepts": [concept],
+                    "score": score,
+                    "section_id": section_id,
+                }
+            )
+    return out[:count]
 
 
 def test_quiz_generate_requires_at_least_one_input(client):
@@ -296,6 +390,325 @@ def test_quiz_generate_doc_id_plus_style_prompt(client, seeded_session):
     assert 1 <= len(data["questions"]) <= 2
 
 
+def test_quiz_generate_default_blueprint_returns_mixed_types_and_paper_meta(client, seeded_session):
+    with patch("app.routers.quiz.generate_quiz", side_effect=_mock_generate_quiz_by_type):
+        resp = client.post(
+            "/api/quiz/generate",
+            json={
+                "doc_id": seeded_session["doc_id"],
+                "user_id": seeded_session["user_id"],
+                "count": 10,
+                "difficulty": "medium",
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("quiz_id")
+    questions = data.get("questions") or []
+    assert len(questions) == 10
+    types = [q.get("type") for q in questions]
+    assert "single_choice" in types
+    assert "multiple_choice" in types
+    assert "true_false" in types
+    assert "fill_blank" in types
+
+    paper_meta = data.get("paper_meta") or {}
+    assert paper_meta.get("title")
+    assert paper_meta.get("duration_minutes") == 20
+    assert paper_meta.get("total_score", 0) > 0
+    assert isinstance(paper_meta.get("sections"), list)
+    assert paper_meta["sections"]
+
+
+def test_quiz_generate_scope_concepts_intersect_with_focus_and_drop_out_of_scope_questions(
+    client, db_session, seeded_session
+):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    keypoint_a = "kp-scope-a"
+    keypoint_b = "kp-scope-b"
+    db_session.add_all(
+        [
+            Keypoint(
+                id=keypoint_a,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="概念A",
+                mastery_level=0.2,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            Keypoint(
+                id=keypoint_b,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="概念B",
+                mastery_level=0.2,
+                attempt_count=0,
+                correct_count=0,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    def _mock_scope_quiz(*args, **kwargs):
+        section_id = kwargs.get("section_id", "single_choice_1")
+        return [
+            {
+                "question_id": f"{section_id}-1",
+                "type": "single_choice",
+                "question": "范围内题目",
+                "options": ["A", "B", "C", "D"],
+                "answer_index": 0,
+                "answer": 0,
+                "explanation": "解析",
+                "concepts": ["概念A"],
+                "score": 1,
+                "section_id": section_id,
+            },
+            {
+                "question_id": f"{section_id}-2",
+                "type": "single_choice",
+                "question": "范围外题目",
+                "options": ["A", "B", "C", "D"],
+                "answer_index": 1,
+                "answer": 1,
+                "explanation": "解析",
+                "concepts": ["越界概念"],
+                "score": 1,
+                "section_id": section_id,
+            },
+        ]
+
+    with (
+        patch("app.routers.quiz.generate_quiz", side_effect=_mock_scope_quiz) as mock_generate,
+        patch("app.routers.quiz._resolve_keypoints_for_question", return_value=[keypoint_a]),
+    ):
+        resp = client.post(
+            "/api/quiz/generate",
+            json={
+                "kb_id": kb_id,
+                "doc_id": doc_id,
+                "user_id": user_id,
+                "count": 2,
+                "difficulty": "easy",
+                "scope_concepts": ["概念A", "概念B"],
+                "focus_concepts": ["概念A"],
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    questions = data.get("questions") or []
+    assert questions
+    assert all("概念A" in (item.get("concepts") or []) for item in questions)
+    assert all("越界概念" not in (item.get("concepts") or []) for item in questions)
+    assert questions[0].get("keypoint_ids") is None  # hidden binding should not leak to response
+    assert mock_generate.called
+    assert mock_generate.call_args.kwargs.get("focus_concepts") == ["概念A"]
+
+
+def test_quiz_generate_scope_concepts_empty_returns_409(client, seeded_session):
+    with patch(
+        "app.routers.quiz.generate_quiz",
+        side_effect=AssertionError("generate_quiz should not be called when scope is empty"),
+    ):
+        resp = client.post(
+            "/api/quiz/generate",
+            json={
+                "kb_id": seeded_session["kb_id"],
+                "user_id": seeded_session["user_id"],
+                "count": 2,
+                "scope_concepts": [],
+            },
+        )
+
+    assert resp.status_code == 409
+    assert "scope_concepts" in str(resp.json().get("detail", ""))
+
+
+def test_quiz_generate_scope_concepts_all_invalid_returns_409(client, seeded_session):
+    with patch(
+        "app.routers.quiz.generate_quiz",
+        side_effect=AssertionError("generate_quiz should not be called for invalid scope concepts"),
+    ):
+        resp = client.post(
+            "/api/quiz/generate",
+            json={
+                "kb_id": seeded_session["kb_id"],
+                "user_id": seeded_session["user_id"],
+                "count": 2,
+                "scope_concepts": ["不存在的概念"],
+            },
+        )
+
+    assert resp.status_code == 409
+    assert "scope_concepts" in str(resp.json().get("detail", ""))
+
+
+def test_quiz_generate_fill_blank_alignment_enforces_placeholder_count(client, seeded_session):
+    def _mock_fill_blank(*args, **kwargs):
+        section_id = kwargs.get("section_id", "fill_blank_1")
+        return [
+            {
+                "question_id": f"{section_id}-1",
+                "type": "fill_blank",
+                "question": "请写出该算法关键步骤。",
+                "answer_blanks": ["步骤一", "步骤二"],
+                "blank_count": 1,
+                "answer": ["步骤一", "步骤二"],
+                "explanation": "需要两个步骤。",
+                "concepts": ["算法步骤"],
+                "score": 2,
+                "section_id": section_id,
+            }
+        ]
+
+    with patch("app.routers.quiz.generate_quiz", side_effect=_mock_fill_blank):
+        resp = client.post(
+            "/api/quiz/generate",
+            json={
+                "doc_id": seeded_session["doc_id"],
+                "user_id": seeded_session["user_id"],
+                "count": 1,
+                "difficulty": "easy",
+                "paper_blueprint": {
+                    "title": "填空一致性测试",
+                    "duration_minutes": 20,
+                    "sections": [
+                        {
+                            "section_id": "fill_blank_1",
+                            "type": "fill_blank",
+                            "count": 1,
+                            "score_per_question": 2,
+                            "difficulty": "easy",
+                        }
+                    ],
+                },
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    question = (data.get("questions") or [])[0]
+    assert question["type"] == "fill_blank"
+    assert question["blank_count"] == len(question["answer_blanks"]) == 2
+    assert str(question["question"]).count("____") >= 2
+
+
+def test_quiz_submit_supports_question_id_answer_payload_and_section_scores(
+    client, db_session, seeded_session
+):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    quiz_id = "quiz-mixed-submit-1"
+    questions = [
+        {
+            "question_id": "q1",
+            "type": "single_choice",
+            "section_id": "single_choice_1",
+            "score": 2,
+            "question": "单选题",
+            "options": ["A", "B", "C", "D"],
+            "answer_index": 1,
+            "answer": 1,
+            "explanation": "单选解析",
+            "concepts": ["概念A"],
+        },
+        {
+            "question_id": "q2",
+            "type": "multiple_choice",
+            "section_id": "multiple_choice_1",
+            "score": 3,
+            "question": "多选题",
+            "options": ["A", "B", "C", "D"],
+            "answer_indexes": [0, 2],
+            "answer": [0, 2],
+            "explanation": "多选解析",
+            "concepts": ["概念B"],
+        },
+        {
+            "question_id": "q3",
+            "type": "true_false",
+            "section_id": "true_false_1",
+            "score": 1,
+            "question": "判断题",
+            "options": ["正确", "错误"],
+            "answer_bool": False,
+            "answer": False,
+            "explanation": "判断解析",
+            "concepts": ["概念C"],
+        },
+        {
+            "question_id": "q4",
+            "type": "fill_blank",
+            "section_id": "fill_blank_1",
+            "score": 4,
+            "question": "填空题",
+            "answer_blanks": ["LU"],
+            "answer": ["LU"],
+            "blank_count": 1,
+            "explanation": "填空解析",
+            "concepts": ["概念D"],
+        },
+    ]
+    db_session.add(
+        Quiz(
+            id=quiz_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            difficulty="adaptive",
+            question_type="mixed",
+            questions_json=json.dumps(questions, ensure_ascii=False),
+            paper_meta_json=json.dumps(
+                {
+                    "title": "自动组卷",
+                    "duration_minutes": 20,
+                    "total_score": 10,
+                    "sections": [],
+                },
+                ensure_ascii=False,
+            ),
+        )
+    )
+    db_session.commit()
+
+    submit = client.post(
+        "/api/quiz/submit",
+        json={
+            "quiz_id": quiz_id,
+            "user_id": user_id,
+            "answers": [
+                {"question_id": "q1", "answer": 1},
+                {"question_id": "q2", "answer": [0, 2]},
+                {"question_id": "q3", "answer": False},
+                {"question_id": "q4", "answer": ["LU"]},
+            ],
+        },
+    )
+    assert submit.status_code == 200
+    data = submit.json()
+    assert data["correct"] == 4
+    assert data["total"] == 4
+    assert data["earned_score"] == 10.0
+    assert data["total_score"] == 10.0
+    assert isinstance(data.get("section_scores"), list)
+    assert len(data["section_scores"]) == 4
+    assert isinstance(data.get("question_results"), list)
+    assert len(data["question_results"]) == 4
+    assert all(item["correct"] is True for item in data["question_results"])
+    assert data.get("mastery_guard")
+    assert data["mastery_guard"]["updated_count"] == 0
+    assert data["mastery_guard"]["skipped_locked"] == 0
+    assert data["mastery_guard"]["skipped_missing_binding"] == 4
+
+
 def test_quiz_submit_after_generate(client, seeded_session):
     """Generate quiz (mocked), then submit; response has score/results/explanations."""
     with patch("app.routers.quiz.generate_quiz", side_effect=_mock_generate_quiz):
@@ -334,6 +747,81 @@ def test_quiz_submit_after_generate(client, seeded_session):
         group["concept"] == "概念A" and 1 in group["question_indices"]
         for group in sub["wrong_questions_by_concept"]
     )
+
+
+def test_quiz_submit_mastery_guard_counts_updated_and_missing_binding(
+    client, db_session, seeded_session
+):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    keypoint_id = "kp-quiz-guard-1"
+    quiz_id = "quiz-guard-1"
+
+    db_session.add(
+        Keypoint(
+            id=keypoint_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            text="守卫测试概念",
+            mastery_level=0.0,
+            attempt_count=0,
+            correct_count=0,
+        )
+    )
+    db_session.add(
+        Quiz(
+            id=quiz_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            difficulty="easy",
+            question_type="mcq",
+            questions_json=json.dumps(
+                [
+                    {
+                        "question_id": "q-1",
+                        "question": "q1",
+                        "options": ["A", "B", "C", "D"],
+                        "answer_index": 0,
+                        "explanation": "e1",
+                        "concepts": ["守卫测试概念"],
+                        "keypoint_ids": [keypoint_id],
+                        "primary_keypoint_id": keypoint_id,
+                    },
+                    {
+                        "question_id": "q-2",
+                        "question": "q2",
+                        "options": ["A", "B", "C", "D"],
+                        "answer_index": 1,
+                        "explanation": "e2",
+                        "concepts": ["未绑定概念"],
+                    },
+                ]
+            ),
+        )
+    )
+    db_session.commit()
+
+    submit = client.post(
+        "/api/quiz/submit",
+        json={
+            "quiz_id": quiz_id,
+            "user_id": user_id,
+            "answers": [
+                {"question_id": "q-1", "answer": 0},
+                {"question_id": "q-2", "answer": 1},
+            ],
+        },
+    )
+
+    assert submit.status_code == 200
+    data = submit.json()
+    guard = data.get("mastery_guard") or {}
+    assert guard.get("updated_count") == 1
+    assert guard.get("skipped_locked") == 0
+    assert guard.get("skipped_missing_binding") == 1
 
 
 def test_quiz_submit_mastery_updates_track_final_level(client, db_session, seeded_session):
@@ -620,6 +1108,10 @@ def test_quiz_submit_locked_primary_keypoint_is_skipped(
     assert resp.status_code == 200
     data = resp.json()
     assert data["mastery_updates"] == []
+    assert data.get("mastery_guard")
+    assert data["mastery_guard"]["updated_count"] == 0
+    assert data["mastery_guard"]["skipped_locked"] == 1
+    assert data["mastery_guard"]["skipped_missing_binding"] == 0
 
     db_session.expire_all()
     locked = db_session.query(Keypoint).filter(Keypoint.id == locked_id).first()

@@ -153,6 +153,88 @@
               </select>
             </div>
 
+            <div class="space-y-3 rounded-xl border border-border bg-accent/20 p-3">
+              <div class="flex items-center justify-between gap-2">
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">组卷模式</label>
+                <button
+                  type="button"
+                  class="px-2 py-1 rounded-md border border-input text-xs font-semibold transition-colors"
+                  :class="usePaperBlueprint ? 'bg-primary/10 text-primary border-primary/30' : 'bg-background text-muted-foreground'"
+                  @click="usePaperBlueprint = !usePaperBlueprint"
+                >
+                  {{ usePaperBlueprint ? '蓝图组卷' : '基础模式' }}
+                </button>
+              </div>
+              <div v-if="usePaperBlueprint" class="space-y-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div class="space-y-1">
+                    <label class="text-[11px] text-muted-foreground">试卷标题</label>
+                    <input
+                      v-model="paperTitle"
+                      type="text"
+                      maxlength="64"
+                      class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
+                    />
+                  </div>
+                  <div class="space-y-1">
+                    <label class="text-[11px] text-muted-foreground">时长（分钟）</label>
+                    <input
+                      v-model.number="paperDurationMinutes"
+                      type="number"
+                      min="5"
+                      max="240"
+                      class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
+                    />
+                  </div>
+                </div>
+                <div class="space-y-2">
+                  <p class="text-[11px] text-muted-foreground">题型蓝图（数量/分值/难度）</p>
+                  <div class="space-y-2">
+                    <div
+                      v-for="section in paperSections"
+                      :key="section.type"
+                      class="grid grid-cols-12 gap-2 items-center"
+                    >
+                      <p class="col-span-12 sm:col-span-3 text-xs font-semibold">
+                        {{ questionTypeLabel(section.type) }}
+                      </p>
+                      <input
+                        v-model.number="section.count"
+                        type="number"
+                        min="0"
+                        max="20"
+                        class="col-span-4 sm:col-span-2 bg-background border border-input rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-primary text-sm"
+                        :aria-label="`${questionTypeLabel(section.type)} 数量`"
+                      />
+                      <input
+                        v-model.number="section.score_per_question"
+                        type="number"
+                        min="0.5"
+                        max="20"
+                        step="0.5"
+                        class="col-span-4 sm:col-span-2 bg-background border border-input rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-primary text-sm"
+                        :aria-label="`${questionTypeLabel(section.type)} 分值`"
+                      />
+                      <select
+                        v-model="section.difficulty"
+                        class="col-span-4 sm:col-span-5 bg-background border border-input rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-primary text-sm"
+                        :aria-label="`${questionTypeLabel(section.type)} 难度`"
+                      >
+                        <option value="">跟随全局</option>
+                        <option value="adaptive">自适应</option>
+                        <option value="easy">简单</option>
+                        <option value="medium">中等</option>
+                        <option value="hard">困难</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                <p class="text-[11px] text-muted-foreground">
+                  当前蓝图总题数：{{ paperSectionTotalCount }}（默认建议不超过 20）
+                </p>
+              </div>
+            </div>
+
             <Button
               class="w-full"
               size="lg"
@@ -189,6 +271,27 @@
           <p class="text-sm font-medium">
             {{ quizResult.correct }} / {{ quizResult.total }} 正确
           </p>
+          <p v-if="Number.isFinite(Number(quizResult.earned_score))" class="text-xs text-muted-foreground">
+            试卷得分：{{ Number(quizResult.earned_score).toFixed(1) }} / {{ Number(quizResult.total_score || 0).toFixed(1) }}
+          </p>
+          <div
+            v-if="Array.isArray(quizResult.section_scores) && quizResult.section_scores.length"
+            class="rounded-lg border border-border bg-background p-3 text-left space-y-2"
+          >
+            <p class="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">分节得分</p>
+            <div class="grid grid-cols-1 gap-1 text-xs">
+              <div
+                v-for="sectionScore in quizResult.section_scores"
+                :key="sectionScore.section_id"
+                class="flex items-center justify-between"
+              >
+                <span class="text-muted-foreground truncate">{{ sectionScore.section_id }}</span>
+                <span class="font-semibold">
+                  {{ Number(sectionScore.earned || 0).toFixed(1) }} / {{ Number(sectionScore.total || 0).toFixed(1) }}
+                </span>
+              </div>
+            </div>
+          </div>
           <div v-if="hasProfileDelta" class="space-y-2 text-left">
             <p class="text-xs font-bold uppercase tracking-widest text-primary">能力变化</p>
             <div class="grid grid-cols-2 gap-3 text-xs font-semibold">
@@ -241,37 +344,111 @@
               </div>
               <div class="space-y-4 flex-1">
                 <div class="quiz-question-markdown markdown-content" v-html="renderMarkdown(q.question)"></div>
-                
-                <div class="grid grid-cols-1 gap-2">
-                  <label 
-                    v-for="(opt, optIdx) in q.options" 
+
+                <div class="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                  <span class="px-2 py-0.5 rounded-full border border-border bg-accent/40">
+                    {{ questionTypeLabel(resolveQuestionType(q)) }}
+                  </span>
+                  <span class="px-2 py-0.5 rounded-full border border-border bg-accent/40">
+                    {{ Number(questionScore(q)).toFixed(1) }} 分
+                  </span>
+                  <span v-if="q.section_id" class="truncate">Section: {{ q.section_id }}</span>
+                </div>
+
+                <div
+                  v-if="resolveQuestionType(q) === 'single_choice' || resolveQuestionType(q) === 'multiple_choice'"
+                  class="grid grid-cols-1 gap-2"
+                >
+                  <label
+                    v-for="(opt, optIdx) in normalizedQuestionOptions(q)"
                     :key="optIdx"
                     class="flex items-start sm:items-center gap-3 p-3 rounded-lg border border-border cursor-pointer transition-all hover:bg-accent/50"
-                    :class="{ 
-                      'bg-primary/10 border-primary/30': quizAnswers[idx] === optIdx && !quizResult,
-                      'bg-green-500/10 border-green-500/30': quizResult && q.answer_index === optIdx,
-                      'bg-destructive/10 border-destructive/30': quizResult && quizAnswers[idx] === optIdx && q.answer_index !== optIdx,
-                      'opacity-50 grayscale-[0.5]': quizResult && quizAnswers[idx] !== optIdx && q.answer_index !== optIdx
-                    }"
+                    :class="choiceOptionClass(q, idx, optIdx)"
                   >
                     <input
+                      v-if="resolveQuestionType(q) === 'single_choice'"
                       type="radio"
                       :name="`q-${idx}`"
                       :value="optIdx"
-                      v-model.number="quizAnswers[idx]"
+                      :checked="quizAnswers[idx] === optIdx"
                       class="hidden"
                       :disabled="!!quizResult"
+                      @change="setSingleChoiceAnswer(idx, optIdx)"
                     />
-                    <div class="w-5 h-5 rounded-full border-2 border-primary flex items-center justify-center flex-shrink-0">
-                      <div v-if="quizAnswers[idx] === optIdx" class="w-2.5 h-2.5 bg-primary rounded-full"></div>
+                    <input
+                      v-else
+                      type="checkbox"
+                      :name="`q-${idx}`"
+                      :value="optIdx"
+                      :checked="isMultipleOptionChecked(idx, optIdx)"
+                      class="hidden"
+                      :disabled="!!quizResult"
+                      @change="toggleMultipleOption(idx, optIdx)"
+                    />
+                    <div
+                      class="w-5 h-5 border-2 border-primary flex items-center justify-center flex-shrink-0"
+                      :class="resolveQuestionType(q) === 'multiple_choice' ? 'rounded-md' : 'rounded-full'"
+                    >
+                      <div
+                        v-if="isChoiceOptionSelected(q, idx, optIdx)"
+                        class="bg-primary"
+                        :class="resolveQuestionType(q) === 'multiple_choice' ? 'w-2.5 h-2.5 rounded-sm' : 'w-2.5 h-2.5 rounded-full'"
+                      ></div>
                     </div>
                     <span
                       class="quiz-option-markdown min-w-0 flex-1"
                       v-html="renderMarkdownInline(opt)"
                     ></span>
-                    <CheckCircle2 v-if="quizResult && q.answer_index === optIdx" class="w-5 h-5 text-green-500 ml-auto" />
-                    <XCircle v-if="quizResult && quizAnswers[idx] === optIdx && q.answer_index !== optIdx" class="w-5 h-5 text-destructive ml-auto" />
+                    <CheckCircle2 v-if="quizResult && isChoiceOptionCorrect(q, optIdx)" class="w-5 h-5 text-green-500 ml-auto" />
+                    <XCircle v-if="quizResult && isChoiceOptionWrongSelection(q, idx, optIdx)" class="w-5 h-5 text-destructive ml-auto" />
                   </label>
+                </div>
+
+                <div v-else-if="resolveQuestionType(q) === 'true_false'" class="grid grid-cols-1 gap-2">
+                  <label
+                    v-for="(opt, optIdx) in normalizedQuestionOptions(q)"
+                    :key="optIdx"
+                    class="flex items-center gap-3 p-3 rounded-lg border border-border cursor-pointer transition-all hover:bg-accent/50"
+                    :class="trueFalseOptionClass(q, idx, optIdx)"
+                  >
+                    <input
+                      type="radio"
+                      :name="`q-${idx}`"
+                      :checked="quizAnswers[idx] === (optIdx === 0)"
+                      class="hidden"
+                      :disabled="!!quizResult"
+                      @change="setTrueFalseAnswer(idx, optIdx === 0)"
+                    />
+                    <div class="w-5 h-5 rounded-full border-2 border-primary flex items-center justify-center flex-shrink-0">
+                      <div v-if="quizAnswers[idx] === (optIdx === 0)" class="w-2.5 h-2.5 bg-primary rounded-full"></div>
+                    </div>
+                    <span class="quiz-option-markdown min-w-0 flex-1" v-html="renderMarkdownInline(opt)"></span>
+                    <CheckCircle2 v-if="quizResult && isTrueFalseOptionCorrect(q, optIdx)" class="w-5 h-5 text-green-500 ml-auto" />
+                    <XCircle v-if="quizResult && isTrueFalseOptionWrongSelection(q, idx, optIdx)" class="w-5 h-5 text-destructive ml-auto" />
+                  </label>
+                </div>
+
+                <div v-else class="space-y-3">
+                  <div
+                    v-for="blankIdx in blankCountForQuestion(q)"
+                    :key="blankIdx"
+                    class="space-y-1"
+                  >
+                    <label class="text-xs text-muted-foreground">填空 {{ blankIdx }}</label>
+                    <input
+                      type="text"
+                      :value="fillBlankValue(idx, blankIdx - 1)"
+                      class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
+                      :disabled="!!quizResult"
+                      @input="setFillBlankAnswer(idx, blankIdx - 1, $event.target?.value || '')"
+                    />
+                  </div>
+                  <p
+                    v-if="quizResult"
+                    class="text-xs text-muted-foreground"
+                  >
+                    参考答案：{{ formatFillBlankAnswers(q) }}
+                  </p>
                 </div>
 
                 <div v-if="quizResult" class="mt-4 p-4 bg-accent/30 rounded-lg space-y-2">
@@ -300,7 +477,7 @@
               class="w-full sm:w-auto px-6 sm:px-12 text-base sm:text-lg font-black shadow-lg hover:scale-105"
               @click="submitQuiz"
               :loading="busy.submit"
-              :disabled="busy.submit || !!quizResult || Object.keys(quizAnswers).length < quiz.questions.length"
+              :disabled="busy.submit || !!quizResult || !allQuestionsAnswered"
             >
               {{ busy.submit ? '正在批改…' : '提交全部答案' }}
             </Button>
@@ -429,6 +606,10 @@ const quizResult = ref(null)
 const quizCount = ref(5)
 const quizDifficulty = ref('medium')
 const autoAdapt = ref(true)
+const usePaperBlueprint = ref(true)
+const paperTitle = ref('自动组卷')
+const paperDurationMinutes = ref(20)
+const paperSections = ref([])
 const quizFocusConcepts = ref([])
 const quizFocusSearch = ref('')
 const quizFocusCandidate = ref('')
@@ -439,6 +620,18 @@ const busy = ref({
   docs: false,
   focusKeypoints: false,
 })
+const QUESTION_TYPE_LABELS = {
+  single_choice: '单选题',
+  multiple_choice: '多选题',
+  true_false: '判断题',
+  fill_blank: '填空题',
+}
+const DEFAULT_BLUEPRINT_RATIOS = {
+  single_choice: 0.5,
+  multiple_choice: 0.2,
+  true_false: 0.15,
+  fill_blank: 0.15,
+}
 
 const profileDelta = computed(() => quizResult.value?.profile_delta || null)
 const hasProfileDelta = computed(() => !!profileDelta.value)
@@ -512,6 +705,17 @@ const quizFocusSelectPlaceholder = computed(() => {
   if (filteredQuizFocusOptions.value.length) return '请选择知识点'
   return selectedDocId.value ? '该文档暂无可选聚合知识点' : '暂无可选聚合知识点'
 })
+const paperSectionTotalCount = computed(() => {
+  return (paperSections.value || []).reduce((sum, section) => {
+    const count = Number(section?.count || 0)
+    return sum + (Number.isFinite(count) ? Math.max(0, count) : 0)
+  }, 0)
+})
+const allQuestionsAnswered = computed(() => {
+  const questions = Array.isArray(quiz.value?.questions) ? quiz.value.questions : []
+  if (!questions.length) return false
+  return questions.every((question, index) => isQuestionAnswered(question, quizAnswers.value[index]))
+})
 const OPTION_LABELS = ['A', 'B', 'C', 'D']
 const effectiveQuizSettings = computed(() => settingsStore.effectiveSettings?.quiz || {})
 
@@ -527,6 +731,227 @@ function applyQuizDefaultsFromSettings() {
     quizDifficulty.value = quizDefaults.difficulty_default
   }
 }
+
+function splitCounts(total, ratios) {
+  const safeTotal = Math.max(0, Number(total) || 0)
+  const keys = Object.keys(ratios || {})
+  const counts = {}
+  let assigned = 0
+  for (const key of keys) {
+    const value = Math.floor(safeTotal * Number(ratios[key] || 0))
+    counts[key] = Math.max(0, value)
+    assigned += counts[key]
+  }
+  let remainder = safeTotal - assigned
+  const rankedKeys = [...keys].sort((a, b) => Number(ratios[b] || 0) - Number(ratios[a] || 0))
+  for (const key of rankedKeys) {
+    if (remainder <= 0) break
+    counts[key] += 1
+    remainder -= 1
+  }
+  return counts
+}
+
+function createDefaultPaperSections(total, mode = 'adaptive') {
+  const counts = splitCounts(total, DEFAULT_BLUEPRINT_RATIOS)
+  const sections = [
+    { section_id: 'single_choice_1', type: 'single_choice', count: counts.single_choice || 0, score_per_question: 1, difficulty: mode },
+    { section_id: 'multiple_choice_1', type: 'multiple_choice', count: counts.multiple_choice || 0, score_per_question: 1, difficulty: mode },
+    { section_id: 'true_false_1', type: 'true_false', count: counts.true_false || 0, score_per_question: 1, difficulty: mode },
+    { section_id: 'fill_blank_1', type: 'fill_blank', count: counts.fill_blank || 0, score_per_question: 1, difficulty: mode },
+  ]
+  if (!sections.some((item) => item.count > 0)) {
+    sections[0].count = Math.max(1, Number(total) || 1)
+  }
+  return sections
+}
+
+function normalizeQuestionType(type) {
+  const text = String(type || '').trim()
+  if (text in QUESTION_TYPE_LABELS) return text
+  return 'single_choice'
+}
+
+function questionTypeLabel(type) {
+  return QUESTION_TYPE_LABELS[normalizeQuestionType(type)] || '单选题'
+}
+
+function resolveQuestionType(question) {
+  return normalizeQuestionType(question?.type || (question?.answer_blanks ? 'fill_blank' : 'single_choice'))
+}
+
+function resolveQuestionId(question, index) {
+  const raw = String(question?.question_id || '').trim()
+  if (raw) return raw
+  return `q-${index + 1}`
+}
+
+function normalizedQuestionOptions(question) {
+  const type = resolveQuestionType(question)
+  if (type === 'true_false') {
+    const opts = Array.isArray(question?.options) ? question.options.slice(0, 2) : []
+    if (opts.length === 2 && String(opts[0] || '').trim() && String(opts[1] || '').trim()) {
+      return opts
+    }
+    return ['正确', '错误']
+  }
+  const options = Array.isArray(question?.options) ? question.options : []
+  return options
+}
+
+function questionScore(question) {
+  const score = Number(question?.score ?? 1)
+  if (!Number.isFinite(score) || score <= 0) return 1
+  return score
+}
+
+function blankCountForQuestion(question) {
+  const explicit = Number(question?.blank_count)
+  if (Number.isFinite(explicit) && explicit > 0) return Math.min(6, Math.max(1, Math.floor(explicit)))
+  const answers = Array.isArray(question?.answer_blanks) ? question.answer_blanks : []
+  if (answers.length > 0) return Math.min(6, answers.length)
+  return 1
+}
+
+function fillBlankValue(questionIndex, blankIndex) {
+  const raw = quizAnswers.value?.[questionIndex]
+  if (Array.isArray(raw)) return String(raw[blankIndex] ?? '')
+  if (blankIndex === 0) return String(raw ?? '')
+  return ''
+}
+
+function setSingleChoiceAnswer(questionIndex, optionIndex) {
+  quizAnswers.value = { ...quizAnswers.value, [questionIndex]: optionIndex }
+}
+
+function isMultipleOptionChecked(questionIndex, optionIndex) {
+  const current = quizAnswers.value?.[questionIndex]
+  return Array.isArray(current) && current.includes(optionIndex)
+}
+
+function toggleMultipleOption(questionIndex, optionIndex) {
+  const current = Array.isArray(quizAnswers.value?.[questionIndex]) ? [...quizAnswers.value[questionIndex]] : []
+  const exists = current.includes(optionIndex)
+  const next = exists ? current.filter((item) => item !== optionIndex) : [...current, optionIndex]
+  quizAnswers.value = { ...quizAnswers.value, [questionIndex]: next.sort((a, b) => a - b) }
+}
+
+function setTrueFalseAnswer(questionIndex, value) {
+  quizAnswers.value = { ...quizAnswers.value, [questionIndex]: Boolean(value) }
+}
+
+function setFillBlankAnswer(questionIndex, blankIndex, value) {
+  const current = Array.isArray(quizAnswers.value?.[questionIndex])
+    ? [...quizAnswers.value[questionIndex]]
+    : [String(quizAnswers.value?.[questionIndex] ?? '')]
+  while (current.length <= blankIndex) current.push('')
+  current[blankIndex] = String(value ?? '')
+  quizAnswers.value = { ...quizAnswers.value, [questionIndex]: current }
+}
+
+function normalizeAnswerForSubmit(question, answer) {
+  const type = resolveQuestionType(question)
+  if (type === 'multiple_choice') {
+    if (!Array.isArray(answer)) return []
+    return answer.filter((item) => Number.isInteger(item)).map((item) => Number(item)).sort((a, b) => a - b)
+  }
+  if (type === 'true_false') {
+    return Boolean(answer)
+  }
+  if (type === 'fill_blank') {
+    const expected = blankCountForQuestion(question)
+    if (Array.isArray(answer)) {
+      return Array.from({ length: expected }, (_, idx) => String(answer[idx] ?? '').trim())
+    }
+    const text = String(answer ?? '').trim()
+    return expected <= 1 ? (text ? [text] : ['']) : [text]
+  }
+  if (Number.isInteger(answer)) return Number(answer)
+  return null
+}
+
+function isQuestionAnswered(question, answer) {
+  const type = resolveQuestionType(question)
+  if (type === 'multiple_choice') return Array.isArray(answer) && answer.length > 0
+  if (type === 'true_false') return typeof answer === 'boolean'
+  if (type === 'fill_blank') {
+    const expected = blankCountForQuestion(question)
+    if (Array.isArray(answer)) {
+      if (answer.length < expected) return false
+      return answer.slice(0, expected).every((item) => String(item ?? '').trim())
+    }
+    return expected <= 1 && Boolean(String(answer ?? '').trim())
+  }
+  return Number.isInteger(answer)
+}
+
+function correctOptionIndexes(question) {
+  const type = resolveQuestionType(question)
+  if (type === 'multiple_choice') {
+    const values = Array.isArray(question?.answer_indexes) ? question.answer_indexes : (Array.isArray(question?.answer) ? question.answer : [])
+    return values.filter((item) => Number.isInteger(item)).map((item) => Number(item))
+  }
+  if (type === 'true_false') {
+    const answerBool = typeof question?.answer_bool === 'boolean'
+      ? question.answer_bool
+      : Boolean(question?.answer)
+    return [answerBool ? 0 : 1]
+  }
+  const answerIndex = Number.isInteger(question?.answer_index) ? question.answer_index : null
+  return answerIndex === null ? [] : [Number(answerIndex)]
+}
+
+function isChoiceOptionSelected(question, questionIndex, optionIndex) {
+  const type = resolveQuestionType(question)
+  if (type === 'multiple_choice') return isMultipleOptionChecked(questionIndex, optionIndex)
+  return quizAnswers.value?.[questionIndex] === optionIndex
+}
+
+function isChoiceOptionCorrect(question, optionIndex) {
+  return correctOptionIndexes(question).includes(optionIndex)
+}
+
+function isChoiceOptionWrongSelection(question, questionIndex, optionIndex) {
+  return isChoiceOptionSelected(question, questionIndex, optionIndex) && !isChoiceOptionCorrect(question, optionIndex)
+}
+
+function isTrueFalseOptionCorrect(question, optionIndex) {
+  return correctOptionIndexes(question).includes(optionIndex)
+}
+
+function isTrueFalseOptionWrongSelection(question, questionIndex, optionIndex) {
+  return quizAnswers.value?.[questionIndex] === (optionIndex === 0) && !isTrueFalseOptionCorrect(question, optionIndex)
+}
+
+function choiceOptionClass(question, questionIndex, optionIndex) {
+  const selected = isChoiceOptionSelected(question, questionIndex, optionIndex)
+  const correct = isChoiceOptionCorrect(question, optionIndex)
+  if (!quizResult.value) {
+    return selected ? 'bg-primary/10 border-primary/30' : ''
+  }
+  if (correct) return 'bg-green-500/10 border-green-500/30'
+  if (selected && !correct) return 'bg-destructive/10 border-destructive/30'
+  return 'opacity-50 grayscale-[0.5]'
+}
+
+function trueFalseOptionClass(question, questionIndex, optionIndex) {
+  const selected = quizAnswers.value?.[questionIndex] === (optionIndex === 0)
+  const correct = isTrueFalseOptionCorrect(question, optionIndex)
+  if (!quizResult.value) {
+    return selected ? 'bg-primary/10 border-primary/30' : ''
+  }
+  if (correct) return 'bg-green-500/10 border-green-500/30'
+  if (selected && !correct) return 'bg-destructive/10 border-destructive/30'
+  return 'opacity-50 grayscale-[0.5]'
+}
+
+function formatFillBlankAnswers(question) {
+  const answers = Array.isArray(question?.answer_blanks) ? question.answer_blanks : (Array.isArray(question?.answer) ? question.answer : [])
+  if (!answers.length) return '暂无'
+  return answers.map((item) => String(item ?? '').trim()).filter(Boolean).join(' / ')
+}
+
+paperSections.value = createDefaultPaperSections(quizCount.value, autoAdapt.value ? 'adaptive' : quizDifficulty.value)
 
 async function loadQuizViewSettings(force = false) {
   try {
@@ -593,6 +1018,25 @@ function normalizeQuizFocusConcepts(values = []) {
     if (out.length >= 8) break
   }
   return out
+}
+
+function normalizeScopeConcepts(values = []) {
+  const seen = new Set()
+  const out = []
+  for (const raw of values) {
+    const text = String(raw ?? '').trim()
+    if (!text) continue
+    const key = text.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(text)
+  }
+  return out
+}
+
+function collectScopeConceptsForGenerate() {
+  const options = Array.isArray(scopedQuizFocusOptions.value) ? scopedQuizFocusOptions.value : []
+  return normalizeScopeConcepts(options.map((item) => item?.text))
 }
 
 function addQuizFocusConcept(concept) {
@@ -771,6 +1215,7 @@ async function generateQuiz(options = {}) {
     if (selectedDocId.value) {
       payload.doc_id = selectedDocId.value
     }
+    payload.scope_concepts = collectScopeConceptsForGenerate()
     const explicitFocusConcepts = normalizeQuizFocusConcepts(options.focusConcepts || quizFocusConcepts.value)
     if (explicitFocusConcepts.length) {
       payload.focus_concepts = explicitFocusConcepts
@@ -778,8 +1223,45 @@ async function generateQuiz(options = {}) {
     if (!autoAdapt.value) {
       payload.difficulty = quizDifficulty.value
     }
+    if (usePaperBlueprint.value) {
+      const sections = (paperSections.value || [])
+        .map((section, sectionIndex) => {
+          const type = normalizeQuestionType(section?.type)
+          const count = Math.max(0, Math.min(20, Number(section?.count || 0)))
+          if (!count) return null
+          const score = Number(section?.score_per_question || 1)
+          const difficulty = String(section?.difficulty || '').trim()
+          return {
+            section_id: String(section?.section_id || `${type}_${sectionIndex + 1}`),
+            type,
+            count,
+            score_per_question: Number.isFinite(score) && score > 0 ? score : 1,
+            difficulty: difficulty || (autoAdapt.value ? 'adaptive' : quizDifficulty.value),
+          }
+        })
+        .filter(Boolean)
+      if (sections.length) {
+        payload.paper_blueprint = {
+          title: String(paperTitle.value || '自动组卷').trim() || '自动组卷',
+          duration_minutes: Math.max(5, Math.min(240, Number(paperDurationMinutes.value) || 20)),
+          sections,
+        }
+        payload.count = Math.max(1, Math.min(20, Number(paperSectionTotalCount.value || quizCount.value) || 1))
+      }
+    }
     const res = await apiPost('/api/quiz/generate', payload)
     quiz.value = res
+    if (res?.paper_meta?.sections?.length) {
+      paperSections.value = res.paper_meta.sections.map((section) => ({
+        section_id: section.section_id,
+        type: normalizeQuestionType(section.type),
+        count: Number(section.generated_count || section.requested_count || 0),
+        score_per_question: Number(section.score_per_question || 1),
+        difficulty: String(section.difficulty || ''),
+      }))
+      paperTitle.value = String(res.paper_meta.title || paperTitle.value || '自动组卷')
+      paperDurationMinutes.value = Math.max(5, Math.min(240, Number(res.paper_meta.duration_minutes || 20)))
+    }
     showToast(`已生成 ${res.questions?.length || 0} 道题目`, 'success')
   } catch {
     // error toast handled globally
@@ -792,7 +1274,11 @@ async function submitQuiz() {
   if (!quiz.value || quizResult.value) return
   busy.value.submit = true
   try {
-    const answers = quiz.value.questions.map((_, idx) => quizAnswers.value[idx] ?? null)
+    const questions = Array.isArray(quiz.value?.questions) ? quiz.value.questions : []
+    const answers = questions.map((question, idx) => ({
+      question_id: resolveQuestionId(question, idx),
+      answer: normalizeAnswerForSubmit(question, quizAnswers.value[idx]),
+    }))
     const res = await apiPost('/api/quiz/submit', {
       quiz_id: quiz.value.quiz_id,
       answers,
@@ -834,22 +1320,45 @@ function formatQuizOptionLabel(optionIndex, options) {
 function buildWrongQuestionExplainPrompt(questionIndex) {
   const q = quiz.value?.questions?.[questionIndex]
   if (!q) return ''
-  const selectedIndex = Number.isInteger(quizAnswers.value?.[questionIndex])
-    ? quizAnswers.value[questionIndex]
-    : null
-  const answerIndex = Number.isInteger(q.answer_index) ? q.answer_index : null
-  const optionLines = Array.isArray(q.options)
-    ? q.options.map((opt, idx) => `${OPTION_LABELS[idx] || `选项${idx + 1}`}. ${String(opt ?? '').trim()}`).join('\n')
-    : ''
+  const type = resolveQuestionType(q)
+  const selectedAnswer = quizAnswers.value?.[questionIndex]
+  const options = normalizedQuestionOptions(q)
+  const optionLines = options
+    .map((opt, idx) => `${OPTION_LABELS[idx] || `选项${idx + 1}`}. ${String(opt ?? '').trim()}`)
+    .join('\n')
+  const expectedIndexes = correctOptionIndexes(q)
+  const expectedLabels = expectedIndexes.map((idx) => formatQuizOptionLabel(idx, options)).join('；')
+  let myAnswerLine = '未作答'
+  if (type === 'multiple_choice') {
+    const picked = Array.isArray(selectedAnswer) ? selectedAnswer : []
+    myAnswerLine = picked.length
+      ? picked.map((idx) => formatQuizOptionLabel(idx, options)).join('；')
+      : '未作答'
+  } else if (type === 'true_false') {
+    if (typeof selectedAnswer === 'boolean') {
+      myAnswerLine = selectedAnswer ? '正确' : '错误'
+    }
+  } else if (type === 'fill_blank') {
+    const lines = Array.isArray(selectedAnswer) ? selectedAnswer : [selectedAnswer]
+    myAnswerLine = lines.map((item) => String(item ?? '').trim()).filter(Boolean).join(' / ') || '未作答'
+  } else {
+    myAnswerLine = Number.isInteger(selectedAnswer)
+      ? formatQuizOptionLabel(selectedAnswer, options)
+      : '未作答'
+  }
+
+  const expectedAnswerText = type === 'fill_blank'
+    ? formatFillBlankAnswers(q)
+    : (expectedLabels || '未提供')
 
   return [
-    '请用讲解模式解析这道选择题，并重点解释我为什么会错、如何避免再次出错。',
+    '请用讲解模式解析这道题，并重点解释我为什么会错、如何避免再次出错。',
     '',
+    `题型：${questionTypeLabel(type)}`,
     `题干：${String(q.question || '').trim()}`,
-    '选项：',
-    optionLines,
-    `我的答案：${formatQuizOptionLabel(selectedIndex, q.options)}`,
-    `正确答案：${formatQuizOptionLabel(answerIndex, q.options)}`,
+    ...(type === 'fill_blank' ? [] : ['选项：', optionLines]),
+    `我的答案：${myAnswerLine}`,
+    `正确答案：${expectedAnswerText}`,
     '额外要求：请总结易错点，并给出 1-2 个自测变式问题。',
   ].join('\n')
 }
@@ -986,5 +1495,23 @@ watch(quizFocusSearch, () => {
 
 watch(quizFocusConcepts, () => {
   syncQuizFocusCandidateSelection()
+})
+
+watch(quizCount, (value) => {
+  const target = Math.max(1, Math.min(20, Number(value) || 1))
+  if (target !== value) {
+    quizCount.value = target
+    return
+  }
+  if (!usePaperBlueprint.value) return
+  paperSections.value = createDefaultPaperSections(target, autoAdapt.value ? 'adaptive' : quizDifficulty.value)
+})
+
+watch([autoAdapt, quizDifficulty], () => {
+  if (!usePaperBlueprint.value) return
+  paperSections.value = paperSections.value.map((section) => ({
+    ...section,
+    difficulty: section?.difficulty || (autoAdapt.value ? 'adaptive' : quizDifficulty.value),
+  }))
 })
 </script>

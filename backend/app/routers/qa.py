@@ -29,7 +29,7 @@ from app.services.keypoint_dedup import (
 from app.services.learning_path import (
     get_unlocked_keypoint_ids,
 )
-from app.services.mastery import record_study_interaction
+from app.services.mastery import record_study_interaction_guarded
 from app.services.qa import (
     NO_RESULTS_ANSWER,
     generate_qa_answer,
@@ -609,7 +609,12 @@ def _update_mastery_from_qa(
             )
             if matched_rep:
                 _, unlocked = _ensure_kb_guard()
-                if unlocked is not None and str(matched_rep.id) not in unlocked:
+                result, guard_reason = record_study_interaction_guarded(
+                    db,
+                    str(matched_rep.id),
+                    unlocked_ids=unlocked,
+                )
+                if guard_reason == "locked":
                     skipped_locked += 1
                     logger.info(
                         "QA mastery summary user_id=%s doc_id=%s kb_id=%s updated_count=%s skipped_locked=%s",
@@ -620,7 +625,6 @@ def _update_mastery_from_qa(
                         skipped_locked,
                     )
                     return
-                result = record_study_interaction(db, matched_rep.id)
                 if result:
                     updated_count += 1
                 logger.info(
@@ -665,7 +669,12 @@ def _update_mastery_from_qa(
                     kb_id=effective_kb_id,
                     member_to_rep=member_to_rep,
                 )
-                if unlocked is not None and target_id not in unlocked:
+                result, guard_reason = record_study_interaction_guarded(
+                    db,
+                    target_id,
+                    unlocked_ids=unlocked,
+                )
+                if guard_reason == "locked":
                     skipped_locked += 1
                     logger.info(
                         "QA mastery summary user_id=%s doc_id=%s kb_id=%s updated_count=%s skipped_locked=%s",
@@ -676,7 +685,11 @@ def _update_mastery_from_qa(
                         skipped_locked,
                     )
                     return
-            result = record_study_interaction(db, target_id)
+            else:
+                result, _ = record_study_interaction_guarded(
+                    db,
+                    target_id,
+                )
             if result:
                 updated_count += 1
             logger.info(
@@ -718,12 +731,16 @@ def _update_mastery_from_qa(
             target_id = str(kp_id)
             if kb_member_to_rep is not None:
                 target_id = kb_member_to_rep.get(target_id, target_id)
-            if unlocked_ids is not None and target_id not in unlocked_ids:
-                skipped_locked += 1
-                continue
             if target_id in updated_ids:
                 continue
-            result = record_study_interaction(db, target_id)
+            result, guard_reason = record_study_interaction_guarded(
+                db,
+                target_id,
+                unlocked_ids=unlocked_ids,
+            )
+            if guard_reason == "locked":
+                skipped_locked += 1
+                continue
             if result:
                 updated_ids.add(target_id)
                 updated_count += 1

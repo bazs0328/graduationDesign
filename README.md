@@ -147,11 +147,28 @@ python3 /app/tests/qa_regression.py \
 - LLM/Embedding 配置统一在 `backend/.env`
 
 ## API (Quiz)
-- **POST /api/quiz/generate**: Generates MCQ quiz. Requires at least one of:
+- **POST /api/quiz/generate**: Generates quiz paper. Requires at least one of:
   - `doc_id` — generate from document content (existing behavior).
   - `reference_questions` — generate questions in the same style/difficulty as the given text (paste or from reference exam).
   - `style_prompt` — generate questions matching a style/template description (e.g. exam-style wording).
-- Optional: `count`, `difficulty`, `user_id`. When `doc_id` is omitted, pass `reference_questions` and/or `style_prompt` for mimic-style generation. Submit with **POST /api/quiz/submit** as before.
+- Optional fields:
+  - `count`, `difficulty`, `user_id`, `focus_concepts`
+  - `paper_blueprint` (optional, blueprint-driven auto paper assembly):
+    - `title: string`
+    - `duration_minutes: int`
+    - `sections: [{ section_id, type, count, score_per_question, difficulty }]`
+    - `type` supports: `single_choice`, `multiple_choice`, `true_false`, `fill_blank`
+- If `paper_blueprint` is omitted, backend applies default mixed-type blueprint:
+  - single_choice 50%
+  - multiple_choice 20%
+  - true_false 15%
+  - fill_blank 15%
+- **POST /api/quiz/submit**:
+  - New answer format (recommended): `answers: [{ question_id, answer }]`
+  - Legacy format still supported for old MCQ records: `answers: [int|null]`
+  - Response includes both legacy fields and new scoring breakdown:
+    - `score/correct/total/results/explanations` (legacy)
+    - `earned_score/total_score/section_scores/question_results` (new)
 - **POST /api/quiz/parse-reference**: Accepts a PDF file (multipart), returns `{ "text": "..." }` (extracted plain text). Use the returned `text` as `reference_questions` in **POST /api/quiz/generate** for reference-exam style generation. Does not persist the file.
 
 ## Notes

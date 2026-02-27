@@ -94,6 +94,32 @@ def record_quiz_result(
     return old_level, keypoint.mastery_level
 
 
+def record_quiz_result_guarded(
+    db: Session,
+    keypoint_id: str | None,
+    is_correct: bool,
+    *,
+    unlocked_ids: set[str] | None = None,
+) -> tuple[Optional[tuple[float, float]], str | None]:
+    """
+    Guarded quiz mastery update.
+
+    Returns:
+    - (delta, None) when updated
+    - (None, "missing_binding") when keypoint is missing/invalid
+    - (None, "locked") when keypoint is locked and should be ignored
+    """
+    target_id = str(keypoint_id or "").strip()
+    if not target_id:
+        return None, "missing_binding"
+    if unlocked_ids is not None and target_id not in unlocked_ids:
+        return None, "locked"
+    delta = record_quiz_result(db, target_id, is_correct)
+    if not delta:
+        return None, "missing_binding"
+    return delta, None
+
+
 def record_study_interaction(
     db: Session,
     keypoint_id: str,
@@ -110,6 +136,31 @@ def record_study_interaction(
     keypoint.mastery_level = round(_ema(old_level, 1.0, ALPHA_STUDY), 4)
     db.flush()
     return old_level, keypoint.mastery_level
+
+
+def record_study_interaction_guarded(
+    db: Session,
+    keypoint_id: str | None,
+    *,
+    unlocked_ids: set[str] | None = None,
+) -> tuple[Optional[tuple[float, float]], str | None]:
+    """
+    Guarded study mastery update.
+
+    Returns:
+    - (delta, None) when updated
+    - (None, "missing_binding") when keypoint is missing/invalid
+    - (None, "locked") when keypoint is locked and should be ignored
+    """
+    target_id = str(keypoint_id or "").strip()
+    if not target_id:
+        return None, "missing_binding"
+    if unlocked_ids is not None and target_id not in unlocked_ids:
+        return None, "locked"
+    delta = record_study_interaction(db, target_id)
+    if not delta:
+        return None, "missing_binding"
+    return delta, None
 
 
 def mastery_priority(level: float) -> str:
