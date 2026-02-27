@@ -68,6 +68,11 @@ Backend settings are in `backend/.env`:
 - `QWEN_API_KEY=...` (Qwen is OpenAI-compatible; see `.env.example` for base_url)
 - `DASHSCOPE_EMBEDDING_MODEL=...` (DashScope SDK embedding using `QWEN_API_KEY`, e.g. `qwen3-vl-embedding`)
 - DeepSeek embedding is optional; if not provided, embeddings fall back to OpenAI when `OPENAI_API_KEY` is set.
+- `INDEX_TEXT_CLEANUP_ENABLED=true|false` (enable index cleanup before chunking)
+- `INDEX_TEXT_CLEANUP_MODE=conservative` (PDF-oriented cleanup mode)
+- `INDEX_TEXT_CLEANUP_NON_PDF_MODE=structure_preserving` (non-PDF cleanup mode; keeps markdown/code structure)
+- `NOISE_FILTER_LEVEL=balanced|conservative|aggressive|structure_preserving` (shared noise filter level for QA/Preview/Quiz)
+- `NOISE_DROP_LOW_QUALITY_HITS=true|false` (drop low-quality retrieval hits before building sources/context)
 - `OCR_ENABLED=true|false` (enable OCR fallback for scanned PDFs)
 - `OCR_ENGINE=rapidocr|tesseract|cloud` (primary OCR engine, `cloud` reserved for future)
 - `OCR_FALLBACK_ENGINES=rapidocr` (comma-separated OCR fallback chain, de-duplicated; default is no Tesseract fallback)
@@ -167,6 +172,10 @@ python3 /app/tests/qa_regression.py \
 - Uploaded files are stored per user in `backend/data/users/<user_id>/uploads`.
 - Parsed text is stored in `backend/data/users/<user_id>/text`.
 - Vector store persists in `backend/data/users/<user_id>/chroma`.
+- Runtime now uses text-only retrieval/source preview; image retrieval/preview endpoints are removed.
+- To purge historical image artifacts and old image metadata:
+  - `python3 backend/scripts/purge_image_data.py --dry-run`
+  - `python3 backend/scripts/purge_image_data.py --execute`
 - If you ran an older schema, remove `backend/data/app.db` to recreate tables.
 - New activity feed endpoint: `GET /api/activity?user_id=...`
 

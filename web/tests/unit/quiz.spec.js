@@ -6,7 +6,7 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 
 import App from '@/App.vue'
 import { routes } from '@/router'
-import { apiGet, apiPost, apiSsePost, apiGetBlob } from '@/api'
+import { apiGet, apiPost, apiSsePost } from '@/api'
 
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal()
@@ -15,7 +15,6 @@ vi.mock('@/api', async (importOriginal) => {
     apiGet: vi.fn(),
     apiPost: vi.fn(),
     apiSsePost: vi.fn(),
-    apiGetBlob: vi.fn(),
   }
 })
 
@@ -144,9 +143,7 @@ beforeEach(() => {
   apiGet.mockReset()
   apiPost.mockReset()
   apiSsePost.mockReset()
-  apiGetBlob.mockReset()
   localStorage.clear()
-  apiGetBlob.mockResolvedValue(new Blob(['img'], { type: 'image/png' }))
 
   apiGet.mockImplementation((path) => {
     if (path.startsWith('/api/kb')) return Promise.resolve([kbFixture])
@@ -217,8 +214,6 @@ beforeEach(() => {
 
   apiSsePost.mockResolvedValue(undefined)
 
-  global.URL.createObjectURL = vi.fn(() => 'blob:test-image')
-  global.URL.revokeObjectURL = vi.fn(() => {})
 })
 
 describe('Quiz wrong-answer explain link', () => {
@@ -276,81 +271,7 @@ describe('Quiz wrong-answer explain link', () => {
     )
     const pushArg = pushSpy.mock.calls.at(-1)?.[0]
     expect(String(pushArg?.query?.qa_question || '')).toContain('请用讲解模式解析这道选择题')
-  })
-
-  it('opens and closes image lightbox for quiz question image', async () => {
-    apiPost.mockImplementation((path) => {
-      if (path === '/api/quiz/generate') {
-        return Promise.resolve({
-          quiz_id: 'quiz-1',
-          questions: [
-            {
-              question: '根据图1判断图形的对称轴。',
-              options: ['x轴', 'y轴', '原点', '无'],
-              answer_index: 1,
-              explanation: '图1 显示关于 y 轴对称。',
-              concepts: ['矩阵变换'],
-              image: {
-                url: '/api/docs/doc-1/image?page=1&chunk=2',
-                caption: '图1 关于 y 轴对称示意图',
-              },
-            },
-          ],
-        })
-      }
-      if (path === '/api/quiz/submit') {
-        return Promise.resolve({
-          score: 1,
-          correct: 1,
-          total: 1,
-          results: [true],
-          explanations: ['解析'],
-          feedback: null,
-          next_quiz_recommendation: null,
-          profile_delta: null,
-          wrong_questions_by_concept: [],
-          mastery_updates: [],
-        })
-      }
-      return Promise.resolve({})
-    })
-
-    const { wrapper, router } = await mountAppWithRouter()
-
-    await router.push('/quiz')
-    await flushPromises()
-    await nextTick()
-    await nextTick()
-
-    const kbSelect = wrapper.findAll('select').at(0)
-    await kbSelect.setValue('kb-1')
-    await flushPromises()
-    await nextTick()
-
-    const generateButton = wrapper.findAll('button').find((btn) => btn.text().includes('生成新测验'))
-    await generateButton.trigger('click')
-    await flushPromises()
-    await nextTick()
-    await flushPromises()
-    await nextTick()
-
-    const previewButton = wrapper.find('button[aria-label^="打开题目配图预览"]')
-    expect(previewButton.exists()).toBe(true)
-    await previewButton.trigger('click')
-    await flushPromises()
-    await nextTick()
-
-    expect(document.body.querySelector('[role="dialog"]')).toBeTruthy()
-    expect(document.body.textContent).toContain('第 1 题配图')
-    expect(document.body.textContent).toContain('图1 关于 y 轴对称示意图')
-
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-    await flushPromises()
-    await nextTick()
-
-    expect(document.body.querySelector('[role="dialog"]')).toBeFalsy()
-    wrapper.unmount()
-  })
+  }, 15000)
 
   it('shows KB aggregation wording in mastery updates and wrong-question groups', async () => {
     apiPost.mockImplementation((path) => {

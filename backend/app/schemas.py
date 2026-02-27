@@ -168,11 +168,6 @@ class SourcePreviewResponse(BaseModel):
     source: Optional[str] = None
     snippet: str
     matched_by: str
-    modality: Optional[str] = None
-    block_id: Optional[str] = None
-    asset_path: Optional[str] = None
-    caption: Optional[str] = None
-    bbox: Optional[List[float]] = None
 
 
 class DocumentUpdateRequest(BaseModel):
@@ -234,10 +229,6 @@ class SourceSnippet(BaseModel):
     kb_id: Optional[str] = None
     page: Optional[int] = None
     chunk: Optional[int] = None
-    modality: Optional[str] = None
-    asset_path: Optional[str] = None
-    caption: Optional[str] = None
-    bbox: Optional[List[float]] = None
 
 
 class QAResponse(BaseModel):
@@ -268,7 +259,6 @@ class QuizQuestion(BaseModel):
     answer_index: int
     explanation: str
     concepts: List[str] = []
-    image: Optional[Dict[str, Any]] = None
 
 
 class QuizGenerateResponse(BaseModel):

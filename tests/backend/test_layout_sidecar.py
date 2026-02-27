@@ -1,6 +1,8 @@
 import json
 
-from app.services.layout_sidecar import build_text_preview_from_sidecar
+from app.services.layout_sidecar import (
+    build_text_preview_from_sidecar,
+)
 
 
 def _sample_sidecar() -> dict:

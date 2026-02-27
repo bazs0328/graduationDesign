@@ -595,77 +595,6 @@ def test_preview_doc_source_returns_traceable_snippet(client, db_session):
     assert "矩阵" in payload["snippet"]
 
 
-def test_preview_doc_source_uses_sidecar_summary_for_image_hits(client, db_session):
-    user_id = "doc_preview_user_img_1"
-    kb_id = "doc_preview_kb_img_1"
-    doc_id = "doc_preview_img_1"
-    doc = _seed_user_kbs_doc(
-        db_session,
-        user_id=user_id,
-        kb_id=kb_id,
-        doc_id=doc_id,
-    )
-
-    ensure_kb_dirs(user_id, kb_id)
-    sidecar_path = os.path.join(kb_base_dir(user_id, kb_id), "content_list", f"{doc_id}.layout.json")
-    with open(sidecar_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "version": 1,
-                "page_count": 1,
-                "pages": [
-                    {
-                        "page": 1,
-                        "ordered_blocks": [
-                            {"block_id": "p1:t1", "kind": "text", "text": "上文介绍了对称变换。"},
-                            {
-                                "block_id": "p1:i1",
-                                "kind": "image",
-                                "caption_text": "图1 对称示意",
-                                "nearby_text": "图像展示了 y 轴对称后的点位变化。",
-                            },
-                            {"block_id": "p1:t2", "kind": "text", "text": "下文继续讨论矩阵表示。"},
-                        ],
-                    }
-                ],
-                "chunk_manifest": [],
-            },
-            f,
-            ensure_ascii=False,
-        )
-
-    image_entries = [
-        {
-            "id": "img-1",
-            "content": "[图片块]\n邻近文字: 原始占位文本",
-            "metadata": {
-                "page": 1,
-                "source": doc.filename,
-                "doc_id": doc_id,
-                "kb_id": kb_id,
-                "modality": "image",
-                "block_id": "p1:i1",
-            },
-        }
-    ]
-    with (
-        patch("app.routers.documents.get_doc_vector_entries", return_value=[]),
-        patch("app.routers.documents.get_doc_image_vector_entries", return_value=image_entries),
-    ):
-        resp = client.get(
-            f"/api/docs/{doc_id}/preview",
-            params={"user_id": user_id, "page": 1},
-        )
-
-    assert resp.status_code == 200
-    payload = resp.json()
-    assert payload["matched_by"] == "image_sidecar"
-    assert payload["block_id"] == "p1:i1"
-    assert "图注: 图1 对称示意" in payload["snippet"]
-    assert "邻近正文" in payload["snippet"]
-    assert "[图片块]" not in payload["snippet"]
-
-
 def test_preview_doc_source_prefers_ocr_override_vector_text(client, db_session):
     user_id = "doc_preview_user_ocr_1"
     kb_id = "doc_preview_kb_ocr_1"
@@ -721,10 +650,7 @@ def test_preview_doc_source_prefers_ocr_override_vector_text(client, db_session)
             },
         }
     ]
-    with (
-        patch("app.routers.documents.get_doc_vector_entries", return_value=vector_entries),
-        patch("app.routers.documents.get_doc_image_vector_entries", return_value=[]),
-    ):
+    with patch("app.routers.documents.get_doc_vector_entries", return_value=vector_entries):
         resp = client.get(
             f"/api/docs/{doc_id}/preview",
             params={"user_id": user_id, "page": 1, "chunk": 1},
@@ -735,61 +661,6 @@ def test_preview_doc_source_prefers_ocr_override_vector_text(client, db_session)
     assert payload["matched_by"] == "ocr_override_text"
     assert "OCR 修复后的最终文本内容" in payload["snippet"]
     assert "sidecar 旧文本内容" not in payload["snippet"]
-
-
-def test_preview_doc_source_prefers_text_when_page_has_text_and_image(client, db_session):
-    user_id = "doc_preview_user_page_text_first"
-    kb_id = "doc_preview_kb_page_text_first"
-    doc_id = "doc_preview_page_text_first"
-    doc = _seed_user_kbs_doc(
-        db_session,
-        user_id=user_id,
-        kb_id=kb_id,
-        doc_id=doc_id,
-    )
-
-    text_entries = [
-        {
-            "id": "txt-1",
-            "content": "这是本页正文：矩阵定义与性质。",
-            "metadata": {
-                "page": 1,
-                "chunk": 5,
-                "source": doc.filename,
-                "doc_id": doc_id,
-                "kb_id": kb_id,
-                "modality": "text",
-            },
-        }
-    ]
-    image_entries = [
-        {
-            "id": "img-1",
-            "content": "[图片块]\n图注: 图1 对称示意",
-            "metadata": {
-                "page": 1,
-                "source": doc.filename,
-                "doc_id": doc_id,
-                "kb_id": kb_id,
-                "modality": "image",
-                "block_id": "p1:i1",
-            },
-        }
-    ]
-    with (
-        patch("app.routers.documents.get_doc_vector_entries", return_value=text_entries),
-        patch("app.routers.documents.get_doc_image_vector_entries", return_value=image_entries),
-    ):
-        resp = client.get(
-            f"/api/docs/{doc_id}/preview",
-            params={"user_id": user_id, "page": 1},
-        )
-
-    assert resp.status_code == 200
-    payload = resp.json()
-    assert payload["matched_by"] == "page"
-    assert payload["modality"] == "text"
-    assert "矩阵定义与性质" in payload["snippet"]
 
 
 def test_preview_doc_source_prefers_text_when_query_hits_text_on_same_page(client, db_session):
@@ -817,24 +688,7 @@ def test_preview_doc_source_prefers_text_when_query_hits_text_on_same_page(clien
             },
         }
     ]
-    image_entries = [
-        {
-            "id": "img-1",
-            "content": "[图片块]\n图注: 图1 对称示意",
-            "metadata": {
-                "page": 1,
-                "source": doc.filename,
-                "doc_id": doc_id,
-                "kb_id": kb_id,
-                "modality": "image",
-                "block_id": "p1:i1",
-            },
-        }
-    ]
-    with (
-        patch("app.routers.documents.get_doc_vector_entries", return_value=text_entries),
-        patch("app.routers.documents.get_doc_image_vector_entries", return_value=image_entries),
-    ):
+    with patch("app.routers.documents.get_doc_vector_entries", return_value=text_entries):
         resp = client.get(
             f"/api/docs/{doc_id}/preview",
             params={"user_id": user_id, "page": 1, "q": "矩阵"},
@@ -842,62 +696,16 @@ def test_preview_doc_source_prefers_text_when_query_hits_text_on_same_page(clien
 
     assert resp.status_code == 200
     payload = resp.json()
-    assert payload["modality"] == "text"
+    assert payload["matched_by"] in {"page", "query"}
     assert "矩阵" in payload["snippet"]
 
 
-def test_preview_doc_source_allows_image_when_query_misses_text_on_same_page(client, db_session):
-    user_id = "doc_preview_user_page_query_image"
-    kb_id = "doc_preview_kb_page_query_image"
-    doc_id = "doc_preview_page_query_image"
-    doc = _seed_user_kbs_doc(
-        db_session,
-        user_id=user_id,
-        kb_id=kb_id,
-        doc_id=doc_id,
+def test_doc_image_preview_route_is_removed(client):
+    resp = client.get(
+        "/api/docs/doc_image_removed/image",
+        params={"user_id": "doc_image_removed_user"},
     )
-
-    text_entries = [
-        {
-            "id": "txt-1",
-            "content": "本页正文讨论矩阵定义。",
-            "metadata": {
-                "page": 1,
-                "chunk": 6,
-                "source": doc.filename,
-                "doc_id": doc_id,
-                "kb_id": kb_id,
-                "modality": "text",
-            },
-        }
-    ]
-    image_entries = [
-        {
-            "id": "img-1",
-            "content": "[图片块]\n邻近文字: 图像展示了关于 y 轴对称的结果。",
-            "metadata": {
-                "page": 1,
-                "source": doc.filename,
-                "doc_id": doc_id,
-                "kb_id": kb_id,
-                "modality": "image",
-                "block_id": "p1:i1",
-            },
-        }
-    ]
-    with (
-        patch("app.routers.documents.get_doc_vector_entries", return_value=text_entries),
-        patch("app.routers.documents.get_doc_image_vector_entries", return_value=image_entries),
-    ):
-        resp = client.get(
-            f"/api/docs/{doc_id}/preview",
-            params={"user_id": user_id, "page": 1, "q": "对称"},
-        )
-
-    assert resp.status_code == 200
-    payload = resp.json()
-    assert payload["modality"] == "image"
-    assert "对称" in payload["snippet"]
+    assert resp.status_code == 404
 
 
 def test_upload_doc_accepts_docx_and_pptx(client):

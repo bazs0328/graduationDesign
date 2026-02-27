@@ -10,7 +10,6 @@ from app.core.kb_metadata import init_kb_metadata
 from app.core.kb_metadata import remove_file_hash
 from app.core.paths import ensure_kb_dirs, kb_base_dir, user_base_dir
 from app.core.vectorstore import delete_doc_vectors
-from app.core.image_vectorstore import delete_doc_image_vectors
 from app.core.users import ensure_user
 from app.db import get_db
 from app.models import (
@@ -155,7 +154,6 @@ def delete_kb(
 
     for doc in docs:
         delete_doc_vectors(resolved_user_id, doc.id)
-        delete_doc_image_vectors(resolved_user_id, doc.id)
         remove_doc_chunks(resolved_user_id, kb.id, doc.id)
         remove_file_hash(resolved_user_id, kb.id, doc.filename)
         if doc.text_path and os.path.exists(doc.text_path):

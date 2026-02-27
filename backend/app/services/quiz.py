@@ -11,9 +11,9 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.config import settings
 from app.core.llm import get_llm
-from app.core.image_vectorstore import query_image_documents
 from app.core.vectorstore import get_vectorstore
 from app.services.quiz_context import build_quiz_context_from_seeds
+from app.services.text_noise_guard import is_low_quality
 from app.utils.json_tools import safe_json_loads
 
 logger = logging.getLogger(__name__)
@@ -29,29 +29,6 @@ QUIZ_CONTEXT_MAX_K_KB = 24
 QUIZ_CONTEXT_DOCS_PER_QUESTION_DOC = 2
 QUIZ_CONTEXT_DOCS_PER_QUESTION_KB = 3
 QUIZ_CONTEXT_MAX_CHARS = 16000
-QUIZ_IMAGE_SCORE_THRESHOLD = 0.35
-QUIZ_IMAGE_GENERIC_SCORE_THRESHOLD = 0.65
-QUIZ_IMAGE_HINT_RE = re.compile(
-    r"(图中|下图|上图|如图|图示|见图|figure|fig\\.?|diagram|shown\\s+in\\s+the\\s+figure)",
-    re.IGNORECASE,
-)
-QUIZ_FIGURE_REF_RE = re.compile(
-    r"(?:图|fig(?:ure)?\.?)\s*[（(]?\s*([0-9]+|[一二三四五六七八九十]+)\s*[)）]?",
-    re.IGNORECASE,
-)
-_CN_NUM_TO_INT = {
-    "一": 1,
-    "二": 2,
-    "三": 3,
-    "四": 4,
-    "五": 5,
-    "六": 6,
-    "七": 7,
-    "八": 8,
-    "九": 9,
-    "十": 10,
-}
-_INT_TO_CN_SMALL = {value: key for key, value in _CN_NUM_TO_INT.items()}
 
 QUIZ_SYSTEM = (
     "You are an exam writer. Generate multiple-choice questions strictly from the context. "
@@ -326,245 +303,6 @@ def _build_context(
     return "General knowledge.", []
 
 
-def _safe_int(value: Any) -> int | None:
-    try:
-        if value is None:
-            return None
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _safe_json_list(value: Any) -> list | None:
-    if isinstance(value, list):
-        return value
-    if isinstance(value, str) and value.strip():
-        try:
-            parsed = json.loads(value)
-            if isinstance(parsed, list):
-                return parsed
-        except Exception:
-            return None
-    return None
-
-
-def _cn_numeral_to_int(text: str) -> int | None:
-    token = str(text or "").strip()
-    if not token:
-        return None
-    if token.isdigit():
-        try:
-            return int(token)
-        except ValueError:
-            return None
-    if token in _CN_NUM_TO_INT:
-        return _CN_NUM_TO_INT[token]
-    if len(token) == 2 and token.startswith("十") and token[1] in _CN_NUM_TO_INT:
-        return 10 + _CN_NUM_TO_INT[token[1]]
-    if len(token) == 2 and token.endswith("十") and token[0] in _CN_NUM_TO_INT:
-        return _CN_NUM_TO_INT[token[0]] * 10
-    if len(token) == 3 and token[1] == "十" and token[0] in _CN_NUM_TO_INT and token[2] in _CN_NUM_TO_INT:
-        return _CN_NUM_TO_INT[token[0]] * 10 + _CN_NUM_TO_INT[token[2]]
-    return None
-
-
-def _normalize_figure_token(token: str) -> str:
-    raw = str(token or "").strip()
-    if not raw:
-        return ""
-    raw = raw.strip("()（）[]【】")
-    numeric = _cn_numeral_to_int(raw)
-    if numeric is not None and numeric > 0:
-        return str(numeric)
-    return raw.lower()
-
-
-def _extract_figure_refs(question: dict[str, Any]) -> list[str]:
-    text = " ".join(
-        [
-            str(question.get("question") or ""),
-            str(question.get("explanation") or ""),
-        ]
-    )
-    refs: list[str] = []
-    seen: set[str] = set()
-    for match in QUIZ_FIGURE_REF_RE.finditer(text or ""):
-        normalized = _normalize_figure_token(match.group(1) or "")
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        refs.append(normalized)
-    return refs
-
-
-def _figure_ref_aliases(ref_token: str) -> list[str]:
-    token = _normalize_figure_token(ref_token)
-    if not token:
-        return []
-    aliases = [token]
-    if token.isdigit():
-        value = int(token)
-        cn = _INT_TO_CN_SMALL.get(value)
-        if cn:
-            aliases.append(cn)
-    return aliases
-
-
-def _caption_matches_figure_ref(text: str, ref_token: str) -> bool:
-    content = str(text or "").strip()
-    if not content:
-        return False
-    aliases = [re.escape(alias) for alias in _figure_ref_aliases(ref_token) if alias]
-    if not aliases:
-        return False
-    alias_group = "|".join(aliases)
-    pattern = re.compile(
-        rf"(?:图|fig(?:ure)?\.?)\s*[（(]?\s*(?:{alias_group})\s*[)）]?",
-        re.IGNORECASE,
-    )
-    return bool(pattern.search(content))
-
-
-def _rerank_image_hits_for_figure_ref(
-    question: dict[str, Any],
-    image_hits: list[tuple[Any, float]],
-) -> list[tuple[Any, float]]:
-    if not image_hits:
-        return []
-    if not bool(getattr(settings, "quiz_image_figure_ref_rerank_enabled", True)):
-        return image_hits
-    refs = _extract_figure_refs(question)
-    if not refs:
-        return image_hits
-    primary_ref = refs[0]
-    min_semantic_floor = 0.12
-
-    scored: list[tuple[float, float, int, Any]] = []
-    for idx, (image_doc, score) in enumerate(image_hits):
-        base_score = float(score)
-        meta = getattr(image_doc, "metadata", {}) or {}
-        caption = str(meta.get("caption") or "").strip()
-        surrogate = str(getattr(image_doc, "page_content", "") or "").strip()
-        matches = _caption_matches_figure_ref(caption, primary_ref) or _caption_matches_figure_ref(
-            surrogate, primary_ref
-        )
-        bonus = 1.0 if matches and base_score >= min_semantic_floor else 0.0
-        scored.append((bonus, base_score, -idx, image_doc))
-
-    scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
-    return [(doc, score) for bonus, score, _idx, doc in scored]
-
-
-def _question_mentions_figure(question: dict[str, Any]) -> bool:
-    text = " ".join(
-        [
-            str(question.get("question") or ""),
-            str(question.get("explanation") or ""),
-        ]
-    )
-    return bool(QUIZ_IMAGE_HINT_RE.search(text) or QUIZ_FIGURE_REF_RE.search(text))
-
-
-def _question_image_query(question: dict[str, Any]) -> str:
-    q_text = str(question.get("question") or "").strip()
-    concepts = [str(c).strip() for c in (question.get("concepts") or []) if str(c).strip()]
-    parts = [q_text]
-    if concepts:
-        parts.append(" ".join(concepts[:3]))
-    refs = _extract_figure_refs(question)
-    if refs:
-        parts.append(" ".join([f"图{refs[0]}", f"Figure {refs[0]}", "图示意图 figure diagram"]))
-    elif _question_mentions_figure(question):
-        parts.append("图 示意图 figure diagram")
-    return " ".join([p for p in parts if p]).strip()
-
-
-def _build_quiz_question_image_payload(question: dict[str, Any], image_doc: Any, score: float) -> dict[str, Any] | None:
-    meta = getattr(image_doc, "metadata", {}) or {}
-    image_doc_id = meta.get("doc_id")
-    if not image_doc_id:
-        return None
-    page = _safe_int(meta.get("page"))
-    chunk = _safe_int(meta.get("chunk"))
-    if page is None and chunk is None:
-        return None
-
-    params: list[str] = []
-    if page is not None:
-        params.append(f"page={page}")
-    if chunk is not None:
-        params.append(f"chunk={chunk}")
-    query = "&".join(params)
-    url = f"/api/docs/{image_doc_id}/image"
-    if query:
-        url = f"{url}?{query}"
-
-    caption = str(meta.get("caption") or "").strip() or None
-    bbox = _safe_json_list(meta.get("bbox"))
-    surrogate = str(getattr(image_doc, "page_content", "") or "").strip() or None
-    payload = {
-        "url": url,
-        "doc_id": str(image_doc_id),
-        "page": page,
-        "chunk": chunk,
-        "caption": caption,
-        "bbox": bbox,
-        "score": round(float(score), 4),
-        "surrogate_text": surrogate,
-    }
-    threshold = QUIZ_IMAGE_SCORE_THRESHOLD if _question_mentions_figure(question) else QUIZ_IMAGE_GENERIC_SCORE_THRESHOLD
-    if float(score) < threshold:
-        return None
-    return payload
-
-
-def _attach_images_to_questions(
-    *,
-    user_id: str,
-    doc_id: str | None,
-    kb_id: str | None,
-    questions: list[dict],
-) -> list[dict]:
-    if not questions or (not doc_id and not kb_id):
-        return questions
-    search_filter = {"doc_id": doc_id} if doc_id else {"kb_id": kb_id}
-    out: list[dict] = []
-    for question in questions:
-        q = dict(question or {})
-        query = _question_image_query(q)
-        if not query:
-            out.append(q)
-            continue
-        refs = _extract_figure_refs(q)
-        image_top_k = 2
-        if refs:
-            try:
-                image_top_k = max(2, int(getattr(settings, "quiz_image_figure_ref_top_k", 5) or 5))
-            except (TypeError, ValueError):
-                image_top_k = 5
-        try:
-            image_hits = query_image_documents(
-                user_id,
-                query,
-                top_k=image_top_k,
-                search_filter=search_filter,
-            )
-        except Exception:
-            logger.exception("Quiz image lookup failed")
-            image_hits = []
-        if refs and image_hits:
-            image_hits = _rerank_image_hits_for_figure_ref(q, image_hits)
-        attached = None
-        for image_doc, score in image_hits:
-            attached = _build_quiz_question_image_payload(q, image_doc, float(score))
-            if attached:
-                break
-        if attached:
-            q["image"] = attached
-        out.append(q)
-    return out
-
-
 def _build_avoid_questions_instructions(avoid_question_texts: Optional[List[str]]) -> str:
     if not avoid_question_texts:
         return ""
@@ -691,6 +429,11 @@ def _is_fragmented_quiz_text(text: str) -> bool:
     lines = [line.strip() for line in candidate.split("\n") if line.strip()]
     if len(lines) < 3:
         return False
+    if is_low_quality(
+        candidate,
+        mode=getattr(settings, "noise_filter_level", "balanced"),
+    ):
+        return True
     lengths = [len(re.sub(r"\s+", "", line)) for line in lines]
     if not lengths:
         return False
@@ -1097,12 +840,6 @@ def generate_quiz(
         )
 
     validated_questions = questions[:count]
-    validated_questions = _attach_images_to_questions(
-        user_id=user_id,
-        doc_id=doc_id,
-        kb_id=kb_id,
-        questions=validated_questions,
-    )
 
     try:
         json.dumps(validated_questions)  # validate serializable

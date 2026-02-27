@@ -10,6 +10,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.core.config import settings
 from app.services.index_text_cleaning import clean_text_for_indexing_with_stats
+from app.services.text_noise_guard import clean_fragment
 from app.services.text_extraction import ExtractionResult
 
 
@@ -20,7 +21,6 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ChunkBuildResult:
     text_docs: list[LCDocument]
-    image_docs: list[LCDocument]
     all_docs: list[LCDocument]
     manifest: list[dict[str, Any]]
 
@@ -53,22 +53,6 @@ def _safe_json(value: Any) -> str:
         return "[]" if isinstance(value, list) else "{}"
 
 
-def _image_surrogate_text(block: Any, filename: str) -> tuple[str, str | None]:
-    caption = (getattr(block, "caption_text", None) or "").strip() or None
-    nearby = (getattr(block, "nearby_text", None) or "").strip() or None
-    ocr_text = (getattr(block, "ocr_text", None) or "").strip() or None
-    parts: list[str] = ["[图片块]"]
-    if caption:
-        parts.append(f"图注: {caption}")
-    if nearby:
-        parts.append(f"邻近文字: {nearby}")
-    if ocr_text:
-        parts.append(f"图片OCR: {ocr_text}")
-    if len(parts) == 1:
-        parts.append(f"来源文档: {filename}")
-    return "\n".join(parts), caption
-
-
 def _doc_base_metadata(doc_id: str, kb_id: str, filename: str, page: int | None) -> dict[str, Any]:
     data: dict[str, Any] = {
         "doc_id": doc_id,
@@ -85,6 +69,7 @@ def _prepare_index_text(
     *,
     meta: dict[str, Any],
     enable_cleanup: bool,
+    format_hint: str | None,
 ) -> str:
     text = (segment_text or "").strip()
     if not text:
@@ -94,18 +79,37 @@ def _prepare_index_text(
     if not bool(getattr(settings, "index_text_cleanup_enabled", True)):
         return text
 
-    mode = str(getattr(settings, "index_text_cleanup_mode", "conservative") or "conservative")
-    cleaned, stats = clean_text_for_indexing_with_stats(text, mode=mode)
+    resolved_format = (format_hint or "").strip().lower()
+    if resolved_format == ".pdf":
+        mode = str(getattr(settings, "index_text_cleanup_mode", "conservative") or "conservative")
+        cleaned, stats = clean_text_for_indexing_with_stats(text, mode=mode)
+        if cleaned != text:
+            logger.info(
+                "Index text cleanup applied scope=pdf doc_id=%s page=%s before=%s after=%s pairs_removed=%s noise_lines_removed=%s short_line_groups_merged=%s",
+                meta.get("doc_id"),
+                meta.get("page"),
+                stats.get("before_len"),
+                stats.get("after_len"),
+                stats.get("pairs_removed"),
+                stats.get("noise_lines_removed"),
+                stats.get("short_line_groups_merged"),
+            )
+        return cleaned.strip()
+
+    non_pdf_mode = str(
+        getattr(settings, "index_text_cleanup_non_pdf_mode", "structure_preserving")
+        or "structure_preserving"
+    )
+    cleaned = clean_fragment(text, mode=non_pdf_mode, format_hint=resolved_format or None)
     if cleaned != text:
         logger.info(
-            "Index text cleanup applied scope=pdf_ocr_only doc_id=%s page=%s before=%s after=%s pairs_removed=%s noise_lines_removed=%s short_line_groups_merged=%s",
+            "Index text cleanup applied scope=non_pdf doc_id=%s page=%s before=%s after=%s mode=%s format=%s",
             meta.get("doc_id"),
             meta.get("page"),
-            stats.get("before_len"),
-            stats.get("after_len"),
-            stats.get("pairs_removed"),
-            stats.get("noise_lines_removed"),
-            stats.get("short_line_groups_merged"),
+            len(text),
+            len(cleaned),
+            non_pdf_mode,
+            resolved_format or "unknown",
         )
     return cleaned.strip()
 
@@ -118,11 +122,13 @@ def _make_text_docs_from_segment(
     splitter: RecursiveCharacterTextSplitter,
     order_hint: int | None = None,
     enable_cleanup: bool = False,
+    format_hint: str | None = None,
 ) -> list[LCDocument]:
     text = _prepare_index_text(
         segment_text,
         meta=meta,
         enable_cleanup=enable_cleanup,
+        format_hint=format_hint,
     )
     if not text:
         return []
@@ -149,6 +155,7 @@ def _flush_text_segment(
     filename: str,
     splitter: RecursiveCharacterTextSplitter,
     enable_cleanup: bool,
+    format_hint: str | None = None,
 ) -> _BufferedTextSegment | None:
     if current is None:
         return None
@@ -166,6 +173,7 @@ def _flush_text_segment(
             splitter=splitter,
             order_hint=current.order_hint,
             enable_cleanup=enable_cleanup,
+            format_hint=format_hint,
         )
     )
     return None
@@ -185,7 +193,6 @@ def build_chunked_documents(
     splitter = _splitter(chunk_size, chunk_overlap)
 
     text_docs: list[LCDocument] = []
-    image_docs: list[LCDocument] = []
 
     if suffix == ".pdf" and getattr(extraction, "page_blocks", None):
         for page_layout in extraction.page_blocks or []:
@@ -204,39 +211,12 @@ def build_chunked_documents(
                         splitter=splitter,
                         order_hint=0,
                         enable_cleanup=True,
+                        format_hint=suffix,
                     )
                 )
             else:
                 buffer: _BufferedTextSegment | None = None
                 for block in getattr(page_layout, "ordered_blocks", []) or []:
-                    if getattr(block, "kind", None) == "image":
-                        buffer = _flush_text_segment(
-                            buffer,
-                            out=text_docs,
-                            doc_id=doc_id,
-                            kb_id=kb_id,
-                            filename=filename,
-                            splitter=splitter,
-                            enable_cleanup=True,
-                        )
-                        surrogate_text, caption = _image_surrogate_text(block, filename)
-                        block_id = str(getattr(block, "block_id", "") or "").strip()
-                        md = _doc_base_metadata(doc_id, kb_id, filename, getattr(block, "page", None))
-                        md.update(
-                            {
-                                "modality": "image",
-                                "chunk_kind": "image",
-                                "block_id": block_id or None,
-                                "block_ids": _safe_json([block_id] if block_id else []),
-                                "asset_path": getattr(block, "asset_path", None) or "",
-                                "caption": caption or "",
-                                "bbox": _safe_json(getattr(block, "bbox", [])),
-                                "_order_hint": int(getattr(block, "order_index", 0) or 0) * 1000,
-                            }
-                        )
-                        image_docs.append(LCDocument(page_content=surrogate_text, metadata=md))
-                        continue
-
                     text = (getattr(block, "text", None) or "").strip()
                     if not text:
                         continue
@@ -268,6 +248,7 @@ def build_chunked_documents(
                             filename=filename,
                             splitter=splitter,
                             enable_cleanup=True,
+                            format_hint=suffix,
                         )
                 buffer = _flush_text_segment(
                     buffer,
@@ -277,27 +258,8 @@ def build_chunked_documents(
                     filename=filename,
                     splitter=splitter,
                     enable_cleanup=True,
+                    format_hint=suffix,
                 )
-
-            # Keep image chunks even when page text was OCR overridden.
-            if override_text:
-                for block in getattr(page_layout, "image_blocks", []) or []:
-                    surrogate_text, caption = _image_surrogate_text(block, filename)
-                    block_id = str(getattr(block, "block_id", "") or "").strip()
-                    md = _doc_base_metadata(doc_id, kb_id, filename, getattr(block, "page", None))
-                    md.update(
-                        {
-                            "modality": "image",
-                            "chunk_kind": "image",
-                            "block_id": block_id or None,
-                            "block_ids": _safe_json([block_id] if block_id else []),
-                            "asset_path": getattr(block, "asset_path", None) or "",
-                            "caption": caption or "",
-                            "bbox": _safe_json(getattr(block, "bbox", [])),
-                            "_order_hint": int(getattr(block, "order_index", 0) or 0) * 1000,
-                        }
-                    )
-                    image_docs.append(LCDocument(page_content=surrogate_text, metadata=md))
     else:
         if suffix in {".pdf", ".pptx"}:
             for page_num, page_text in enumerate(extraction.pages, start=1):
@@ -310,7 +272,8 @@ def build_chunked_documents(
                 cleaned_page_text = _prepare_index_text(
                     page_text,
                     meta=meta,
-                    enable_cleanup=(suffix == ".pdf"),
+                    enable_cleanup=True,
+                    format_hint=suffix,
                 )
                 if not cleaned_page_text:
                     continue
@@ -336,7 +299,8 @@ def build_chunked_documents(
             cleaned_text = _prepare_index_text(
                 extraction.text,
                 meta=meta,
-                enable_cleanup=(suffix == ".pdf"),
+                enable_cleanup=True,
+                format_hint=suffix,
             )
             if not cleaned_text:
                 docs = []
@@ -369,7 +333,6 @@ def build_chunked_documents(
         return page, order_hint, doc.page_content[:40]
 
     text_docs.sort(key=_sort_key)
-    image_docs.sort(key=_sort_key)
 
     manifest: list[dict[str, Any]] = []
     for idx, doc in enumerate(text_docs, start=1):
@@ -384,14 +347,11 @@ def build_chunked_documents(
                 "block_ids": doc.metadata.get("block_ids"),
             }
         )
-    for doc in image_docs:
-        doc.metadata.pop("_order_hint", None)
 
     all_docs = list(text_docs)
 
     return ChunkBuildResult(
         text_docs=text_docs,
-        image_docs=image_docs,
         all_docs=all_docs,
         manifest=manifest,
     )

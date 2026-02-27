@@ -26,21 +26,15 @@ def test_ingest_document_indexes_only_text_docs_for_lexical_store(monkeypatch, t
         page_content="第一段文本",
         metadata={"doc_id": "doc1", "kb_id": "kb1", "source": "sample.txt", "modality": "text", "chunk": 1},
     )
-    image_doc = Document(
-        page_content="[图片块]\n图注: 图1",
-        metadata={"doc_id": "doc1", "kb_id": "kb1", "source": "sample.txt", "modality": "image"},
-    )
     chunk_result = ChunkBuildResult(
         text_docs=[text_doc],
-        image_docs=[image_doc],
-        all_docs=[text_doc, image_doc],
+        all_docs=[text_doc],
         manifest=[{"chunk": 1, "modality": "text"}],
     )
     monkeypatch.setattr("app.services.ingest.build_chunked_documents", lambda *args, **kwargs: chunk_result)
 
     vectorstore = MagicMock()
     monkeypatch.setattr("app.services.ingest.get_vectorstore", lambda _user_id: vectorstore)
-    monkeypatch.setattr("app.services.ingest.add_image_documents", lambda _user_id, _docs: 1)
 
     appended_docs: list[Document] = []
 

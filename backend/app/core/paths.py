@@ -23,5 +23,5 @@ def ensure_user_dirs(user_id: str):
 
 def ensure_kb_dirs(user_id: str, kb_id: str):
     base = kb_base_dir(user_id, kb_id)
-    for name in ("raw", "images", "content_list", "rag_storage"):
+    for name in ("raw", "content_list", "rag_storage"):
         os.makedirs(os.path.join(base, name), exist_ok=True)

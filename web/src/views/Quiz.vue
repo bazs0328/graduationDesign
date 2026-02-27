@@ -240,35 +240,6 @@
                 {{ idx + 1 }}
               </div>
               <div class="space-y-4 flex-1">
-                <div v-if="q._imageObjectUrl || q.image?.caption" class="space-y-2">
-                  <div
-                    v-if="q._imageObjectUrl"
-                    class="rounded-xl border border-border bg-background p-2 overflow-hidden"
-                  >
-                    <button
-                      type="button"
-                      class="group relative block w-full rounded-lg overflow-hidden focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      :aria-label="`打开题目配图预览（第 ${idx + 1} 题）`"
-                      @click="openQuestionImagePreview(q, idx)"
-                    >
-                      <img
-                        :src="q._imageObjectUrl"
-                        :alt="q.image?.caption || `题目配图 ${idx + 1}`"
-                        class="w-full max-h-72 object-contain rounded-lg bg-muted/20"
-                        loading="lazy"
-                      />
-                      <span
-                        class="absolute inset-x-2 bottom-2 rounded-md bg-black/60 text-white text-[11px] px-2 py-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
-                      >
-                        点击放大预览
-                      </span>
-                    </button>
-                  </div>
-                  <p v-if="q.image?.caption" class="text-xs text-muted-foreground">
-                    图注：{{ q.image.caption }}
-                  </p>
-                </div>
-
                 <div class="quiz-question-markdown markdown-content" v-html="renderMarkdown(q.question)"></div>
                 
                 <div class="grid grid-cols-1 gap-2">
@@ -417,22 +388,14 @@
         </div>
       </section>
     </div>
-    <ImageLightboxModal
-      :open="imagePreviewState.open"
-      :src="imagePreviewState.src"
-      :alt="imagePreviewState.alt"
-      :caption="imagePreviewState.caption"
-      :title="imagePreviewState.title"
-      @close="closeQuestionImagePreview"
-    />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onActivated, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onActivated, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PenTool, Sparkles, CheckCircle2, XCircle, SlidersHorizontal } from 'lucide-vue-next'
-import { apiGet, apiGetBlob, apiPost } from '../api'
+import { apiGet, apiPost } from '../api'
 import AnimatedNumber from '../components/ui/AnimatedNumber.vue'
 import { useToast } from '../composables/useToast'
 import { useKbDocuments } from '../composables/useKbDocuments'
@@ -440,7 +403,6 @@ import { useAppContextStore } from '../stores/appContext'
 import { useSettingsStore } from '../stores/settings'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
-import ImageLightboxModal from '../components/ui/ImageLightboxModal.vue'
 import LoadingOverlay from '../components/ui/LoadingOverlay.vue'
 import KnowledgeScopePicker from '../components/context/KnowledgeScopePicker.vue'
 import { masteryLabel, masteryPercent, masteryBadgeClass, masteryBorderClass } from '../utils/mastery'
@@ -557,14 +519,6 @@ const quizFocusSelectPlaceholder = computed(() => {
   return selectedDocId.value ? '该文档暂无可选聚合知识点' : '暂无可选聚合知识点'
 })
 const OPTION_LABELS = ['A', 'B', 'C', 'D']
-let quizImageLoadSeq = 0
-const imagePreviewState = ref({
-  open: false,
-  src: '',
-  alt: '',
-  caption: '',
-  title: '图片预览',
-})
 const effectiveQuizSettings = computed(() => settingsStore.effectiveSettings?.quiz || {})
 
 function applyQuizDefaultsFromSettings() {
@@ -616,69 +570,6 @@ async function saveCurrentQuizDefaults() {
     showToast('已保存当前测验配置为默认设置', 'success')
   } catch {
     // error toast handled globally
-  }
-}
-
-function closeQuestionImagePreview() {
-  imagePreviewState.value = {
-    open: false,
-    src: '',
-    alt: '',
-    caption: '',
-    title: '图片预览',
-  }
-}
-
-function openQuestionImagePreview(question, questionIndex) {
-  const src = typeof question?._imageObjectUrl === 'string' ? question._imageObjectUrl.trim() : ''
-  if (!src) return
-  const caption = typeof question?.image?.caption === 'string' ? question.image.caption.trim() : ''
-  imagePreviewState.value = {
-    open: true,
-    src,
-    alt: caption || `题目配图 ${questionIndex + 1}`,
-    caption,
-    title: `第 ${questionIndex + 1} 题配图`,
-  }
-}
-
-function revokeQuizImageObjectUrls(quizPayload) {
-  if (imagePreviewState.value.open) {
-    const openSrc = imagePreviewState.value.src
-    const questions = Array.isArray(quizPayload?.questions) ? quizPayload.questions : []
-    if (questions.some((q) => q && q._imageObjectUrl === openSrc)) {
-      closeQuestionImagePreview()
-    }
-  }
-  const questions = Array.isArray(quizPayload?.questions) ? quizPayload.questions : []
-  for (const q of questions) {
-    if (q && q._imageObjectUrl) {
-      try {
-        URL.revokeObjectURL(q._imageObjectUrl)
-      } catch {
-        // ignore revoke failures
-      }
-      q._imageObjectUrl = ''
-    }
-  }
-}
-
-async function hydrateQuizQuestionImages(quizPayload) {
-  const currentSeq = ++quizImageLoadSeq
-  const questions = Array.isArray(quizPayload?.questions) ? quizPayload.questions : []
-  for (const q of questions) {
-    if (!q || !q.image || typeof q.image !== 'object') continue
-    const imageUrl = typeof q.image.url === 'string' ? q.image.url.trim() : ''
-    if (!imageUrl) continue
-    try {
-      const blob = await apiGetBlob(imageUrl)
-      if (currentSeq !== quizImageLoadSeq) return
-      if (!(blob instanceof Blob)) continue
-      q._imageObjectUrl = URL.createObjectURL(blob)
-    } catch {
-      // Image is optional; keep question usable even if preview image fails.
-      q._imageObjectUrl = ''
-    }
   }
 }
 
@@ -872,8 +763,6 @@ async function refreshDocsInKb() {
 async function generateQuiz(options = {}) {
   if (!selectedKbId.value) return
   busy.value.quiz = true
-  closeQuestionImagePreview()
-  revokeQuizImageObjectUrls(quiz.value)
   quiz.value = null
   quizAnswers.value = {}
   quizResult.value = null
@@ -896,7 +785,6 @@ async function generateQuiz(options = {}) {
     }
     const res = await apiPost('/api/quiz/generate', payload)
     quiz.value = res
-    void hydrateQuizQuestionImages(quiz.value)
     showToast(`已生成 ${res.questions?.length || 0} 道题目`, 'success')
   } catch {
     // error toast handled globally
@@ -1065,12 +953,6 @@ onActivated(async () => {
     ensureKbs: !appContext.kbs.length,
     autoGenerate: true,
   })
-})
-
-onBeforeUnmount(() => {
-  closeQuestionImagePreview()
-  quizImageLoadSeq += 1
-  revokeQuizImageObjectUrls(quiz.value)
 })
 
 watch(

@@ -11,11 +11,16 @@ from typing import Any
 from app.core.config import settings
 from app.core.paths import kb_base_dir
 from app.core.vectorstore import get_doc_vector_entries
+from app.services.text_noise_guard import (
+    clean_fragment,
+    infer_format_hint,
+    is_low_quality,
+    score_text_fragment,
+)
 
 logger = logging.getLogger(__name__)
 
 _CAPTIONISH_RE = re.compile(r"^\s*(图|表|figure|fig\.?|table)\s*[\(（]?\s*[0-9一二三四五六七八九十A-Za-z]+", re.I)
-_IMG_PLACEHOLDER_RE = re.compile(r"\[\s*图片块\s*\]")
 _SEED_MIN_VISIBLE_CHARS = 80
 
 
@@ -99,58 +104,27 @@ def _visible_chars(text: str) -> str:
     return "".join(ch for ch in str(text or "") if not ch.isspace())
 
 
-def _text_metrics(text: str) -> dict[str, float]:
-    normalized = _normalize_ws(text)
-    visible = _visible_chars(normalized)
-    visible_len = len(visible)
-    lines = [line.strip() for line in normalized.split("\n") if line.strip()]
-    if not lines or visible_len == 0:
-        return {
-            "visible_len": float(visible_len),
-            "line_count": float(len(lines)),
-            "avg_line_len": 0.0,
-            "single_char_line_ratio": 1.0 if lines else 0.0,
-            "short_line_ratio": 1.0 if lines else 0.0,
-            "line_break_ratio": 1.0 if visible_len else 0.0,
-        }
-    line_visible_lengths = [len(_visible_chars(line)) for line in lines]
-    avg_line_len = sum(line_visible_lengths) / max(1, len(line_visible_lengths))
-    single_char_lines = sum(1 for n in line_visible_lengths if n <= 1)
-    short_lines = sum(1 for n in line_visible_lengths if n <= 6)
-    return {
-        "visible_len": float(visible_len),
-        "line_count": float(len(lines)),
-        "avg_line_len": float(avg_line_len),
-        "single_char_line_ratio": single_char_lines / max(1, len(lines)),
-        "short_line_ratio": short_lines / max(1, len(lines)),
-        "line_break_ratio": normalized.count("\n") / max(1, visible_len),
-    }
-
-
 def _quality_score(text: str) -> float:
-    m = _text_metrics(text)
-    if m["visible_len"] <= 0:
-        return 0.0
-    score = 0.35
-    score += min(0.35, m["visible_len"] / 1200.0)
-    score += min(0.2, m["avg_line_len"] / 40.0)
-    score -= m["single_char_line_ratio"] * 0.35
-    score -= m["short_line_ratio"] * 0.2
-    score -= min(0.15, m["line_break_ratio"] * 4.0)
-    if _IMG_PLACEHOLDER_RE.search(text):
-        score -= 0.5
-    return max(0.0, min(1.0, score))
+    metrics = score_text_fragment(
+        text,
+        mode=getattr(settings, "noise_filter_level", "balanced"),
+    )
+    return float(metrics.get("score", 0.0))
 
 
 def _seed_quality_score(text: str, metadata: dict[str, Any]) -> float:
-    score = _quality_score(text)
-    normalized = _normalize_ws(text)
+    format_hint = infer_format_hint(str(metadata.get("source") or ""))
+    cleaned_text = clean_fragment(
+        text,
+        mode=getattr(settings, "noise_filter_level", "balanced"),
+        format_hint=format_hint,
+    )
+    score = _quality_score(cleaned_text)
+    normalized = _normalize_ws(cleaned_text)
     if len(_visible_chars(normalized)) < _SEED_MIN_VISIBLE_CHARS:
         score -= 0.2
     if _CAPTIONISH_RE.match(normalized) and len(_visible_chars(normalized)) < 120:
         score -= 0.25
-    if _IMG_PLACEHOLDER_RE.search(normalized):
-        score -= 0.8
     if bool(metadata.get("ocr_override")):
         score -= 0.06
     page_q = _safe_float(metadata.get("page_text_quality_score"))
@@ -160,17 +134,23 @@ def _seed_quality_score(text: str, metadata: dict[str, Any]) -> float:
 
 
 def _should_filter_seed(text: str, metadata: dict[str, Any], score: float) -> tuple[bool, str | None]:
-    normalized = _normalize_ws(text)
+    format_hint = infer_format_hint(str(metadata.get("source") or ""))
+    normalized = clean_fragment(
+        _normalize_ws(text),
+        mode=getattr(settings, "noise_filter_level", "balanced"),
+        format_hint=format_hint,
+    )
     if not normalized:
         return True, "empty"
-    if _IMG_PLACEHOLDER_RE.search(normalized):
-        return True, "image_placeholder"
-    if score < 0.14:
+    line_count = len([line for line in normalized.split("\n") if line.strip()])
+    visible_len = len(_visible_chars(normalized))
+    if score < 0.14 and (line_count >= 2 or visible_len <= 4):
         return True, "low_quality"
-    m = _text_metrics(normalized)
-    if m["single_char_line_ratio"] >= 0.45:
-        return True, "single_char_lines"
-    if m["short_line_ratio"] >= 0.75 and m["avg_line_len"] < 8:
+    if line_count >= 2 and is_low_quality(
+        normalized,
+        mode=getattr(settings, "noise_filter_level", "balanced"),
+        format_hint=format_hint,
+    ):
         return True, "too_fragmented"
     if _CAPTIONISH_RE.match(normalized) and len(_visible_chars(normalized)) < 80:
         return True, "short_caption"
@@ -231,15 +211,17 @@ def _build_neighbor_passage(entries: list[dict[str, Any]], *, chunk: int | None,
         return "", None, None
     if chunk is None:
         text = _merge_broken_lines(str(entries[0].get("content") or ""))
+        format_hint = infer_format_hint(str((entries[0].get("metadata") or {}).get("source") or ""))
+        text = clean_fragment(
+            text,
+            mode=getattr(settings, "noise_filter_level", "balanced"),
+            format_hint=format_hint,
+        )
         meta = entries[0].get("metadata") or {}
         c = _safe_int(meta.get("chunk"))
         return _truncate_soft(text, int(target_chars * 1.3)), c, c
 
-    text_entries = [
-        entry
-        for entry in entries
-        if str(((entry.get("metadata") or {}).get("modality") or "text")) != "image"
-    ]
+    text_entries = list(entries)
     if not text_entries:
         return "", None, None
     center_idx: int | None = None
@@ -282,6 +264,13 @@ def _build_neighbor_passage(entries: list[dict[str, Any]], *, chunk: int | None,
         for item in selected
     ]
     selected_chunks = [c for c in selected_chunks if c is not None]
+    center_source = str((center_meta or {}).get("source") or "")
+    format_hint = infer_format_hint(center_source)
+    joined = clean_fragment(
+        joined,
+        mode=getattr(settings, "noise_filter_level", "balanced"),
+        format_hint=format_hint,
+    )
     return (
         _truncate_soft(joined, int(target_chars * 1.35)),
         (min(selected_chunks) if selected_chunks else chunk),
@@ -306,9 +295,6 @@ def _build_sidecar_passage(sidecar: dict | None, *, chunk: int | None, page: int
             break
     if not isinstance(manifest_entry, dict):
         return ""
-    if str(manifest_entry.get("modality") or "text") == "image":
-        return ""
-
     target_page = _safe_int(manifest_entry.get("page")) or page
     if target_page is None:
         return ""
@@ -345,8 +331,6 @@ def _build_sidecar_passage(sidecar: dict | None, *, chunk: int | None, page: int
             block = ordered_blocks[idx]
             if not isinstance(block, dict):
                 continue
-            if str(block.get("kind") or "") == "image":
-                continue
             text = _normalize_ws(str(block.get("text") or ""))
             if not text:
                 continue
@@ -363,6 +347,11 @@ def _build_sidecar_passage(sidecar: dict | None, *, chunk: int | None, page: int
         if (right - left) > 14:
             break
     passage = _merge_broken_lines("\n\n".join(text_parts))
+    passage = clean_fragment(
+        passage,
+        mode=getattr(settings, "noise_filter_level", "balanced"),
+        format_hint=".pdf",
+    )
     return _truncate_soft(passage, int(target_chars * 1.35))
 
 
@@ -374,12 +363,6 @@ def _get_doc_entries_cached(user_id: str, doc_id: str, cache: dict[str, list[dic
     except Exception:
         logger.debug("Quiz context doc entry fetch failed doc_id=%s", doc_id, exc_info=True)
         rows = []
-    rows = [
-        row
-        for row in rows
-        if str(((row.get("metadata") or {}).get("modality") or "text")) != "image"
-        and str(((row.get("metadata") or {}).get("chunk_kind") or "text")) != "image"
-    ]
     cache[doc_id] = rows
     return rows
 
@@ -485,7 +468,12 @@ def build_quiz_context_from_seeds(
     fallback_seeds: list[tuple[int, Any, dict[str, Any], str, float]] = []
     for rank, seed in enumerate(seed_docs or []):
         metadata = dict(getattr(seed, "metadata", {}) or {})
-        text = _normalize_ws(str(getattr(seed, "page_content", "") or ""))
+        format_hint = infer_format_hint(str(metadata.get("source") or ""))
+        text = clean_fragment(
+            _normalize_ws(str(getattr(seed, "page_content", "") or "")),
+            mode=getattr(settings, "noise_filter_level", "balanced"),
+            format_hint=format_hint,
+        )
         score = _seed_quality_score(text, metadata)
         fallback_seeds.append((rank, seed, metadata, text, score))
         drop, reason = _should_filter_seed(text, metadata, score)
@@ -573,11 +561,16 @@ def build_quiz_context_from_seeds(
 
     if not passages:
         stats["fallback_used"] = True
-        raw = "\n\n".join(
-            _normalize_ws(str(getattr(seed, "page_content", "") or ""))
-            for seed in (seed_docs or [])
-            if _normalize_ws(str(getattr(seed, "page_content", "") or ""))
-        )
+        raw_parts: list[str] = []
+        for seed in seed_docs or []:
+            cleaned_seed = clean_fragment(
+                _normalize_ws(str(getattr(seed, "page_content", "") or "")),
+                mode=getattr(settings, "noise_filter_level", "balanced"),
+                format_hint=infer_format_hint(str((getattr(seed, "metadata", {}) or {}).get("source") or "")),
+            )
+            if cleaned_seed:
+                raw_parts.append(cleaned_seed)
+        raw = "\n\n".join(raw_parts)
         return QuizContextBuildResult(text=_truncate_soft(raw, max_chars), stats=stats)
 
     context_text, used_count = _compose_context(passages, max_chars=max_chars, kb_scope=kb_scope)

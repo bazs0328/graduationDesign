@@ -1,17 +1,13 @@
 import json
-import logging
 import os
 from typing import Tuple
 
 from app.core.config import settings
-from app.core.image_vectorstore import add_image_documents
 from app.core.paths import ensure_user_dirs, kb_base_dir, user_base_dir
 from app.core.vectorstore import get_vectorstore
 from app.services.chunking import build_chunked_documents
 from app.services.lexical import append_lexical_chunks
 from app.services.text_extraction import extract_text
-
-logger = logging.getLogger(__name__)
 
 SUPPORTED_TYPES = {".pdf", ".txt", ".md", ".docx", ".pptx"}
 
@@ -70,26 +66,13 @@ def ingest_document(
         chunk_overlap=chunk_overlap,
     )
     text_docs = chunk_result.text_docs
-    image_docs = chunk_result.image_docs
 
-    if not text_docs and not image_docs:
+    if not text_docs:
         raise ValueError("No text extracted from file")
 
     vectorstore = get_vectorstore(user_id)
-    if text_docs:
-        vectorstore.add_documents(text_docs)
-        vectorstore.persist()
-    else:
-        logger.info("No text chunks to add for doc_id=%s; document may be image-only", doc_id)
-
-    image_indexed_count = 0
-    if image_docs:
-        try:
-            image_indexed_count = add_image_documents(user_id, image_docs)
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to add image vectors for doc_id=%s", doc_id)
-    if image_docs and image_indexed_count == 0:
-        logger.info("Image chunks generated but image indexing skipped doc_id=%s count=%s", doc_id, len(image_docs))
+    vectorstore.add_documents(text_docs)
+    vectorstore.persist()
 
     append_lexical_chunks(user_id, kb_id, text_docs)
     _write_layout_sidecar(

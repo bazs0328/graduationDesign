@@ -134,7 +134,6 @@ def test_quiz_context_prefers_sidecar_reconstruction_when_available(tmp_path, mo
                 "ordered_blocks": [
                     {"block_id": "p1:t1", "kind": "text", "text": "矩阵变换用于描述图形坐标变化。"},
                     {"block_id": "p1:t2", "kind": "text", "text": "图1展示了关于 y 轴对称的结果。"},
-                    {"block_id": "p1:i1", "kind": "image", "text": None},
                     {"block_id": "p1:t3", "kind": "text", "text": "当 x 坐标取反时可得到对称图像。"},
                 ],
             }
@@ -163,3 +162,32 @@ def test_quiz_context_prefers_sidecar_reconstruction_when_available(tmp_path, mo
     assert "x 坐标取反" in result.text
     assert result.stats.get("build_modes", {}).get("sidecar", 0) >= 1
 
+
+def test_quiz_context_filters_latin_fragment_noise_seed():
+    seed = _seed(
+        doc_id="doc-noise",
+        kb_id="kb-1",
+        source="noise.txt",
+        chunk=1,
+        page=1,
+        text="shRn\n么\n第四单元\n使",
+    )
+    clean_entry = _entry(
+        doc_id="doc-noise",
+        kb_id="kb-1",
+        source="noise.txt",
+        chunk=1,
+        page=1,
+        text="线性变换可以将平面中的点映射到新的位置。",
+    )
+
+    with patch("app.services.quiz_context.get_doc_vector_entries", return_value=[clean_entry]):
+        result = build_quiz_context_from_seeds(
+            user_id="u1",
+            seed_docs=[seed],
+            max_chars=1800,
+            kb_scope=False,
+        )
+
+    assert "shRn" not in result.text
+    assert "线性变换" in result.text

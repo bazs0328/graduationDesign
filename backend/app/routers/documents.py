@@ -1,6 +1,5 @@
 import hashlib
 import glob
-import json
 import os
 import shutil
 from datetime import datetime
@@ -8,17 +7,11 @@ from uuid import uuid4
 import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import asc, desc
 
+from app.core.config import settings
 from app.core.knowledge_bases import ensure_kb
-from app.core.image_vectorstore import (
-    delete_doc_image_vectors,
-    get_doc_image_vector_entries,
-    rewrite_doc_image_asset_paths,
-    update_doc_image_vector_metadata,
-)
 from app.core.kb_metadata import (
     load_kb_metadata,
     record_file_hash,
@@ -58,22 +51,15 @@ from app.schemas import (
 from app.services.lexical import move_doc_chunks, remove_doc_chunks, update_doc_chunks_metadata
 from app.services.ingest_tasks import process_document_task
 from app.services.layout_sidecar import (
-    build_image_preview_from_sidecar,
     build_text_preview_from_sidecar,
     load_layout_sidecar,
     resolve_block_id,
-    sanitize_image_placeholder_text,
     should_skip_text_sidecar_preview,
 )
+from app.services.text_noise_guard import clean_fragment, infer_format_hint, is_low_quality
 from app.utils.document_validator import DocumentValidator
 
 router = APIRouter()
-
-
-def _doc_image_dir(user_id: str, kb_id: str | None, doc_id: str) -> str | None:
-    if not kb_id:
-        return None
-    return os.path.join(kb_base_dir(user_id, kb_id), "images", doc_id)
 
 
 def _doc_layout_sidecar_path(user_id: str, kb_id: str | None, doc_id: str) -> str | None:
@@ -83,9 +69,6 @@ def _doc_layout_sidecar_path(user_id: str, kb_id: str | None, doc_id: str) -> st
 
 
 def _remove_doc_derived_assets(user_id: str, kb_id: str | None, doc_id: str) -> None:
-    image_dir = _doc_image_dir(user_id, kb_id, doc_id)
-    if image_dir and os.path.exists(image_dir):
-        shutil.rmtree(image_dir, ignore_errors=True)
     sidecar_path = _doc_layout_sidecar_path(user_id, kb_id, doc_id)
     if sidecar_path and os.path.exists(sidecar_path):
         try:
@@ -96,15 +79,6 @@ def _remove_doc_derived_assets(user_id: str, kb_id: str | None, doc_id: str) -> 
 
 def _move_doc_derived_assets(user_id: str, from_kb_id: str, to_kb_id: str, doc_id: str) -> None:
     ensure_kb_dirs(user_id, to_kb_id)
-    old_image_dir = _doc_image_dir(user_id, from_kb_id, doc_id)
-    new_image_dir = _doc_image_dir(user_id, to_kb_id, doc_id)
-    if old_image_dir and new_image_dir and os.path.exists(old_image_dir):
-        parent = os.path.dirname(new_image_dir)
-        os.makedirs(parent, exist_ok=True)
-        if os.path.exists(new_image_dir):
-            shutil.rmtree(new_image_dir, ignore_errors=True)
-        shutil.move(old_image_dir, new_image_dir)
-
     old_sidecar = _doc_layout_sidecar_path(user_id, from_kb_id, doc_id)
     new_sidecar = _doc_layout_sidecar_path(user_id, to_kb_id, doc_id)
     if old_sidecar and new_sidecar and os.path.exists(old_sidecar):
@@ -294,6 +268,21 @@ def _extract_snippet_window(text: str, query: str | None, window_chars: int = 22
     return normalized[start:end]
 
 
+def _clean_preview_snippet(
+    snippet: str,
+    *,
+    source_name: str | None,
+) -> str:
+    mode = str(getattr(settings, "noise_filter_level", "balanced") or "balanced")
+    format_hint = infer_format_hint(source_name)
+    cleaned = clean_fragment(snippet or "", mode=mode, format_hint=format_hint)
+    if not cleaned:
+        return ""
+    if is_low_quality(cleaned, mode=mode, format_hint=format_hint):
+        return ""
+    return cleaned
+
+
 def _build_source_preview(
     doc: Document,
     vector_entries: list[dict],
@@ -308,19 +297,6 @@ def _build_source_preview(
     target_page = _normalize_int(page)
     target_chunk = _normalize_int(chunk)
     sidecar = load_layout_sidecar(doc.user_id, doc.kb_id, doc.id)
-
-    def _is_image_entry(entry: dict) -> bool:
-        meta = entry.get("metadata") or {}
-        modality = str(meta.get("modality") or "").strip().lower()
-        return modality == "image"
-
-    def _pick_query_match(entries: list[dict]) -> dict | None:
-        if not query_text:
-            return None
-        return next(
-            (entry for entry in entries if _contains_query(entry.get("content", ""), query_text)),
-            None,
-        )
 
     selected_entry: dict | None = None
     matched_by = "fallback"
@@ -344,31 +320,27 @@ def _build_source_preview(
                     break
 
     if selected_entry is None and target_page is not None:
-        page_entries = [
-            entry
-            for entry in vector_entries
-            if _normalize_int((entry.get("metadata") or {}).get("page")) == target_page
-        ]
-        text_page_entries = [entry for entry in page_entries if not _is_image_entry(entry)]
-        image_page_entries = [entry for entry in page_entries if _is_image_entry(entry)]
-        if query_text:
-            selected_entry = _pick_query_match(text_page_entries)
-            if selected_entry is None:
-                selected_entry = _pick_query_match(image_page_entries)
-        if selected_entry is None:
-            if text_page_entries:
-                selected_entry = text_page_entries[0]
-            elif image_page_entries:
-                selected_entry = image_page_entries[0]
+        selected_entry = next(
+            (
+                entry
+                for entry in vector_entries
+                if _normalize_int((entry.get("metadata") or {}).get("page")) == target_page
+                and (not query_text or _contains_query(entry.get("content", ""), query_text))
+            ),
+            None,
+        )
         if selected_entry is not None:
             matched_by = "page"
 
     if selected_entry is None and query_text:
-        text_entries = [entry for entry in vector_entries if not _is_image_entry(entry)]
-        image_entries = [entry for entry in vector_entries if _is_image_entry(entry)]
-        selected_entry = _pick_query_match(text_entries)
-        if selected_entry is None:
-            selected_entry = _pick_query_match(image_entries)
+        selected_entry = next(
+            (
+                entry
+                for entry in vector_entries
+                if _contains_query(entry.get("content", ""), query_text)
+            ),
+            None,
+        )
         if selected_entry is not None:
             matched_by = "query"
 
@@ -376,65 +348,39 @@ def _build_source_preview(
         metadata = selected_entry.get("metadata") or {}
         source_page = _normalize_int(metadata.get("page"))
         source_chunk = _normalize_int(metadata.get("chunk"))
-        block_id = resolve_block_id(metadata, sidecar)
-        modality = str(metadata.get("modality") or "text")
-
-        snippet = ""
-        if modality == "image":
-            snippet = build_image_preview_from_sidecar(
-                sidecar,
-                metadata,
-                target_chars=420,
-            )
-            if snippet:
-                matched_by = "image_sidecar"
-            else:
-                fallback_text = sanitize_image_placeholder_text(selected_entry.get("content", ""))
-                if not fallback_text:
-                    fallback_text = str(selected_entry.get("content", "") or "")
-                snippet = _extract_snippet_window(fallback_text, query_text or None)
-        else:
-            snippet = build_text_preview_from_sidecar(
-                sidecar,
-                metadata,
-                query=query_text or None,
-                window_chars=220,
-                target_chars=900,
-            )
-            if not snippet:
-                fallback_text = str(selected_entry.get("content", "") or "")
-                snippet = _extract_snippet_window(fallback_text, query_text or None)
-                if should_skip_text_sidecar_preview(metadata, sidecar):
-                    matched_by = "ocr_override_text"
+        snippet = build_text_preview_from_sidecar(
+            sidecar,
+            metadata,
+            query=query_text or None,
+            window_chars=220,
+            target_chars=900,
+        )
+        if not snippet:
+            fallback_text = str(selected_entry.get("content", "") or "")
+            snippet = _extract_snippet_window(fallback_text, query_text or None)
+            if should_skip_text_sidecar_preview(metadata, sidecar):
+                matched_by = "ocr_override_text"
         source_name = metadata.get("source") if isinstance(metadata.get("source"), str) else doc.filename
-        bbox = None
-        raw_bbox = metadata.get("bbox")
-        if isinstance(raw_bbox, str) and raw_bbox.strip():
-            try:
-                parsed = json.loads(raw_bbox)
-                if isinstance(parsed, list):
-                    bbox = parsed
-            except Exception:
-                bbox = None
-        elif isinstance(raw_bbox, list):
-            bbox = raw_bbox
+        snippet = _clean_preview_snippet(
+            snippet,
+            source_name=source_name,
+        )
         return {
             "snippet": snippet,
             "page": source_page,
             "chunk": source_chunk,
             "matched_by": matched_by,
             "source": source_name,
-            "modality": metadata.get("modality"),
-            "block_id": block_id,
-            "asset_path": metadata.get("asset_path"),
-            "caption": metadata.get("caption"),
-            "bbox": bbox,
         }
 
     if doc.text_path and os.path.exists(doc.text_path):
         with open(doc.text_path, "r", encoding="utf-8", errors="ignore") as f:
             full_text = f.read()
         snippet = _extract_snippet_window(full_text, query_text or None, window_chars=260)
+        snippet = _clean_preview_snippet(
+            snippet,
+            source_name=doc.filename,
+        )
         if snippet:
             return {
                 "snippet": snippet,
@@ -442,72 +388,9 @@ def _build_source_preview(
                 "chunk": target_chunk,
                 "matched_by": "text_path",
                 "source": doc.filename,
-                "modality": "text",
-                "block_id": None,
-                "asset_path": None,
-                "caption": None,
-                "bbox": None,
             }
 
     raise HTTPException(status_code=404, detail="No source preview available")
-
-
-def _build_image_preview_path(
-    doc: Document,
-    image_entries: list[dict],
-    *,
-    block_id: str | None = None,
-    page: int | None = None,
-    chunk: int | None = None,
-) -> tuple[str, int | None, int | None]:
-    target_block_id = str(block_id or "").strip()
-    target_page = _normalize_int(page)
-    target_chunk = _normalize_int(chunk)
-    selected_entry: dict | None = None
-
-    if target_block_id:
-        for entry in image_entries:
-            meta = entry.get("metadata") or {}
-            if resolve_block_id(meta) == target_block_id:
-                selected_entry = entry
-                break
-
-    if selected_entry is None and target_chunk is not None:
-        for entry in image_entries:
-            meta = entry.get("metadata") or {}
-            if _normalize_int(meta.get("chunk")) == target_chunk:
-                selected_entry = entry
-                break
-
-    if selected_entry is None and target_page is not None:
-        selected_entry = next(
-            (
-                entry
-                for entry in image_entries
-                if _normalize_int((entry.get("metadata") or {}).get("page")) == target_page
-            ),
-            None,
-        )
-
-    if selected_entry is None and image_entries:
-        selected_entry = image_entries[0]
-
-    if selected_entry is None:
-        raise HTTPException(status_code=404, detail="No source image available")
-
-    metadata = selected_entry.get("metadata") or {}
-    source_page = _normalize_int(metadata.get("page"))
-    source_chunk = _normalize_int(metadata.get("chunk"))
-    asset_path = metadata.get("asset_path")
-    if not isinstance(asset_path, str) or not asset_path.strip():
-        raise HTTPException(status_code=404, detail="Source image file missing")
-    resolved = os.path.realpath(asset_path)
-    user_root = os.path.realpath(user_base_dir(doc.user_id))
-    if not resolved.startswith(user_root + os.sep) and resolved != user_root:
-        raise HTTPException(status_code=403, detail="Invalid source image path")
-    if not os.path.exists(resolved):
-        raise HTTPException(status_code=404, detail="Source image file not found")
-    return resolved, source_page, source_chunk
 
 
 def _queue_doc_reprocess(
@@ -525,7 +408,6 @@ def _queue_doc_reprocess(
         return False, "Original file not found, reprocess is unavailable"
 
     delete_doc_vectors(resolved_user_id, doc.id)
-    delete_doc_image_vectors(resolved_user_id, doc.id)
     remove_doc_chunks(resolved_user_id, doc.kb_id, doc.id)
     _remove_doc_derived_assets(resolved_user_id, doc.kb_id, doc.id)
 
@@ -605,7 +487,6 @@ def delete_doc(doc_id: str, user_id: str | None = None, db: Session = Depends(ge
 
     remove_doc_chunks(resolved_user_id, doc.kb_id or "", doc.id) if doc.kb_id else None
     delete_doc_vectors(resolved_user_id, doc.id)
-    delete_doc_image_vectors(resolved_user_id, doc.id)
     _remove_doc_derived_assets(resolved_user_id, doc.kb_id, doc.id)
     if doc.kb_id:
         remove_file_hash(resolved_user_id, doc.kb_id, doc.filename)
@@ -653,16 +534,11 @@ def update_doc(
 
     if changed_kb and doc.kb_id:
         ensure_kb_dirs(resolved_user_id, new_kb_id)
-        old_image_dir_before_move = _doc_image_dir(resolved_user_id, doc.kb_id, doc.id)
-        new_image_dir_after_move = _doc_image_dir(resolved_user_id, new_kb_id, doc.id)
         old_candidates = _find_raw_candidates(resolved_user_id, doc.kb_id, doc.id)
         new_raw_dir = os.path.join(kb_base_dir(resolved_user_id, new_kb_id), "raw")
         for old_path in old_candidates:
             shutil.move(old_path, os.path.join(new_raw_dir, os.path.basename(old_path)))
         _move_doc_derived_assets(resolved_user_id, doc.kb_id, new_kb_id, doc.id)
-    else:
-        old_image_dir_before_move = None
-        new_image_dir_after_move = None
 
     if changed_kb and doc.kb_id:
         transfer_file_hash(
@@ -685,19 +561,6 @@ def update_doc(
             kb_id=new_kb_id if changed_kb else None,
             source=new_filename if changed_name else None,
         )
-        update_doc_image_vector_metadata(
-            resolved_user_id,
-            doc.id,
-            kb_id=new_kb_id if changed_kb else None,
-            source=new_filename if changed_name else None,
-        )
-        if changed_kb and old_image_dir_before_move and new_image_dir_after_move:
-            rewrite_doc_image_asset_paths(
-                resolved_user_id,
-                doc.id,
-                old_prefix=old_image_dir_before_move.rstrip(os.sep) + os.sep,
-                new_prefix=new_image_dir_after_move.rstrip(os.sep) + os.sep,
-            )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Failed to update vector index: {exc}") from exc
 
@@ -708,16 +571,6 @@ def update_doc(
             new_kb_id,
             doc.id,
             source=new_filename if changed_name else None,
-            asset_path_from=(
-                old_image_dir_before_move.rstrip(os.sep) + os.sep
-                if changed_kb and old_image_dir_before_move
-                else None
-            ),
-            asset_path_to=(
-                new_image_dir_after_move.rstrip(os.sep) + os.sep
-                if changed_kb and new_image_dir_after_move
-                else None
-            ),
         )
     elif changed_name and doc.kb_id:
         update_doc_chunks_metadata(
@@ -790,9 +643,7 @@ def preview_doc_source(
     resolved_user_id = ensure_user(db, user_id)
     doc = _get_doc_or_404(db, resolved_user_id, doc_id)
     vector_entries = get_doc_vector_entries(resolved_user_id, doc_id)
-    image_entries = get_doc_image_vector_entries(resolved_user_id, doc_id)
-    merged_entries = [*vector_entries, *image_entries]
-    merged_entries.sort(
+    vector_entries.sort(
         key=lambda entry: (
             _normalize_int((entry.get("metadata") or {}).get("page")) or 0,
             _normalize_int((entry.get("metadata") or {}).get("chunk")) or 0,
@@ -800,7 +651,7 @@ def preview_doc_source(
     )
     preview = _build_source_preview(
         doc,
-        merged_entries,
+        vector_entries,
         block_id=block_id,
         page=page,
         chunk=chunk,
@@ -814,35 +665,7 @@ def preview_doc_source(
         source=preview.get("source"),
         snippet=preview.get("snippet") or "",
         matched_by=preview.get("matched_by") or "fallback",
-        modality=preview.get("modality"),
-        block_id=preview.get("block_id"),
-        asset_path=preview.get("asset_path"),
-        caption=preview.get("caption"),
-        bbox=preview.get("bbox"),
     )
-
-
-@router.get("/docs/{doc_id}/image")
-def preview_doc_image(
-    doc_id: str,
-    user_id: str | None = None,
-    block_id: str | None = None,
-    page: int | None = None,
-    chunk: int | None = None,
-    db: Session = Depends(get_db),
-):
-    resolved_user_id = ensure_user(db, user_id)
-    doc = _get_doc_or_404(db, resolved_user_id, doc_id)
-    image_entries = get_doc_image_vector_entries(resolved_user_id, doc_id)
-    asset_path, _, _ = _build_image_preview_path(
-        doc,
-        image_entries,
-        block_id=block_id,
-        page=page,
-        chunk=chunk,
-    )
-    # Stored quiz/source crops are PNG today.
-    return FileResponse(asset_path, media_type="image/png")
 
 
 @router.get("/docs/tasks", response_model=DocumentTaskCenterResponse)

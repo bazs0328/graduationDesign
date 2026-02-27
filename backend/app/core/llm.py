@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.embeddings import Embeddings
@@ -30,9 +29,6 @@ class DashScopeVLEmbeddings(Embeddings):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url
-
-    def supports_image_embedding(self) -> bool:
-        return True
 
     def _configure_client(self) -> None:
         import logging
@@ -86,25 +82,6 @@ class DashScopeVLEmbeddings(Embeddings):
 
     def embed_query(self, text: str) -> list[float]:
         return self.embed_documents([text])[0]
-
-    def embed_image_paths(self, image_paths: list[str]) -> list[list[float]]:
-        self._configure_client()
-        embeddings: list[list[float]] = []
-        for image_path in image_paths:
-            if not image_path:
-                raise ValueError("Empty image path for multimodal embedding")
-            uri = image_path
-            if not (uri.startswith("http://") or uri.startswith("https://") or uri.startswith("file://")):
-                uri = f"file://{os.path.abspath(uri)}"
-            try:
-                resp = dashscope.MultiModalEmbedding.call(
-                    model=self.model,
-                    input=[{"image": uri}],
-                )
-            except Exception as e:
-                raise ValueError(f"DashScope image embedding API call failed: {e}") from e
-            embeddings.append(self._parse_response_vector(resp))
-        return embeddings
 
 
 def get_llm(temperature: float = 0.2):

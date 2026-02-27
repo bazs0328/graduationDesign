@@ -6,7 +6,7 @@ from app.services.pdf_layout import ExtractedBlock, PageLayoutResult
 from app.services.text_extraction import ExtractionResult
 
 
-def test_build_chunked_documents_preserves_text_image_order_and_metadata():
+def test_build_chunked_documents_preserves_text_order_and_metadata():
     page_layout = PageLayoutResult(
         page=1,
         ordered_blocks=[
@@ -19,30 +19,17 @@ def test_build_chunked_documents_preserves_text_image_order_and_metadata():
                 order_index=1,
             ),
             ExtractedBlock(
-                block_id="p1:i1",
-                kind="image",
-                page=1,
-                bbox=[0, 30, 120, 120],
-                asset_path="/tmp/fake.png",
-                caption_text="图1 示例",
-                nearby_text="相邻说明",
-                order_index=2,
-            ),
-            ExtractedBlock(
                 block_id="p1:t2",
                 kind="text",
                 page=1,
-                bbox=[0, 130, 100, 160],
+                bbox=[0, 30, 120, 120],
                 text="第二段文字",
-                order_index=3,
+                order_index=2,
             ),
         ],
-        image_blocks=[],
         text_blocks=[],
     )
-    # Keep image_blocks populated like real parser output.
-    page_layout.image_blocks = [page_layout.ordered_blocks[1]]
-    page_layout.text_blocks = [page_layout.ordered_blocks[0], page_layout.ordered_blocks[2]]
+    page_layout.text_blocks = list(page_layout.ordered_blocks)
 
     extraction = ExtractionResult(
         text="第一段文字\n\n第二段文字",
@@ -63,23 +50,16 @@ def test_build_chunked_documents_preserves_text_image_order_and_metadata():
         chunk_overlap=0,
     )
 
-    assert len(result.text_docs) == 2
-    assert len(result.image_docs) == 1
-    assert len(result.all_docs) == 2
-    assert [d.metadata.get("modality") for d in result.all_docs] == ["text", "text"]
-    assert [d.metadata.get("chunk") for d in result.all_docs] == [1, 2]
-    assert [item.get("modality") for item in result.manifest] == ["text", "text"]
-    image_doc = result.image_docs[0]
-    assert image_doc.metadata.get("asset_path") == "/tmp/fake.png"
-    assert image_doc.metadata.get("caption") == "图1 示例"
-    assert image_doc.metadata.get("block_id") == "p1:i1"
-    assert image_doc.metadata.get("chunk") is None
-    assert "图注: 图1 示例" in image_doc.page_content
+    assert len(result.text_docs) == 1
+    assert len(result.all_docs) == 1
+    assert [d.metadata.get("modality") for d in result.all_docs] == ["text"]
+    assert [d.metadata.get("chunk") for d in result.all_docs] == [1]
+    assert [item.get("modality") for item in result.manifest] == ["text"]
+    assert "第一段文字" in result.text_docs[0].page_content
+    assert "第二段文字" in result.text_docs[0].page_content
 
 
-def test_build_chunked_documents_cleans_text_chunks_without_affecting_image_chunks(
-    monkeypatch,
-):
+def test_build_chunked_documents_cleans_text_chunks_for_pdf(monkeypatch):
     monkeypatch.setattr(chunking_service.settings, "index_text_cleanup_enabled", True)
     monkeypatch.setattr(chunking_service.settings, "index_text_cleanup_mode", "conservative")
 
@@ -95,29 +75,17 @@ def test_build_chunked_documents_cleans_text_chunks_without_affecting_image_chun
                 order_index=1,
             ),
             ExtractedBlock(
-                block_id="p1:i1",
-                kind="image",
-                page=1,
-                bbox=[0, 30, 120, 120],
-                asset_path="/tmp/fake.png",
-                caption_text="图1 示例",
-                nearby_text="相邻说明",
-                order_index=2,
-            ),
-            ExtractedBlock(
                 block_id="p1:t2",
                 kind="text",
                 page=1,
                 bbox=[0, 130, 100, 160],
                 text="我们使用 Python 和 AI。",
-                order_index=3,
+                order_index=2,
             ),
         ],
-        image_blocks=[],
         text_blocks=[],
     )
-    page_layout.image_blocks = [page_layout.ordered_blocks[1]]
-    page_layout.text_blocks = [page_layout.ordered_blocks[0], page_layout.ordered_blocks[2]]
+    page_layout.text_blocks = list(page_layout.ordered_blocks)
 
     extraction = ExtractionResult(
         text="家jiQ\n中zhTng\n。\n\n我们使用 Python 和 AI。",
@@ -138,24 +106,24 @@ def test_build_chunked_documents_cleans_text_chunks_without_affecting_image_chun
         chunk_overlap=0,
     )
 
-    assert len(result.text_docs) == 2
-    assert len(result.image_docs) == 1
-    assert len(result.all_docs) == 2
-    assert [d.metadata.get("modality") for d in result.all_docs] == ["text", "text"]
-    assert result.all_docs[0].page_content == "家中。"
-    assert re.search(r"[A-Za-z]", result.all_docs[0].page_content) is None
-    assert "Python 和 AI" in result.all_docs[1].page_content
-    assert result.image_docs[0].metadata.get("asset_path") == "/tmp/fake.png"
+    assert len(result.text_docs) == 1
+    assert len(result.all_docs) == 1
+    assert [d.metadata.get("modality") for d in result.all_docs] == ["text"]
+    assert "家中。" in result.all_docs[0].page_content
+    assert "jiQ" not in result.all_docs[0].page_content
+    assert "zhTng" not in result.all_docs[0].page_content
+    assert "Python 和 AI" in result.all_docs[0].page_content
 
 
-def test_build_chunked_documents_does_not_clean_non_pdf_text(monkeypatch):
+def test_build_chunked_documents_cleans_non_pdf_text_with_structure_preserving_mode(monkeypatch):
     monkeypatch.setattr(chunking_service.settings, "index_text_cleanup_enabled", True)
     monkeypatch.setattr(chunking_service.settings, "index_text_cleanup_mode", "conservative")
+    monkeypatch.setattr(chunking_service.settings, "index_text_cleanup_non_pdf_mode", "structure_preserving")
 
     extraction = ExtractionResult(
-        text="家jiQ\n中zhTng\n。\n\n我们使用 Python 和 AI。",
+        text="bAo\nhM\nzhTng\n\n我们使用 Python 和 AI。",
         page_count=1,
-        pages=["家jiQ\n中zhTng\n。\n\n我们使用 Python 和 AI。"],
+        pages=["bAo\nhM\nzhTng\n\n我们使用 Python 和 AI。"],
     )
 
     result = build_chunked_documents(
@@ -170,5 +138,7 @@ def test_build_chunked_documents_does_not_clean_non_pdf_text(monkeypatch):
     )
 
     assert len(result.text_docs) == 1
-    assert "家jiQ" in result.text_docs[0].page_content
-    assert "中zhTng" in result.text_docs[0].page_content
+    assert "bAo" not in result.text_docs[0].page_content
+    assert "hM" not in result.text_docs[0].page_content
+    assert "zhTng" not in result.text_docs[0].page_content
+    assert "Python 和 AI" in result.text_docs[0].page_content

@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     chunk_overlap: int = 150
     index_text_cleanup_enabled: bool = True
     index_text_cleanup_mode: str = "conservative"
+    index_text_cleanup_non_pdf_mode: str = "structure_preserving"
+    noise_filter_level: str = "balanced"
+    noise_drop_low_quality_hits: bool = True
     ocr_enabled: bool = True
     ocr_engine: str = "rapidocr"
     ocr_fallback_engines: str = "rapidocr"
@@ -54,19 +57,12 @@ class Settings(BaseSettings):
     pdf_garbled_ocr_min_len_ratio: float = 0.30
     pdf_garbled_single_char_line_ratio: float = 0.45
     pdf_garbled_short_line_ratio: float = 0.65
-    pdf_extract_images: bool = True
-    pdf_image_min_area_ratio: float = 0.01
-    pdf_image_max_per_page: int = 12
-    mm_image_index_enabled: bool = True
-    mm_image_collection_name: str = "documents_images"
 
     quiz_context_reconstruct_enabled: bool = True
     quiz_context_seed_k_multiplier: float = 2.0
     quiz_context_neighbor_window: int = 2
     quiz_context_passage_target_chars: int = 900
     quiz_context_fragment_filter_enabled: bool = True
-    quiz_image_figure_ref_rerank_enabled: bool = True
-    quiz_image_figure_ref_top_k: int = 5
 
     qa_top_k: int = 4
     qa_fetch_k: int = 12

@@ -1,4 +1,3 @@
-import json
 import logging
 import re
 from typing import Any, Iterator, List, Tuple
@@ -7,14 +6,8 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.llm import get_llm
 from app.core.config import settings
-from app.core.image_vectorstore import query_image_documents
 from app.services.lexical import bm25_search
-from app.services.layout_sidecar import (
-    build_image_preview_from_sidecar,
-    load_layout_sidecar,
-    resolve_block_id,
-    sanitize_image_placeholder_text,
-)
+from app.services.text_noise_guard import clean_fragment, infer_format_hint, is_low_quality
 from app.core.vectorstore import get_vectorstore
 
 logger = logging.getLogger(__name__)
@@ -318,6 +311,56 @@ def stream_qa_answer(llm: Any, formatted_messages: Any) -> Iterator[str]:
         yield full_answer
 
 
+def _quality_filter_mode() -> str:
+    return str(getattr(settings, "noise_filter_level", "balanced") or "balanced")
+
+
+def _doc_format_hint(meta: dict[str, Any]) -> str | None:
+    source = (
+        str(meta.get("source") or "").strip()
+        or str(meta.get("filename") or "").strip()
+        or str(meta.get("title") or "").strip()
+    )
+    return infer_format_hint(source)
+
+
+def _sanitize_doc_for_quality(doc: Any) -> tuple[str, bool]:
+    meta = doc.metadata or {}
+    mode = _quality_filter_mode()
+    format_hint = _doc_format_hint(meta)
+    raw = str(doc.page_content or "")
+    cleaned = clean_fragment(raw, mode=mode, format_hint=format_hint)
+    dropped = is_low_quality(cleaned, mode=mode, format_hint=format_hint)
+    return cleaned, dropped
+
+
+def _filter_low_quality_docs(question: str, docs: list[Any]) -> list[Any]:
+    if not docs:
+        return []
+    if not bool(getattr(settings, "noise_drop_low_quality_hits", True)):
+        return docs
+
+    dropped_count = 0
+    kept: list[Any] = []
+    for doc in docs:
+        cleaned_text, dropped = _sanitize_doc_for_quality(doc)
+        if dropped:
+            dropped_count += 1
+            continue
+        if cleaned_text:
+            doc.page_content = cleaned_text
+        kept.append(doc)
+    if dropped_count > 0:
+        logger.info(
+            "QA retrieval noise-filter applied question_len=%s total=%s kept=%s dropped=%s",
+            len((question or "").strip()),
+            len(docs),
+            len(kept),
+            dropped_count,
+        )
+    return kept
+
+
 def retrieve_documents(
     user_id: str,
     question: str,
@@ -346,17 +389,8 @@ def retrieve_documents(
             )
         except Exception:
             docs = vectorstore.similarity_search(question, k=k, filter=search_filter)
-        image_docs = [doc for doc, _ in query_image_documents(
-            user_id,
-            question,
-            top_k=k,
-            search_filter=search_filter,
-        )]
-        if image_docs:
-            docs.extend(image_docs)
-            # Preserve top-k-ish behavior while keeping image hits visible.
-            docs = docs[: max(k, min(len(docs), k + len(image_docs)))]
-        return docs
+        filtered = _filter_low_quality_docs(question, docs)
+        return filtered[:k] if len(filtered) > k else filtered
 
     dense_results: list[tuple[Any, float]] = []
     try:
@@ -374,14 +408,6 @@ def retrieve_documents(
                 dense_results.append((doc, 1.0 / (1.0 + max(float(score), 0.0))))
         except Exception:
             dense_results = []
-
-    for doc, score in query_image_documents(
-        user_id,
-        question,
-        top_k=fetch,
-        search_filter=search_filter,
-    ):
-        dense_results.append((doc, float(score)))
 
     bm25_k = settings.qa_bm25_k
     if bm25_k < k:
@@ -403,8 +429,6 @@ def retrieve_documents(
             meta.get("doc_id"),
             meta.get("page"),
             meta.get("chunk"),
-            meta.get("block_id"),
-            meta.get("modality"),
             doc.page_content[:80],
         )
         dense_score = float(score)
@@ -423,8 +447,6 @@ def retrieve_documents(
             meta.get("doc_id"),
             meta.get("page"),
             meta.get("chunk"),
-            meta.get("block_id"),
-            meta.get("modality"),
             doc.page_content[:80],
         )
         if key not in combined:
@@ -460,79 +482,36 @@ def retrieve_documents(
         weighted.append((item["doc"], score))
 
     weighted.sort(key=lambda x: x[1], reverse=True)
-    return [doc for doc, _ in weighted[:k]]
+    selected = [doc for doc, _ in weighted[:k]]
+    return _filter_low_quality_docs(question, selected)
 
 
 def build_sources_and_context(docs: list, user_id: str | None = None) -> Tuple[List[dict], str]:
     sources = []
     context_blocks = []
-    sidecar_cache: dict[tuple[str, str], dict[str, Any] | None] = {}
-
-    def _load_sidecar_for(meta: dict[str, Any]) -> dict[str, Any] | None:
-        if not user_id:
-            return None
-        doc_id_val = str(meta.get("doc_id") or "").strip()
-        kb_id_val = str(meta.get("kb_id") or "").strip()
-        if not doc_id_val or not kb_id_val:
-            return None
-        cache_key = (kb_id_val, doc_id_val)
-        if cache_key in sidecar_cache:
-            return sidecar_cache[cache_key]
-        sidecar_cache[cache_key] = load_layout_sidecar(user_id, kb_id_val, doc_id_val)
-        return sidecar_cache[cache_key]
 
     for idx, doc in enumerate(docs, start=1):
         metadata = doc.metadata or {}
-        sidecar = _load_sidecar_for(metadata)
-        modality = (metadata.get("modality") or "text")
-        block_id = resolve_block_id(metadata, sidecar)
+        mode = _quality_filter_mode()
 
-        image_summary = ""
-        if modality == "image":
-            image_summary = build_image_preview_from_sidecar(
-                sidecar,
-                metadata,
-                target_chars=760,
-            )
-            if not image_summary:
-                image_summary = sanitize_image_placeholder_text(str(doc.page_content or ""))
-            if not image_summary:
-                image_summary = str(doc.page_content or "")
-
-        if modality == "image":
-            snippet = image_summary[:400].replace("\n", " ")
-        else:
-            snippet = doc.page_content[:400].replace("\n", " ")
         source_name = (
             metadata.get("source")
             or metadata.get("filename")
             or metadata.get("title")
             or "文档片段"
         )
+        format_hint = infer_format_hint(str(source_name or ""))
+        snippet_raw = str(doc.page_content or "")[:400]
+        snippet = clean_fragment(snippet_raw, mode=mode, format_hint=format_hint)
+        if is_low_quality(snippet, mode=mode, format_hint=format_hint):
+            snippet = ""
+
         page = metadata.get("page")
         chunk = metadata.get("chunk")
         doc_id_meta = metadata.get("doc_id")
         kb_id_meta = metadata.get("kb_id")
-        asset_path = metadata.get("asset_path") or None
-        caption = metadata.get("caption") or None
-        bbox = None
-        raw_bbox = metadata.get("bbox")
-        if isinstance(raw_bbox, str) and raw_bbox.strip():
-            try:
-                parsed = json.loads(raw_bbox)
-                if isinstance(parsed, list):
-                    bbox = parsed
-            except Exception:
-                bbox = None
-        elif isinstance(raw_bbox, list):
-            bbox = raw_bbox
-
         source_label = str(source_name)
-        if modality == "image":
-            source_label = f"{source_label} (图片相关)"
         context_label = source_name
-        if modality == "image":
-            context_label = f"{source_name} (图片相关)"
 
         sources.append(
             {
@@ -542,21 +521,14 @@ def build_sources_and_context(docs: list, user_id: str | None = None) -> Tuple[L
                 "kb_id": kb_id_meta,
                 "page": page,
                 "chunk": chunk,
-                "modality": modality,
-                "block_id": block_id,
-                "asset_path": asset_path,
-                "caption": caption,
-                "bbox": bbox,
             }
         )
-        if modality == "image":
-            image_lines = [f"[{idx}] Source: {context_label}"]
-            if caption and f"图注: {caption}" not in image_summary:
-                image_lines.append(f"图注: {caption}")
-            image_lines.append(image_summary)
-            context_blocks.append("\n".join(image_lines))
-        else:
-            context_blocks.append(f"[{idx}] Source: {context_label}\n{doc.page_content}")
+        context_text = clean_fragment(
+            str(doc.page_content or ""),
+            mode=mode,
+            format_hint=format_hint,
+        )
+        context_blocks.append(f"[{idx}] Source: {context_label}\n{context_text}")
 
     context = "\n\n".join(context_blocks)
     return sources, context
