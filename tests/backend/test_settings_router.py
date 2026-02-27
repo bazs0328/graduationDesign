@@ -1,6 +1,9 @@
 """Integration tests for settings router."""
 
+import json
+
 from app.core.config import settings
+from app.models import KnowledgeBase, User
 
 
 def _register_or_login(client, username: str, password: str = "pass123456"):
@@ -114,6 +117,82 @@ def test_patch_kb_settings_rejects_ui_payload(client):
     )
     assert resp.status_code == 400
     assert "KB overrides only support qa and quiz settings" in resp.json()["detail"]
+
+
+def test_get_settings_tolerates_legacy_kb_extra_keys(client, db_session):
+    user = _register_or_login(client, "settings_legacy_kb_extra_user")
+    headers = _auth_headers(user)
+    kb_id = client.get("/api/kb", headers=headers).json()[0]["id"]
+
+    kb = db_session.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
+    assert kb is not None
+    kb.preferences_json = json.dumps(
+        {"learning_path": {"order_anchor": {"keypoint_ids": ["kp-1"], "updated_at": 1772198555}}},
+        ensure_ascii=False,
+    )
+    db_session.add(kb)
+    db_session.commit()
+
+    resp = client.get(f"/api/settings?kb_id={kb_id}", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["kb_overrides"] is not None
+    assert "learning_path" not in data["kb_overrides"]
+
+    db_session.refresh(kb)
+    raw = json.loads(kb.preferences_json)
+    assert "learning_path" in raw
+
+
+def test_patch_kb_settings_overwrites_legacy_dirty_payload(client, db_session):
+    user = _register_or_login(client, "settings_legacy_kb_patch_user")
+    headers = _auth_headers(user)
+    kb_id = client.get("/api/kb", headers=headers).json()[0]["id"]
+
+    kb = db_session.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
+    assert kb is not None
+    kb.preferences_json = json.dumps(
+        {"learning_path": {"order_anchor": {"keypoint_ids": ["kp-1"], "updated_at": 1772198555}}},
+        ensure_ascii=False,
+    )
+    db_session.add(kb)
+    db_session.commit()
+
+    resp = client.patch(
+        f"/api/settings/kb/{kb_id}",
+        json={"qa": {"mode": "explain"}},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert "learning_path" not in (resp.json()["kb_overrides"] or {})
+
+    db_session.refresh(kb)
+    stored = json.loads(kb.preferences_json)
+    assert stored == {"qa": {"mode": "explain"}}
+
+
+def test_get_settings_tolerates_legacy_user_extra_keys(client, db_session):
+    user = _register_or_login(client, "settings_legacy_user_extra_user")
+    headers = _auth_headers(user)
+
+    row = db_session.query(User).filter(User.id == user["user_id"]).first()
+    assert row is not None
+    row.preferences_json = json.dumps(
+        {"qa": {"mode": "normal"}, "learning_path": {"order_anchor": {"updated_at": 1772198555}}},
+        ensure_ascii=False,
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    resp = client.get("/api/settings", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["user_defaults"]["qa"]["mode"] == "normal"
+    assert "learning_path" not in data["user_defaults"]
+
+    db_session.refresh(row)
+    raw = json.loads(row.preferences_json)
+    assert "learning_path" in raw
 
 
 def test_settings_validation_rejects_out_of_range_values(client):

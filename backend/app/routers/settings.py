@@ -13,6 +13,10 @@ from app.core.runtime_overrides import (
     patch_system_overrides,
     reset_system_overrides,
 )
+from app.core.settings_preferences import (
+    normalize_settings_payload_for_read,
+    prune_empty_dicts,
+)
 from app.core.users import ensure_user
 from app.db import get_db
 from app.models import KnowledgeBase, User
@@ -95,42 +99,26 @@ def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _prune_empty_dicts(value: dict[str, Any]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, item in value.items():
-        if isinstance(item, dict):
-            nested = _prune_empty_dicts(item)
-            if nested:
-                result[key] = nested
-            continue
-        result[key] = item
-    return result
-
-
 def _normalize_user_settings(data: dict[str, Any]) -> dict[str, Any]:
-    validated = UserSettingsPayload.model_validate(data or {})
-    normalized = validated.model_dump(exclude_none=True)
-    return _prune_empty_dicts(normalized)
+    return normalize_settings_payload_for_read(data or {}, UserSettingsPayload)
 
 
 def _normalize_kb_settings(data: dict[str, Any]) -> dict[str, Any]:
-    validated = KbSettingsPayload.model_validate(data or {})
-    normalized = validated.model_dump(exclude_none=True)
-    return _prune_empty_dicts(normalized)
+    return normalize_settings_payload_for_read(data or {}, KbSettingsPayload)
 
 
 def _normalize_user_settings_patch(data: dict[str, Any]) -> dict[str, Any]:
     # Keep explicit nulls so PATCH can clear nullable fields (e.g., top_k/fetch_k).
     validated = UserSettingsPayload.model_validate(data or {})
     normalized = validated.model_dump(exclude_unset=True)
-    return _prune_empty_dicts(normalized)
+    return prune_empty_dicts(normalized)
 
 
 def _normalize_kb_settings_patch(data: dict[str, Any]) -> dict[str, Any]:
     # Keep explicit nulls so KB overrides can revert to "follow user default".
     validated = KbSettingsPayload.model_validate(data or {})
     normalized = validated.model_dump(exclude_unset=True)
-    return _prune_empty_dicts(normalized)
+    return prune_empty_dicts(normalized)
 
 
 def _effective_user_settings(user_defaults: dict[str, Any], kb_overrides: dict[str, Any]) -> dict[str, Any]:

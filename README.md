@@ -169,6 +169,9 @@ python3 /app/tests/qa_regression.py \
 - To purge historical image artifacts and old image metadata:
   - `python3 backend/scripts/purge_image_data.py --dry-run`
   - `python3 backend/scripts/purge_image_data.py --execute`
+- To clean legacy extra keys in `users.preferences_json` and `knowledge_bases.preferences_json`:
+  - `python3 backend/scripts/clean_settings_preferences.py` (dry-run)
+  - `python3 backend/scripts/clean_settings_preferences.py --execute`
 - If you ran an older schema, remove `backend/data/app.db` to recreate tables.
 - New activity feed endpoint: `GET /api/activity?user_id=...`
 
