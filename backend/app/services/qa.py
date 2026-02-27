@@ -9,6 +9,12 @@ from app.core.llm import get_llm
 from app.core.config import settings
 from app.core.image_vectorstore import query_image_documents
 from app.services.lexical import bm25_search
+from app.services.layout_sidecar import (
+    build_image_preview_from_sidecar,
+    load_layout_sidecar,
+    resolve_block_id,
+    sanitize_image_placeholder_text,
+)
 from app.core.vectorstore import get_vectorstore
 
 logger = logging.getLogger(__name__)
@@ -196,7 +202,7 @@ def prepare_qa_answer(
             "mode": resolved_mode,
         }
 
-    sources, context = build_sources_and_context(docs)
+    sources, context = build_sources_and_context(docs, user_id=user_id)
     if resolved_mode == QA_MODE_EXPLAIN:
         system_prompt = build_explain_system_prompt(
             ability_level=ability_level,
@@ -397,6 +403,7 @@ def retrieve_documents(
             meta.get("doc_id"),
             meta.get("page"),
             meta.get("chunk"),
+            meta.get("block_id"),
             meta.get("modality"),
             doc.page_content[:80],
         )
@@ -416,6 +423,7 @@ def retrieve_documents(
             meta.get("doc_id"),
             meta.get("page"),
             meta.get("chunk"),
+            meta.get("block_id"),
             meta.get("modality"),
             doc.page_content[:80],
         )
@@ -455,12 +463,46 @@ def retrieve_documents(
     return [doc for doc, _ in weighted[:k]]
 
 
-def build_sources_and_context(docs: list) -> Tuple[List[dict], str]:
+def build_sources_and_context(docs: list, user_id: str | None = None) -> Tuple[List[dict], str]:
     sources = []
     context_blocks = []
+    sidecar_cache: dict[tuple[str, str], dict[str, Any] | None] = {}
+
+    def _load_sidecar_for(meta: dict[str, Any]) -> dict[str, Any] | None:
+        if not user_id:
+            return None
+        doc_id_val = str(meta.get("doc_id") or "").strip()
+        kb_id_val = str(meta.get("kb_id") or "").strip()
+        if not doc_id_val or not kb_id_val:
+            return None
+        cache_key = (kb_id_val, doc_id_val)
+        if cache_key in sidecar_cache:
+            return sidecar_cache[cache_key]
+        sidecar_cache[cache_key] = load_layout_sidecar(user_id, kb_id_val, doc_id_val)
+        return sidecar_cache[cache_key]
+
     for idx, doc in enumerate(docs, start=1):
         metadata = doc.metadata or {}
-        snippet = doc.page_content[:400].replace("\n", " ")
+        sidecar = _load_sidecar_for(metadata)
+        modality = (metadata.get("modality") or "text")
+        block_id = resolve_block_id(metadata, sidecar)
+
+        image_summary = ""
+        if modality == "image":
+            image_summary = build_image_preview_from_sidecar(
+                sidecar,
+                metadata,
+                target_chars=760,
+            )
+            if not image_summary:
+                image_summary = sanitize_image_placeholder_text(str(doc.page_content or ""))
+            if not image_summary:
+                image_summary = str(doc.page_content or "")
+
+        if modality == "image":
+            snippet = image_summary[:400].replace("\n", " ")
+        else:
+            snippet = doc.page_content[:400].replace("\n", " ")
         source_name = (
             metadata.get("source")
             or metadata.get("filename")
@@ -471,7 +513,6 @@ def build_sources_and_context(docs: list) -> Tuple[List[dict], str]:
         chunk = metadata.get("chunk")
         doc_id_meta = metadata.get("doc_id")
         kb_id_meta = metadata.get("kb_id")
-        modality = (metadata.get("modality") or "text")
         asset_path = metadata.get("asset_path") or None
         caption = metadata.get("caption") or None
         bbox = None
@@ -488,7 +529,7 @@ def build_sources_and_context(docs: list) -> Tuple[List[dict], str]:
 
         source_label = str(source_name)
         if modality == "image":
-            source_label = f"{source_label} (图片块)"
+            source_label = f"{source_label} (图片相关)"
         context_label = source_name
         if modality == "image":
             context_label = f"{source_name} (图片相关)"
@@ -502,6 +543,7 @@ def build_sources_and_context(docs: list) -> Tuple[List[dict], str]:
                 "page": page,
                 "chunk": chunk,
                 "modality": modality,
+                "block_id": block_id,
                 "asset_path": asset_path,
                 "caption": caption,
                 "bbox": bbox,
@@ -509,9 +551,9 @@ def build_sources_and_context(docs: list) -> Tuple[List[dict], str]:
         )
         if modality == "image":
             image_lines = [f"[{idx}] Source: {context_label}"]
-            if caption:
+            if caption and f"图注: {caption}" not in image_summary:
                 image_lines.append(f"图注: {caption}")
-            image_lines.append(doc.page_content)
+            image_lines.append(image_summary)
             context_blocks.append("\n".join(image_lines))
         else:
             context_blocks.append(f"[{idx}] Source: {context_label}\n{doc.page_content}")

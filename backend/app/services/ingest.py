@@ -69,11 +69,10 @@ def ingest_document(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
     )
-    all_docs = chunk_result.all_docs
     text_docs = chunk_result.text_docs
     image_docs = chunk_result.image_docs
 
-    if not all_docs:
+    if not text_docs and not image_docs:
         raise ValueError("No text extracted from file")
 
     vectorstore = get_vectorstore(user_id)
@@ -92,8 +91,7 @@ def ingest_document(
     if image_docs and image_indexed_count == 0:
         logger.info("Image chunks generated but image indexing skipped doc_id=%s count=%s", doc_id, len(image_docs))
 
-    # Keep lexical search aware of image chunks via surrogate text.
-    append_lexical_chunks(user_id, kb_id, all_docs)
+    append_lexical_chunks(user_id, kb_id, text_docs)
     _write_layout_sidecar(
         user_id=user_id,
         kb_id=kb_id,
@@ -103,4 +101,4 @@ def ingest_document(
     )
 
     char_count = len(text)
-    return text_path, len(all_docs), extraction.page_count, char_count
+    return text_path, len(text_docs), extraction.page_count, char_count

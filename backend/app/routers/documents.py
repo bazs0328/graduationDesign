@@ -57,6 +57,14 @@ from app.schemas import (
 )
 from app.services.lexical import move_doc_chunks, remove_doc_chunks, update_doc_chunks_metadata
 from app.services.ingest_tasks import process_document_task
+from app.services.layout_sidecar import (
+    build_image_preview_from_sidecar,
+    build_text_preview_from_sidecar,
+    load_layout_sidecar,
+    resolve_block_id,
+    sanitize_image_placeholder_text,
+    should_skip_text_sidecar_preview,
+)
 from app.utils.document_validator import DocumentValidator
 
 router = APIRouter()
@@ -290,18 +298,43 @@ def _build_source_preview(
     doc: Document,
     vector_entries: list[dict],
     *,
+    block_id: str | None = None,
     page: int | None = None,
     chunk: int | None = None,
     query: str | None = None,
 ) -> dict:
     query_text = (query or "").strip()
+    target_block_id = str(block_id or "").strip()
     target_page = _normalize_int(page)
     target_chunk = _normalize_int(chunk)
+    sidecar = load_layout_sidecar(doc.user_id, doc.kb_id, doc.id)
+
+    def _is_image_entry(entry: dict) -> bool:
+        meta = entry.get("metadata") or {}
+        modality = str(meta.get("modality") or "").strip().lower()
+        return modality == "image"
+
+    def _pick_query_match(entries: list[dict]) -> dict | None:
+        if not query_text:
+            return None
+        return next(
+            (entry for entry in entries if _contains_query(entry.get("content", ""), query_text)),
+            None,
+        )
 
     selected_entry: dict | None = None
     matched_by = "fallback"
 
-    if target_chunk is not None:
+    if target_block_id:
+        for entry in vector_entries:
+            meta = entry.get("metadata") or {}
+            if resolve_block_id(meta, sidecar) == target_block_id:
+                if not query_text or _contains_query(entry.get("content", ""), query_text):
+                    selected_entry = entry
+                    matched_by = "block_id"
+                    break
+
+    if selected_entry is None and target_chunk is not None:
         for entry in vector_entries:
             meta = entry.get("metadata") or {}
             if _normalize_int(meta.get("chunk")) == target_chunk:
@@ -316,21 +349,26 @@ def _build_source_preview(
             for entry in vector_entries
             if _normalize_int((entry.get("metadata") or {}).get("page")) == target_page
         ]
+        text_page_entries = [entry for entry in page_entries if not _is_image_entry(entry)]
+        image_page_entries = [entry for entry in page_entries if _is_image_entry(entry)]
         if query_text:
-            selected_entry = next(
-                (entry for entry in page_entries if _contains_query(entry.get("content", ""), query_text)),
-                None,
-            )
-        if selected_entry is None and page_entries:
-            selected_entry = page_entries[0]
+            selected_entry = _pick_query_match(text_page_entries)
+            if selected_entry is None:
+                selected_entry = _pick_query_match(image_page_entries)
+        if selected_entry is None:
+            if text_page_entries:
+                selected_entry = text_page_entries[0]
+            elif image_page_entries:
+                selected_entry = image_page_entries[0]
         if selected_entry is not None:
             matched_by = "page"
 
     if selected_entry is None and query_text:
-        selected_entry = next(
-            (entry for entry in vector_entries if _contains_query(entry.get("content", ""), query_text)),
-            None,
-        )
+        text_entries = [entry for entry in vector_entries if not _is_image_entry(entry)]
+        image_entries = [entry for entry in vector_entries if _is_image_entry(entry)]
+        selected_entry = _pick_query_match(text_entries)
+        if selected_entry is None:
+            selected_entry = _pick_query_match(image_entries)
         if selected_entry is not None:
             matched_by = "query"
 
@@ -338,7 +376,36 @@ def _build_source_preview(
         metadata = selected_entry.get("metadata") or {}
         source_page = _normalize_int(metadata.get("page"))
         source_chunk = _normalize_int(metadata.get("chunk"))
-        snippet = _extract_snippet_window(selected_entry.get("content", ""), query_text or None)
+        block_id = resolve_block_id(metadata, sidecar)
+        modality = str(metadata.get("modality") or "text")
+
+        snippet = ""
+        if modality == "image":
+            snippet = build_image_preview_from_sidecar(
+                sidecar,
+                metadata,
+                target_chars=420,
+            )
+            if snippet:
+                matched_by = "image_sidecar"
+            else:
+                fallback_text = sanitize_image_placeholder_text(selected_entry.get("content", ""))
+                if not fallback_text:
+                    fallback_text = str(selected_entry.get("content", "") or "")
+                snippet = _extract_snippet_window(fallback_text, query_text or None)
+        else:
+            snippet = build_text_preview_from_sidecar(
+                sidecar,
+                metadata,
+                query=query_text or None,
+                window_chars=220,
+                target_chars=900,
+            )
+            if not snippet:
+                fallback_text = str(selected_entry.get("content", "") or "")
+                snippet = _extract_snippet_window(fallback_text, query_text or None)
+                if should_skip_text_sidecar_preview(metadata, sidecar):
+                    matched_by = "ocr_override_text"
         source_name = metadata.get("source") if isinstance(metadata.get("source"), str) else doc.filename
         bbox = None
         raw_bbox = metadata.get("bbox")
@@ -358,6 +425,7 @@ def _build_source_preview(
             "matched_by": matched_by,
             "source": source_name,
             "modality": metadata.get("modality"),
+            "block_id": block_id,
             "asset_path": metadata.get("asset_path"),
             "caption": metadata.get("caption"),
             "bbox": bbox,
@@ -375,6 +443,7 @@ def _build_source_preview(
                 "matched_by": "text_path",
                 "source": doc.filename,
                 "modality": "text",
+                "block_id": None,
                 "asset_path": None,
                 "caption": None,
                 "bbox": None,
@@ -387,14 +456,23 @@ def _build_image_preview_path(
     doc: Document,
     image_entries: list[dict],
     *,
+    block_id: str | None = None,
     page: int | None = None,
     chunk: int | None = None,
 ) -> tuple[str, int | None, int | None]:
+    target_block_id = str(block_id or "").strip()
     target_page = _normalize_int(page)
     target_chunk = _normalize_int(chunk)
     selected_entry: dict | None = None
 
-    if target_chunk is not None:
+    if target_block_id:
+        for entry in image_entries:
+            meta = entry.get("metadata") or {}
+            if resolve_block_id(meta) == target_block_id:
+                selected_entry = entry
+                break
+
+    if selected_entry is None and target_chunk is not None:
         for entry in image_entries:
             meta = entry.get("metadata") or {}
             if _normalize_int(meta.get("chunk")) == target_chunk:
@@ -703,6 +781,7 @@ def reprocess_doc(
 def preview_doc_source(
     doc_id: str,
     user_id: str | None = None,
+    block_id: str | None = None,
     page: int | None = None,
     chunk: int | None = None,
     q: str | None = None,
@@ -722,6 +801,7 @@ def preview_doc_source(
     preview = _build_source_preview(
         doc,
         merged_entries,
+        block_id=block_id,
         page=page,
         chunk=chunk,
         query=q,
@@ -735,6 +815,7 @@ def preview_doc_source(
         snippet=preview.get("snippet") or "",
         matched_by=preview.get("matched_by") or "fallback",
         modality=preview.get("modality"),
+        block_id=preview.get("block_id"),
         asset_path=preview.get("asset_path"),
         caption=preview.get("caption"),
         bbox=preview.get("bbox"),
@@ -745,6 +826,7 @@ def preview_doc_source(
 def preview_doc_image(
     doc_id: str,
     user_id: str | None = None,
+    block_id: str | None = None,
     page: int | None = None,
     chunk: int | None = None,
     db: Session = Depends(get_db),
@@ -755,6 +837,7 @@ def preview_doc_image(
     asset_path, _, _ = _build_image_preview_path(
         doc,
         image_entries,
+        block_id=block_id,
         page=page,
         chunk=chunk,
     )

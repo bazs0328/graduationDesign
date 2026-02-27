@@ -169,6 +169,7 @@ class SourcePreviewResponse(BaseModel):
     snippet: str
     matched_by: str
     modality: Optional[str] = None
+    block_id: Optional[str] = None
     asset_path: Optional[str] = None
     caption: Optional[str] = None
     bbox: Optional[List[float]] = None

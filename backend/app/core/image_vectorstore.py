@@ -62,6 +62,9 @@ def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
 def _image_doc_id(doc: Document) -> str:
     meta = doc.metadata or {}
     doc_id = str(meta.get("doc_id") or "doc")
+    block_id = str(meta.get("block_id") or "").strip()
+    if block_id:
+        return f"{doc_id}:b{block_id}:img"
     page = meta.get("page")
     chunk = meta.get("chunk")
     if page is None:

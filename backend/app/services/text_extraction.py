@@ -72,7 +72,8 @@ class RapidOcrEngine(OcrEngine):
             from rapidocr_onnxruntime import RapidOCR  # type: ignore
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(
-                "OCR dependency missing: install rapidocr-onnxruntime."
+                f"OCR dependency missing: rapidocr import failed ({exc}). "
+                "Ensure rapidocr-onnxruntime is installed and required system libraries are present."
             ) from exc
         self._engine = RapidOCR()
         return self._engine
@@ -224,6 +225,17 @@ def _get_ocr_low_confidence_threshold() -> float:
     value = _safe_float(getattr(settings, "ocr_low_confidence_threshold", 0.78))
     if value is None:
         return 0.78
+    return min(1.0, max(0.0, value))
+
+
+def _get_pdf_garbled_ocr_force() -> bool:
+    return bool(getattr(settings, "pdf_garbled_ocr_force", True))
+
+
+def _get_pdf_garbled_ocr_min_len_ratio() -> float:
+    value = _safe_float(getattr(settings, "pdf_garbled_ocr_min_len_ratio", 0.30))
+    if value is None:
+        return 0.30
     return min(1.0, max(0.0, value))
 
 
@@ -704,12 +716,26 @@ def _pick_page_text_after_ocr(
     *,
     scanned_pdf: bool,
     min_text_length: int,
+    trigger_reasons: list[str] | None = None,
 ) -> tuple[str, str]:
     """Return (chosen_text, reason)."""
     if not ocr_text:
         return original_text, "no_ocr_text"
     if not original_text:
         return ocr_text, "ocr_empty_text_layer"
+
+    reasons = {(item or "").strip().lower() for item in (trigger_reasons or []) if item}
+    if "garbled_text" in reasons and _get_pdf_garbled_ocr_force():
+        original_visible = len(_visible_chars(original_text))
+        ocr_visible = len(_visible_chars(ocr_text))
+        min_visible = max(
+            8,
+            int(original_visible * _get_pdf_garbled_ocr_min_len_ratio()),
+        )
+        if ocr_visible < min_visible:
+            return original_text, "garbled_force_fallback_short_ocr"
+        return ocr_text, "ocr_forced_garbled"
+
     if scanned_pdf or _is_low_text_page(original_text, min_text_length):
         return ocr_text, "ocr_low_text_or_scanned"
 
@@ -775,6 +801,7 @@ def _apply_pdf_ocr_repair(
             ocr_result.text,
             scanned_pdf=scanned_pdf,
             min_text_length=min_text_length,
+            trigger_reasons=page_reasons.get(page_num, []),
         )
         pages[page_num - 1] = chosen_text
 
@@ -785,11 +812,14 @@ def _apply_pdf_ocr_repair(
                 page_block.ocr_override_text = chosen_text
 
         logger.info(
-            "PDF page=%s ocr_trigger=%s choose=%s reason=%s orig_q=%.3f ocr_q=%.3f",
+            "PDF page=%s ocr_trigger=%s choose=%s reason=%s fallback=%s orig_chars=%s ocr_chars=%s orig_q=%.3f ocr_q=%.3f",
             page_num,
             ",".join(page_reasons.get(page_num, [])) or "none",
             "ocr" if chosen_text == ocr_result.text else "text_layer",
             choose_reason,
+            choose_reason == "garbled_force_fallback_short_ocr",
+            len(_visible_chars(original_page_text)),
+            len(_visible_chars(ocr_result.text)),
             _score_page_text_quality(original_page_text),
             _score_page_text_quality(ocr_result.text),
         )

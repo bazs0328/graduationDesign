@@ -154,3 +154,41 @@ def test_extract_pdf_scanned_pdf_with_ocr_disabled_does_not_call_ocr(monkeypatch
     assert result.page_count == 2
     assert result.pages == ["", ""]
     assert result.text == ""
+
+
+def test_pick_page_text_after_ocr_prefers_ocr_when_page_is_garbled(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(te.settings, "pdf_garbled_ocr_force", True)
+    monkeypatch.setattr(te.settings, "pdf_garbled_ocr_min_len_ratio", 0.3)
+
+    original_text = "bAo\n护\nhM\n感\nzSi\n黑\nhEi\n夜"
+    ocr_text = "保护黑夜中的行动"
+
+    chosen, reason = te._pick_page_text_after_ocr(
+        original_text,
+        ocr_text,
+        scanned_pdf=False,
+        min_text_length=10,
+        trigger_reasons=["garbled_text"],
+    )
+
+    assert chosen == ocr_text
+    assert reason == "ocr_forced_garbled"
+
+
+def test_pick_page_text_after_ocr_fallbacks_when_garbled_ocr_is_too_short(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(te.settings, "pdf_garbled_ocr_force", True)
+    monkeypatch.setattr(te.settings, "pdf_garbled_ocr_min_len_ratio", 0.3)
+
+    original_text = "bAo\n护\nhM\n感\n保\nzSi\n黑\nhEi\n夜\nyF\n中\nzhTng\n行"
+    ocr_text = "保护"
+
+    chosen, reason = te._pick_page_text_after_ocr(
+        original_text,
+        ocr_text,
+        scanned_pdf=False,
+        min_text_length=10,
+        trigger_reasons=["garbled_text"],
+    )
+
+    assert chosen == original_text
+    assert reason == "garbled_force_fallback_short_ocr"

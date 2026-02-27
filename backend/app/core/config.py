@@ -34,6 +34,8 @@ class Settings(BaseSettings):
 
     chunk_size: int = 1000
     chunk_overlap: int = 150
+    index_text_cleanup_enabled: bool = True
+    index_text_cleanup_mode: str = "conservative"
     ocr_enabled: bool = True
     ocr_engine: str = "rapidocr"
     ocr_fallback_engines: str = "rapidocr"
@@ -48,6 +50,8 @@ class Settings(BaseSettings):
     pdf_parser_mode: str = "auto"
     pdf_layout_engine: str = "pymupdf"
     pdf_garbled_ocr_enabled: bool = True
+    pdf_garbled_ocr_force: bool = True
+    pdf_garbled_ocr_min_len_ratio: float = 0.30
     pdf_garbled_single_char_line_ratio: float = 0.45
     pdf_garbled_short_line_ratio: float = 0.65
     pdf_extract_images: bool = True

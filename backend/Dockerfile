@@ -8,6 +8,8 @@ WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
     tesseract-ocr \
     tesseract-ocr-chi-sim \
     tesseract-ocr-eng \
