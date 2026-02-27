@@ -1,6 +1,9 @@
 import re
 
-from app.services.index_text_cleaning import clean_text_for_indexing
+from app.services.index_text_cleaning import (
+    clean_text_for_indexing,
+    clean_text_for_indexing_with_stats,
+)
 
 
 def test_clean_text_for_indexing_removes_pinyin_annotation_noise():
@@ -51,7 +54,25 @@ def test_clean_text_for_indexing_removes_short_latin_noise_lines():
     assert clean_text_for_indexing(raw_text) == "中文内容"
 
 
+def test_clean_text_for_indexing_removes_dotted_and_long_latin_noise_lines():
+    raw_text = "人民教育出版社\ndaikocicn\nz.nyong\n作用"
+    cleaned = clean_text_for_indexing(raw_text)
+    assert "daikocicn" not in cleaned
+    assert "z.nyong" not in cleaned
+    assert "人民教育出版社" in cleaned
+    assert "作用" in cleaned
+
+
 def test_clean_text_for_indexing_does_not_clean_when_pair_ratio_is_low():
     raw_text = "我们学习拼音示例时提到家jiQ，但不应该触发全段清洗。"
     cleaned = clean_text_for_indexing(raw_text)
     assert "家jiQ" in cleaned
+
+
+def test_clean_text_for_indexing_stats_include_common_cleanup_fields():
+    raw_text = "ＡＩ\u200b 学习, 进步!\n\n人民教育出版社\n62\n人民教育出版社"
+    cleaned, stats = clean_text_for_indexing_with_stats(raw_text)
+    assert "AI 学习，进步！" in cleaned
+    assert "common_normalizations_applied" in stats
+    assert "latin_noise_lines_removed" in stats
+    assert "header_footer_lines_removed" in stats

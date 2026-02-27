@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     index_text_cleanup_non_pdf_mode: str = "structure_preserving"
     noise_filter_level: str = "balanced"
     noise_drop_low_quality_hits: bool = True
+    lexical_stopwords_enabled: bool = True
+    lexical_stopwords_global_path: str = "data/lexical/stopwords.txt"
+    lexical_userdict_global_path: str = "data/lexical/userdict.txt"
+    lexical_stopwords_kb_rel_path: str = "rag_storage/lexicon/stopwords.txt"
+    lexical_userdict_kb_rel_path: str = "rag_storage/lexicon/userdict.txt"
+    lexical_tokenizer_version: str = "v2"
     ocr_enabled: bool = True
     ocr_engine: str = "rapidocr"
     ocr_fallback_engines: str = "rapidocr"
@@ -67,6 +73,9 @@ class Settings(BaseSettings):
     qa_top_k: int = 4
     qa_fetch_k: int = 12
     qa_bm25_k: int = 6
+    qa_summary_auto_expand_enabled: bool = True
+    qa_summary_top_k: int = 8
+    qa_summary_fetch_k: int = 28
     rag_mode: str = "hybrid"  # dense, hybrid
     rag_dense_weight: float = 0.7
     rag_bm25_weight: float = 0.3

@@ -3,11 +3,14 @@
 from langchain_core.documents import Document
 
 from app.services.qa import (
+    _is_summary_like_question,
+    _resolve_retrieval_window,
     _strip_inline_source_markers,
     build_adaptive_system_prompt,
     build_explain_system_prompt,
     build_sources_and_context,
 )
+from app.services import qa as qa_service
 
 
 def test_adaptive_system_prompt_differs_by_ability_level():
@@ -95,3 +98,60 @@ def test_build_sources_and_context_filters_low_quality_snippet():
     assert len(sources) == 1
     assert sources[0]["snippet"] == ""
     assert "shRn" not in context
+
+
+def test_summary_like_question_detection():
+    assert _is_summary_like_question("请总结这一章的重点内容")
+    assert _is_summary_like_question("Can you summarize this chapter?")
+    assert not _is_summary_like_question("矩阵的特征值怎么计算？")
+
+
+def test_resolve_retrieval_window_expands_for_summary_question(monkeypatch):
+    monkeypatch.setattr(qa_service.settings, "qa_top_k", 4)
+    monkeypatch.setattr(qa_service.settings, "qa_fetch_k", 12)
+    monkeypatch.setattr(qa_service.settings, "qa_summary_auto_expand_enabled", True)
+    monkeypatch.setattr(qa_service.settings, "qa_summary_top_k", 8)
+    monkeypatch.setattr(qa_service.settings, "qa_summary_fetch_k", 28)
+
+    k, fetch_k = _resolve_retrieval_window(
+        question="请总结这个文档的核心知识点",
+        top_k=4,
+        fetch_k=12,
+    )
+
+    assert k == 8
+    assert fetch_k == 28
+
+
+def test_resolve_retrieval_window_keeps_larger_manual_values(monkeypatch):
+    monkeypatch.setattr(qa_service.settings, "qa_top_k", 4)
+    monkeypatch.setattr(qa_service.settings, "qa_fetch_k", 12)
+    monkeypatch.setattr(qa_service.settings, "qa_summary_auto_expand_enabled", True)
+    monkeypatch.setattr(qa_service.settings, "qa_summary_top_k", 8)
+    monkeypatch.setattr(qa_service.settings, "qa_summary_fetch_k", 28)
+
+    k, fetch_k = _resolve_retrieval_window(
+        question="summary this section",
+        top_k=10,
+        fetch_k=40,
+    )
+
+    assert k == 10
+    assert fetch_k == 40
+
+
+def test_resolve_retrieval_window_does_not_expand_when_disabled(monkeypatch):
+    monkeypatch.setattr(qa_service.settings, "qa_top_k", 4)
+    monkeypatch.setattr(qa_service.settings, "qa_fetch_k", 12)
+    monkeypatch.setattr(qa_service.settings, "qa_summary_auto_expand_enabled", False)
+    monkeypatch.setattr(qa_service.settings, "qa_summary_top_k", 8)
+    monkeypatch.setattr(qa_service.settings, "qa_summary_fetch_k", 28)
+
+    k, fetch_k = _resolve_retrieval_window(
+        question="请总结这个文档",
+        top_k=4,
+        fetch_k=12,
+    )
+
+    assert k == 4
+    assert fetch_k == 12

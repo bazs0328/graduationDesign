@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 from unittest.mock import MagicMock
 
 from langchain_core.documents import Document
@@ -57,3 +58,50 @@ def test_ingest_document_indexes_only_text_docs_for_lexical_store(monkeypatch, t
     assert Path(text_path).exists()
     assert appended_docs == [text_doc]
     vectorstore.add_documents.assert_called_once_with([text_doc])
+
+
+def test_ingest_document_writes_lexical_tokens_and_version(monkeypatch, tmp_path):
+    monkeypatch.setattr(ingest_service.settings, "data_dir", str(tmp_path))
+    monkeypatch.setattr(ingest_service.settings, "lexical_stopwords_enabled", True)
+    monkeypatch.setattr(ingest_service.settings, "lexical_tokenizer_version", "v2")
+
+    source_file = Path(tmp_path) / "sample2.txt"
+    source_file.write_text("raw", encoding="utf-8")
+
+    extraction = ExtractionResult(
+        text="我们使用 Python 和 AI 学习矩阵分解。",
+        page_count=1,
+        pages=["我们使用 Python 和 AI 学习矩阵分解。"],
+    )
+    monkeypatch.setattr("app.services.ingest.extract_text", lambda *args, **kwargs: extraction)
+
+    text_doc = Document(
+        page_content="我们使用 Python 和 AI 学习矩阵分解。",
+        metadata={"doc_id": "doc2", "kb_id": "kb2", "source": "sample2.txt", "modality": "text", "chunk": 1},
+    )
+    chunk_result = ChunkBuildResult(
+        text_docs=[text_doc],
+        all_docs=[text_doc],
+        manifest=[{"chunk": 1, "modality": "text"}],
+    )
+    monkeypatch.setattr("app.services.ingest.build_chunked_documents", lambda *args, **kwargs: chunk_result)
+
+    vectorstore = MagicMock()
+    monkeypatch.setattr("app.services.ingest.get_vectorstore", lambda _user_id: vectorstore)
+
+    ingest_document(
+        str(source_file),
+        "sample2.txt",
+        "doc2",
+        "u2",
+        "kb2",
+    )
+
+    lexical_path = Path(tmp_path) / "users" / "u2" / "lexical" / "kb2.jsonl"
+    assert lexical_path.exists()
+    row = json.loads(lexical_path.read_text(encoding="utf-8").strip().splitlines()[0])
+    assert row.get("tokenizer_version") == "v2"
+    tokens = row.get("tokens")
+    assert isinstance(tokens, list)
+    assert "python" in tokens
+    assert "ai" in tokens

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -16,6 +17,7 @@ from app.services.text_extraction import ExtractionResult
 
 CHINESE_SEPARATORS = ["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""]
 logger = logging.getLogger(__name__)
+_PDF_PAGE_NUMBER_LINE_RE = re.compile(r"^(第?\s*\d{1,4}\s*页?|[0-9]{1,4})$")
 
 
 @dataclass
@@ -64,6 +66,115 @@ def _doc_base_metadata(doc_id: str, kb_id: str, filename: str, page: int | None)
     return data
 
 
+def _visible_len(text: str) -> int:
+    return len("".join(ch for ch in str(text or "") if not ch.isspace()))
+
+
+def _normalize_edge_key(text: str) -> str:
+    normalized = str(text or "").strip().lower()
+    normalized = re.sub(r"\s+", "", normalized)
+    return normalized
+
+
+def _extract_edge_lines(page_text: str) -> tuple[str, str]:
+    lines = [line.strip() for line in str(page_text or "").splitlines() if line.strip()]
+    if not lines:
+        return "", ""
+    if len(lines) == 1:
+        return lines[0], lines[0]
+    return lines[0], lines[-1]
+
+
+def _is_repeated_edge_candidate(line: str) -> bool:
+    stripped = str(line or "").strip()
+    if not stripped:
+        return False
+    if _PDF_PAGE_NUMBER_LINE_RE.fullmatch(stripped):
+        return False
+    visible_len = _visible_len(stripped)
+    if visible_len <= 1 or visible_len > 26:
+        return False
+    return True
+
+
+def _build_pdf_repeated_edge_keys(pages: list[str]) -> set[str]:
+    counts: dict[str, int] = {}
+    for page_text in pages or []:
+        top, bottom = _extract_edge_lines(page_text)
+        for line in {top, bottom}:
+            if not _is_repeated_edge_candidate(line):
+                continue
+            key = _normalize_edge_key(line)
+            if not key:
+                continue
+            counts[key] = counts.get(key, 0) + 1
+    return {key for key, count in counts.items() if count >= 2}
+
+
+def _is_pdf_edge_noise_line(line: str, repeated_edge_keys: set[str]) -> bool:
+    stripped = str(line or "").strip()
+    if not stripped:
+        return False
+    if _PDF_PAGE_NUMBER_LINE_RE.fullmatch(stripped):
+        return True
+    key = _normalize_edge_key(stripped)
+    return bool(key and key in repeated_edge_keys)
+
+
+def _remove_pdf_page_edge_noise(page_text: str, repeated_edge_keys: set[str]) -> tuple[str, int]:
+    raw_lines = str(page_text or "").splitlines()
+    if not raw_lines:
+        return "", 0
+    non_empty_indexes = [idx for idx, line in enumerate(raw_lines) if line.strip()]
+    if not non_empty_indexes:
+        return "", 0
+    targets = {non_empty_indexes[0], non_empty_indexes[-1]}
+    removed = 0
+    for idx in targets:
+        if _is_pdf_edge_noise_line(raw_lines[idx], repeated_edge_keys):
+            raw_lines[idx] = ""
+            removed += 1
+    cleaned = "\n".join(raw_lines)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned, removed
+
+
+def _remove_pdf_layout_edge_blocks(
+    blocks: list[Any],
+    repeated_edge_keys: set[str],
+) -> tuple[list[Any], int]:
+    if not blocks:
+        return blocks, 0
+    non_empty_indexes = [
+        idx
+        for idx, block in enumerate(blocks)
+        if str(getattr(block, "text", "") or "").strip()
+    ]
+    if not non_empty_indexes:
+        return blocks, 0
+
+    to_remove: set[int] = set()
+    edge_candidates = [non_empty_indexes[0], non_empty_indexes[-1]]
+    for idx in edge_candidates:
+        block = blocks[idx]
+        block_text = str(getattr(block, "text", "") or "").strip()
+        if not block_text:
+            continue
+        block_lines = [line.strip() for line in block_text.splitlines() if line.strip()]
+        if not block_lines:
+            continue
+        probe = block_lines[0] if idx == non_empty_indexes[0] else block_lines[-1]
+        if len(block_lines) > 2 and not _PDF_PAGE_NUMBER_LINE_RE.fullmatch(probe):
+            continue
+        if _is_pdf_edge_noise_line(probe, repeated_edge_keys):
+            to_remove.add(idx)
+
+    if not to_remove:
+        return blocks, 0
+    cleaned = [block for idx, block in enumerate(blocks) if idx not in to_remove]
+    return cleaned, len(to_remove)
+
+
 def _prepare_index_text(
     segment_text: str,
     *,
@@ -85,14 +196,17 @@ def _prepare_index_text(
         cleaned, stats = clean_text_for_indexing_with_stats(text, mode=mode)
         if cleaned != text:
             logger.info(
-                "Index text cleanup applied scope=pdf doc_id=%s page=%s before=%s after=%s pairs_removed=%s noise_lines_removed=%s short_line_groups_merged=%s",
+                "Index text cleanup applied scope=pdf doc_id=%s page=%s before=%s after=%s pairs_removed=%s noise_lines_removed=%s latin_noise_lines_removed=%s short_line_groups_merged=%s common_normalizations_applied=%s header_footer_lines_removed=%s",
                 meta.get("doc_id"),
                 meta.get("page"),
                 stats.get("before_len"),
                 stats.get("after_len"),
                 stats.get("pairs_removed"),
                 stats.get("noise_lines_removed"),
+                stats.get("latin_noise_lines_removed"),
                 stats.get("short_line_groups_merged"),
+                stats.get("common_normalizations_applied"),
+                stats.get("header_footer_lines_removed"),
             )
         return cleaned.strip()
 
@@ -193,11 +307,23 @@ def build_chunked_documents(
     splitter = _splitter(chunk_size, chunk_overlap)
 
     text_docs: list[LCDocument] = []
+    pdf_repeated_edge_keys = (
+        _build_pdf_repeated_edge_keys(extraction.pages)
+        if suffix == ".pdf"
+        else set()
+    )
+    removed_pdf_edge_lines_total = 0
 
     if suffix == ".pdf" and getattr(extraction, "page_blocks", None):
         for page_layout in extraction.page_blocks or []:
             override_text = (getattr(page_layout, "ocr_override_text", None) or "").strip()
             page_quality_score = getattr(page_layout, "text_quality_score", None)
+            if override_text:
+                override_text, removed_count = _remove_pdf_page_edge_noise(
+                    override_text,
+                    pdf_repeated_edge_keys,
+                )
+                removed_pdf_edge_lines_total += removed_count
             if override_text:
                 meta = _doc_base_metadata(doc_id, kb_id, filename, getattr(page_layout, "page", None))
                 if page_quality_score is not None:
@@ -216,7 +342,13 @@ def build_chunked_documents(
                 )
             else:
                 buffer: _BufferedTextSegment | None = None
-                for block in getattr(page_layout, "ordered_blocks", []) or []:
+                ordered_blocks = list(getattr(page_layout, "ordered_blocks", []) or [])
+                ordered_blocks, removed_count = _remove_pdf_layout_edge_blocks(
+                    ordered_blocks,
+                    pdf_repeated_edge_keys,
+                )
+                removed_pdf_edge_lines_total += removed_count
+                for block in ordered_blocks:
                     text = (getattr(block, "text", None) or "").strip()
                     if not text:
                         continue
@@ -263,6 +395,13 @@ def build_chunked_documents(
     else:
         if suffix in {".pdf", ".pptx"}:
             for page_num, page_text in enumerate(extraction.pages, start=1):
+                cleaned_page_input = page_text
+                if suffix == ".pdf":
+                    cleaned_page_input, removed_count = _remove_pdf_page_edge_noise(
+                        page_text,
+                        pdf_repeated_edge_keys,
+                    )
+                    removed_pdf_edge_lines_total += removed_count
                 meta = {
                     "doc_id": doc_id,
                     "kb_id": kb_id,
@@ -270,7 +409,7 @@ def build_chunked_documents(
                     "page": page_num,
                 }
                 cleaned_page_text = _prepare_index_text(
-                    page_text,
+                    cleaned_page_input,
                     meta=meta,
                     enable_cleanup=True,
                     format_hint=suffix,
@@ -318,6 +457,13 @@ def build_chunked_documents(
                         },
                     )
                 )
+
+    if removed_pdf_edge_lines_total > 0:
+        logger.info(
+            "PDF edge cleanup removed header/footer lines doc_id=%s total_removed=%s",
+            doc_id,
+            removed_pdf_edge_lines_total,
+        )
 
     def _sort_key(doc: LCDocument) -> tuple[int, int, str]:
         meta = doc.metadata or {}

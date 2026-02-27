@@ -3,11 +3,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.services.text_noise_guard import clean_fragment_with_stats
+
 
 _CHINESE_CHAR_RE = re.compile(r"[\u4e00-\u9fff]")
 _PINYIN_PAIR_RE = re.compile(r"([\u4e00-\u9fff])([A-Za-z]{1,8})")
-_LATIN_TOKEN_RE = re.compile(r"[A-Za-z]+")
-_LATIN_LINE_RE = re.compile(r"^[A-Za-z ]+$")
 
 
 def _normalize_text(text: str) -> str:
@@ -42,36 +42,6 @@ def _process_paragraph(paragraph: str) -> tuple[str, int, int, bool]:
 
     replaced_text, replaced_count = _PINYIN_PAIR_RE.subn(r"\1", text)
     return replaced_text, pair_count, replaced_count, True
-
-
-def _looks_like_short_latin_noise_line(line: str) -> bool:
-    stripped = (line or "").strip()
-    if not stripped:
-        return False
-    if _CHINESE_CHAR_RE.search(stripped):
-        return False
-    if len(stripped) > 24:
-        return False
-    if not _LATIN_LINE_RE.fullmatch(stripped):
-        return False
-
-    tokens = _LATIN_TOKEN_RE.findall(stripped)
-    if not tokens:
-        return False
-    if any(len(token) > 8 for token in tokens):
-        return False
-    return True
-
-
-def _remove_noise_lines(text: str) -> tuple[str, int]:
-    removed = 0
-    out_lines: list[str] = []
-    for line in (text or "").split("\n"):
-        if _looks_like_short_latin_noise_line(line):
-            removed += 1
-            continue
-        out_lines.append(line)
-    return "\n".join(out_lines), removed
 
 
 def _visible_len(text: str) -> int:
@@ -116,6 +86,25 @@ def _merge_short_lines(text: str) -> tuple[str, int]:
     return "\n".join(output), merged_groups
 
 
+def _normalize_chinese_context_ascii_punct(text: str) -> str:
+    normalized = str(text or "")
+    punct_map = {
+        ",": "，",
+        ".": "。",
+        ";": "；",
+        ":": "：",
+        "!": "！",
+        "?": "？",
+    }
+    for ascii_punct, zh_punct in punct_map.items():
+        normalized = re.sub(
+            rf"(?<=[\u4e00-\u9fff]){re.escape(ascii_punct)}(?=$|[\s”’」』】）)])",
+            zh_punct,
+            normalized,
+        )
+    return normalized
+
+
 def clean_text_for_indexing_with_stats(
     text: str,
     *,
@@ -133,7 +122,10 @@ def clean_text_for_indexing_with_stats(
         "pairs_detected": 0,
         "pairs_removed": 0,
         "noise_lines_removed": 0,
+        "latin_noise_lines_removed": 0,
         "short_line_groups_merged": 0,
+        "common_normalizations_applied": 0,
+        "header_footer_lines_removed": 0,
     }
     if not normalized:
         return "", stats
@@ -153,12 +145,23 @@ def clean_text_for_indexing_with_stats(
         cleaned_paragraphs.append(cleaned)
 
     joined = "\n\n".join(cleaned_paragraphs)
-    without_noise, removed_lines = _remove_noise_lines(joined)
-    merged_short, merged_groups = _merge_short_lines(without_noise)
+    finalized, extra_stats = clean_fragment_with_stats(
+        joined,
+        mode="balanced",
+        format_hint=".pdf",
+        enable_pinyin_cleanup=False,
+    )
+    merged_short, short_groups = _merge_short_lines(finalized)
     finalized = _normalize_text(merged_short)
+    finalized = _normalize_chinese_context_ascii_punct(finalized)
+    latin_removed = int(extra_stats.get("latin_noise_lines_removed", 0) or 0)
+    merged_groups = int(extra_stats.get("line_merges_applied", 0) or 0) + short_groups
+    common_norms = int(extra_stats.get("common_normalizations_applied", 0) or 0)
 
-    stats["noise_lines_removed"] = removed_lines
+    stats["noise_lines_removed"] = latin_removed
+    stats["latin_noise_lines_removed"] = latin_removed
     stats["short_line_groups_merged"] = merged_groups
+    stats["common_normalizations_applied"] = common_norms
     stats["after_len"] = len(finalized)
     return finalized, stats
 

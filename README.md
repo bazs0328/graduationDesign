@@ -72,7 +72,19 @@ Backend settings are in `backend/.env`:
 - `INDEX_TEXT_CLEANUP_MODE=conservative` (PDF-oriented cleanup mode)
 - `INDEX_TEXT_CLEANUP_NON_PDF_MODE=structure_preserving` (non-PDF cleanup mode; keeps markdown/code structure)
 - `NOISE_FILTER_LEVEL=balanced|conservative|aggressive|structure_preserving` (shared noise filter level for QA/Preview/Quiz)
+- Text cleanup includes common normalization (NFKC, invisible-char cleanup, whitespace normalization, Chinese-context punctuation normalization, hard line-break repair) plus conservative Latin noise-line filtering.
+- PDF chunking also applies conservative header/footer cleanup (repeated edge lines + page-number lines) before indexing.
+- Existing documents are not auto-migrated: use document `reprocess` to apply new cleanup rules to historical files.
 - `NOISE_DROP_LOW_QUALITY_HITS=true|false` (drop low-quality retrieval hits before building sources/context)
+- `QA_TOP_K=4`, `QA_FETCH_K=12` (base retrieval window for normal QA)
+- `QA_SUMMARY_AUTO_EXPAND_ENABLED=true|false` (auto expand retrieval for summary-like questions)
+- `QA_SUMMARY_TOP_K=8`, `QA_SUMMARY_FETCH_K=28` (summary-like question retrieval floor; system keeps larger manual values)
+- `LEXICAL_STOPWORDS_ENABLED=true|false` (enable conservative stopword filtering for BM25 lexical tokens)
+- `LEXICAL_STOPWORDS_GLOBAL_PATH=data/lexical/stopwords.txt` (global stopword file; one token per line, `#` for comments)
+- `LEXICAL_USERDICT_GLOBAL_PATH=data/lexical/userdict.txt` (global jieba user dictionary file)
+- `LEXICAL_STOPWORDS_KB_REL_PATH=rag_storage/lexicon/stopwords.txt` (KB-level stopword file relative to each KB directory)
+- `LEXICAL_USERDICT_KB_REL_PATH=rag_storage/lexicon/userdict.txt` (KB-level jieba user dictionary file relative to each KB directory)
+- `LEXICAL_TOKENIZER_VERSION=v2` (lexical tokenization schema/version marker for BM25 entries)
 - `OCR_ENABLED=true|false` (enable OCR fallback for scanned PDFs)
 - `OCR_ENGINE=rapidocr|tesseract|cloud` (primary OCR engine, `cloud` reserved for future)
 - `OCR_FALLBACK_ENGINES=rapidocr` (comma-separated OCR fallback chain, de-duplicated; default is no Tesseract fallback)
@@ -172,6 +184,13 @@ python3 /app/tests/qa_regression.py \
 - Uploaded files are stored per user in `backend/data/users/<user_id>/uploads`.
 - Parsed text is stored in `backend/data/users/<user_id>/text`.
 - Vector store persists in `backend/data/users/<user_id>/chroma`.
+- Lexical BM25 cache persists in `backend/data/users/<user_id>/lexical/<kb_id>.jsonl` and now stores optional `tokens` + `tokenizer_version`.
+- For custom lexicon files:
+  - Global: `data/lexical/stopwords.txt`, `data/lexical/userdict.txt`
+  - KB-level: `backend/data/users/<user_id>/kb/<kb_id>/rag_storage/lexicon/stopwords.txt` and `.../userdict.txt`
+- To backfill historical lexical rows with the new token fields:
+  - `python3 backend/scripts/backfill_lexical_tokens.py` (dry-run)
+  - `python3 backend/scripts/backfill_lexical_tokens.py --execute`
 - Runtime now uses text-only retrieval/source preview; image retrieval/preview endpoints are removed.
 - To purge historical image artifacts and old image metadata:
   - `python3 backend/scripts/purge_image_data.py --dry-run`

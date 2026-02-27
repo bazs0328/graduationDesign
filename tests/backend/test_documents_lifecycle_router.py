@@ -700,6 +700,43 @@ def test_preview_doc_source_prefers_text_when_query_hits_text_on_same_page(clien
     assert "矩阵" in payload["snippet"]
 
 
+def test_preview_doc_source_cleans_common_noise_lines(client, db_session):
+    user_id = "doc_preview_user_clean_noise"
+    kb_id = "doc_preview_kb_clean_noise"
+    doc_id = "doc_preview_clean_noise"
+    _seed_user_kbs_doc(
+        db_session,
+        user_id=user_id,
+        kb_id=kb_id,
+        doc_id=doc_id,
+    )
+
+    entries = [
+        {
+            "id": "txt-noise-1",
+            "content": "人民教育出版社\ndaikocicn\nz.nyong\n改变生活, 带来便利!",
+            "metadata": {
+                "page": 1,
+                "chunk": 1,
+                "source": "origin.txt",
+                "doc_id": doc_id,
+            },
+        }
+    ]
+
+    with patch("app.routers.documents.get_doc_vector_entries", return_value=entries):
+        resp = client.get(
+            f"/api/docs/{doc_id}/preview",
+            params={"user_id": user_id, "page": 1, "chunk": 1},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert "daikocicn" not in payload["snippet"]
+    assert "z.nyong" not in payload["snippet"]
+    assert "改变生活，带来便利！" in payload["snippet"]
+
+
 def test_doc_image_preview_route_is_removed(client):
     resp = client.get(
         "/api/docs/doc_image_removed/image",

@@ -24,6 +24,17 @@ QA_EXPLAIN_SECTION_TITLES = [
     "自测问题",
 ]
 
+_QA_TOP_K_MIN = 1
+_QA_TOP_K_MAX = 20
+_QA_FETCH_K_MIN = 1
+_QA_FETCH_K_MAX = 50
+
+_SUMMARY_QUERY_PATTERNS = [
+    re.compile(r"\b(summary|summari[sz]e|overview|recap|synopsis)\b", re.IGNORECASE),
+    re.compile(r"(总结|概括|归纳|梳理|总览|综述|提炼|总结一下|概述)"),
+    re.compile(r"(全文|整篇|本章|这一章|这章|本节|这节).{0,12}(讲了什么|主要内容|核心内容|重点)"),
+]
+
 _QA_HUMAN_TEMPLATE = (
     "Conversation history:\n{history}\n\nQuestion: {question}\n\nContext:\n{context}\n\nAnswer:"
 )
@@ -62,6 +73,62 @@ def normalize_qa_mode(mode: str | None) -> str:
     if normalized == QA_MODE_EXPLAIN:
         return QA_MODE_EXPLAIN
     return QA_MODE_NORMAL
+
+
+def _is_summary_like_question(question: str | None) -> bool:
+    normalized = " ".join(str(question or "").strip().split())
+    if not normalized:
+        return False
+    return any(pattern.search(normalized) for pattern in _SUMMARY_QUERY_PATTERNS)
+
+
+def _clamp_int(value: int, *, lower: int, upper: int) -> int:
+    if value < lower:
+        return lower
+    if value > upper:
+        return upper
+    return value
+
+
+def _resolve_retrieval_window(
+    *,
+    question: str,
+    top_k: int | None,
+    fetch_k: int | None,
+) -> tuple[int, int]:
+    k = int(top_k or settings.qa_top_k or _QA_TOP_K_MIN)
+    fetch = int(fetch_k or settings.qa_fetch_k or k)
+    k = _clamp_int(k, lower=_QA_TOP_K_MIN, upper=_QA_TOP_K_MAX)
+    fetch = _clamp_int(fetch, lower=_QA_FETCH_K_MIN, upper=_QA_FETCH_K_MAX)
+    if fetch < k:
+        fetch = k
+
+    if not bool(getattr(settings, "qa_summary_auto_expand_enabled", True)):
+        return k, fetch
+    if not _is_summary_like_question(question):
+        return k, fetch
+
+    summary_top_k = int(getattr(settings, "qa_summary_top_k", 8) or 8)
+    summary_fetch_k = int(getattr(settings, "qa_summary_fetch_k", 28) or 28)
+    summary_top_k = _clamp_int(summary_top_k, lower=_QA_TOP_K_MIN, upper=_QA_TOP_K_MAX)
+    summary_fetch_k = _clamp_int(summary_fetch_k, lower=_QA_FETCH_K_MIN, upper=_QA_FETCH_K_MAX)
+    if summary_fetch_k < summary_top_k:
+        summary_fetch_k = summary_top_k
+
+    resolved_k = max(k, summary_top_k)
+    resolved_fetch = max(fetch, summary_fetch_k)
+    if resolved_fetch < resolved_k:
+        resolved_fetch = resolved_k
+
+    if resolved_k != k or resolved_fetch != fetch:
+        logger.info(
+            "QA retrieval expanded for summary-like query k=%s->%s fetch_k=%s->%s",
+            k,
+            resolved_k,
+            fetch,
+            resolved_fetch,
+        )
+    return resolved_k, resolved_fetch
 
 
 def build_adaptive_system_prompt(
@@ -376,10 +443,11 @@ def retrieve_documents(
     elif kb_id:
         search_filter = {"kb_id": kb_id}
 
-    k = top_k or settings.qa_top_k
-    fetch = fetch_k or settings.qa_fetch_k
-    if fetch < k:
-        fetch = k
+    k, fetch = _resolve_retrieval_window(
+        question=question,
+        top_k=top_k,
+        fetch_k=fetch_k,
+    )
 
     docs = []
     if settings.rag_mode == "dense":

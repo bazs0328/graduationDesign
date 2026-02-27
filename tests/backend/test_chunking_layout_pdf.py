@@ -142,3 +142,32 @@ def test_build_chunked_documents_cleans_non_pdf_text_with_structure_preserving_m
     assert "hM" not in result.text_docs[0].page_content
     assert "zhTng" not in result.text_docs[0].page_content
     assert "Python 和 AI" in result.text_docs[0].page_content
+
+
+def test_build_chunked_documents_removes_pdf_repeated_header_footer_and_page_numbers():
+    extraction = ExtractionResult(
+        text="人民教育出版社\n单元回顾\n正文一\n62\n\n人民教育出版社\n正文二\n63",
+        page_count=2,
+        pages=[
+            "人民教育出版社\n单元回顾\n正文一\n62",
+            "人民教育出版社\n正文二\n63",
+        ],
+    )
+
+    result = build_chunked_documents(
+        extraction=extraction,
+        suffix=".pdf",
+        doc_id="doc-pdf-edge",
+        user_id="u1",
+        kb_id="kb1",
+        filename="edge.pdf",
+        chunk_size=1000,
+        chunk_overlap=0,
+    )
+
+    combined = "\n".join(doc.page_content for doc in result.text_docs)
+    assert "人民教育出版社" not in combined
+    assert "\n62" not in combined
+    assert "\n63" not in combined
+    assert "正文一" in combined
+    assert "正文二" in combined

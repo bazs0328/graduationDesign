@@ -191,3 +191,34 @@ def test_quiz_context_filters_latin_fragment_noise_seed():
 
     assert "shRn" not in result.text
     assert "线性变换" in result.text
+
+
+def test_quiz_context_filters_dotted_and_long_latin_noise_seed():
+    seed = _seed(
+        doc_id="doc-noise-2",
+        kb_id="kb-1",
+        source="noise.txt",
+        chunk=2,
+        page=1,
+        text="人民教育出版社\ndaikocicn\nz.nyong\n作用",
+    )
+    clean_entry = _entry(
+        doc_id="doc-noise-2",
+        kb_id="kb-1",
+        source="noise.txt",
+        chunk=2,
+        page=1,
+        text="工具发明改变生活，带来便利。",
+    )
+
+    with patch("app.services.quiz_context.get_doc_vector_entries", return_value=[clean_entry]):
+        result = build_quiz_context_from_seeds(
+            user_id="u1",
+            seed_docs=[seed],
+            max_chars=1800,
+            kb_scope=False,
+        )
+
+    assert "daikocicn" not in result.text
+    assert "z.nyong" not in result.text
+    assert "改变生活，带来便利" in result.text

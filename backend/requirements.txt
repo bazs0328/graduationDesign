@@ -21,6 +21,7 @@ python-docx
 python-pptx
 charset-normalizer
 rank-bm25
+jieba
 dashscope
 pytest
 pytest-asyncio
