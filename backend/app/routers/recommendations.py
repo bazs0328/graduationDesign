@@ -387,6 +387,8 @@ def get_recommendations(
                     reason="还未进行测验，建议先做一次掌握度评估。",
                     params=params,
                     cta="开始测验",
+                    # For first-time calibration, keep quiz above review to match ready_for_practice guidance.
+                    priority=86,
                 )
             elif avg_score < 0.65:
                 params = {

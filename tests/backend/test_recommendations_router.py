@@ -73,6 +73,66 @@ def test_recommendations_blocked_doc_has_next_step(client, db_session):
     assert data["next_step"]["action"]["type"] == "summary"
 
 
+def test_recommendations_ready_for_practice_prioritizes_initial_quiz(client, db_session):
+    user_id = "rec_user_ready_practice"
+    kb_id = "rec_kb_ready_practice"
+    doc_id = "rec_doc_ready_practice"
+    _seed_user_kb_doc(
+        db_session,
+        user_id=user_id,
+        kb_id=kb_id,
+        doc_id=doc_id,
+        filename="ready-practice.txt",
+    )
+
+    db_session.add(
+        SummaryRecord(
+            id="sum-ready-practice",
+            user_id=user_id,
+            doc_id=doc_id,
+            summary_text="summary",
+        )
+    )
+    db_session.add(
+        KeypointRecord(
+            id="kp-ready-practice-record",
+            user_id=user_id,
+            doc_id=doc_id,
+            points_json='["A","B"]',
+        )
+    )
+    db_session.add(
+        Keypoint(
+            id="kp-ready-practice-1",
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            text="牛顿第二定律",
+            explanation="e1",
+            mastery_level=0.2,
+            attempt_count=0,
+            correct_count=0,
+        )
+    )
+    db_session.commit()
+
+    with patch("app.routers.recommendations.generate_learning_path", return_value=([], [], [], [], {})):
+        resp = client.get(
+            f"/api/recommendations?user_id={user_id}&kb_id={kb_id}&limit=5"
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    item = data["items"][0]
+    assert item["status"] == "ready_for_practice"
+    actions = {action["type"]: action for action in item["actions"]}
+    assert "review" in actions
+    assert "quiz" in actions
+    assert actions["quiz"]["priority"] > actions["review"]["priority"]
+    assert item["primary_action"]["type"] == "quiz"
+    assert data["next_step"]["action"]["type"] == "quiz"
+
+
 def test_recommendations_need_practice_include_review_and_quiz(client, db_session):
     user_id = "rec_user_practice"
     kb_id = "rec_kb_practice"
