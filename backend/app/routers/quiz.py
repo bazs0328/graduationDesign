@@ -38,6 +38,7 @@ from app.services.keypoints import (
     match_keypoints_by_kb,
 )
 from app.services.keypoint_dedup import (
+    build_keypoint_cluster_index,
     collapse_kb_keypoint_ids_to_representatives,
     cluster_kb_keypoints,
     normalize_keypoint_text,
@@ -227,9 +228,97 @@ def _build_kb_member_to_rep_index(
     kb_id: str,
 ) -> dict[str, str]:
     """Build a KB member->representative index once for dedup-aware mastery updates."""
-    from app.services.keypoint_dedup import build_keypoint_cluster_index
-
     return build_keypoint_cluster_index(cluster_kb_keypoints(db, user_id, kb_id))
+
+
+def _build_kb_mastery_guard_context(
+    db: Session,
+    user_id: str,
+    kb_id: str,
+) -> tuple[dict[str, str], set[str]]:
+    """Build KB dedup + learning-path unlock context once per request."""
+    clusters = cluster_kb_keypoints(db, user_id, kb_id)
+    member_to_rep = build_keypoint_cluster_index(clusters)
+    representative_keypoints = [cluster.representative_keypoint for cluster in clusters]
+    cluster_map = {cluster.representative_id: cluster for cluster in clusters}
+    unlocked_ids = get_unlocked_keypoint_ids(
+        db,
+        user_id,
+        kb_id,
+        keypoints=representative_keypoints,
+        cluster_map=cluster_map,
+    )
+    return member_to_rep, unlocked_ids
+
+
+def _clean_bound_keypoint_ids(
+    values: object,
+) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        if not isinstance(item, str):
+            continue
+        candidate = item.strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        cleaned.append(candidate)
+    return cleaned
+
+
+def _resolve_primary_keypoint_for_submit(
+    db: Session,
+    q: dict,
+    user_id: str,
+    kb_id: str | None,
+    kb_member_to_rep: dict[str, str] | None,
+    unlocked_ids: set[str] | None,
+) -> tuple[str | None, str | None]:
+    """Resolve one submit-time target keypoint from pre-bound fields only."""
+    primary_raw = q.get("primary_keypoint_id")
+    primary_id = primary_raw.strip() if isinstance(primary_raw, str) else ""
+    candidate_ids = _clean_bound_keypoint_ids(q.get("keypoint_ids"))
+
+    if kb_id:
+        if primary_id:
+            collapsed_primary = _collapse_kb_keypoint_ids(
+                db,
+                user_id,
+                kb_id,
+                [primary_id],
+                kb_member_to_rep=kb_member_to_rep,
+            )
+            primary_id = collapsed_primary[0] if collapsed_primary else ""
+        candidate_ids = _collapse_kb_keypoint_ids(
+            db,
+            user_id,
+            kb_id,
+            candidate_ids,
+            kb_member_to_rep=kb_member_to_rep,
+        )
+
+    ordered_candidates: list[str] = []
+    seen: set[str] = set()
+    if primary_id and primary_id not in seen:
+        seen.add(primary_id)
+        ordered_candidates.append(primary_id)
+    for kp_id in candidate_ids:
+        if kp_id in seen:
+            continue
+        seen.add(kp_id)
+        ordered_candidates.append(kp_id)
+
+    if not ordered_candidates:
+        return None, "missing_binding"
+    if unlocked_ids is None:
+        return ordered_candidates[0], None
+    for kp_id in ordered_candidates:
+        if kp_id in unlocked_ids:
+            return kp_id, None
+    return None, "locked"
 
 
 def _match_keypoints_by_free_text(
@@ -317,6 +406,7 @@ def _prebind_quiz_question_keypoints(
             continue
 
         q["keypoint_ids"] = kp_ids
+        q["primary_keypoint_id"] = kp_ids[0]
         bound_questions += 1
         bound_refs += len(kp_ids)
 
@@ -604,12 +694,22 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
     correct = 0
     mastery_deltas: dict[str, tuple[float, float]] = {}
     kb_member_to_rep: dict[str, str] | None = None
+    unlocked_ids: set[str] | None = None
+    updated_count = 0
+    skipped_missing_binding = 0
+    skipped_locked = 0
     effective_kb_id = resolve_effective_kb_id(
         db,
         resolved_user_id,
         doc_id=quiz.doc_id,
         kb_id=quiz.kb_id,
     )
+    if effective_kb_id:
+        kb_member_to_rep, unlocked_ids = _build_kb_mastery_guard_context(
+            db,
+            resolved_user_id,
+            effective_kb_id,
+        )
 
     for idx, q in enumerate(questions):
         expected = q.get("answer_index")
@@ -620,42 +720,55 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
         if is_correct:
             correct += 1
 
-        if effective_kb_id and kb_member_to_rep is None:
-            # Lazy-load once per submission to avoid repeated KB clustering per question.
-            kb_member_to_rep = _build_kb_member_to_rep_index(
-                db,
-                resolved_user_id,
-                effective_kb_id,
-            )
-
-        kp_ids = _resolve_keypoints_for_question(
+        target_kp_id, skip_reason = _resolve_primary_keypoint_for_submit(
             db,
             q,
             resolved_user_id,
-            quiz.doc_id,
             effective_kb_id,
-            kb_member_to_rep=kb_member_to_rep,
+            kb_member_to_rep,
+            unlocked_ids,
         )
-        for kp_id in kp_ids:
-            delta = record_quiz_result(db, kp_id, is_correct)
-            if not delta:
-                continue
-            old_lv, new_lv = delta
-            previous = mastery_deltas.get(kp_id)
-            if previous:
-                # Keep the initial old level, but always refresh to the latest new level
-                # so quiz summary stays consistent with persisted mastery.
-                mastery_deltas[kp_id] = (previous[0], new_lv)
+        if not target_kp_id:
+            if skip_reason == "locked":
+                skipped_locked += 1
             else:
-                mastery_deltas[kp_id] = (old_lv, new_lv)
+                skipped_missing_binding += 1
+            continue
+
+        delta = record_quiz_result(db, target_kp_id, is_correct)
+        if not delta:
+            skipped_missing_binding += 1
+            continue
+
+        updated_count += 1
+        old_lv, new_lv = delta
+        previous = mastery_deltas.get(target_kp_id)
+        if previous:
+            # Keep the initial old level, but always refresh to the latest new level
+            # so quiz summary stays consistent with persisted mastery.
+            mastery_deltas[target_kp_id] = (previous[0], new_lv)
+        else:
+            mastery_deltas[target_kp_id] = (old_lv, new_lv)
+
+    logger.info(
+        "Quiz submit mastery summary quiz_id=%s user_id=%s total=%s updated_count=%s skipped_missing_binding=%s skipped_locked=%s",
+        payload.quiz_id,
+        resolved_user_id,
+        total,
+        updated_count,
+        skipped_missing_binding,
+        skipped_locked,
+    )
     if total > 0 and not mastery_deltas:
         logger.warning(
-            "Quiz submit produced no mastery updates quiz_id=%s user_id=%s doc_id=%s kb_id=%s total=%s",
+            "Quiz submit produced no mastery updates quiz_id=%s user_id=%s doc_id=%s kb_id=%s total=%s skipped_missing_binding=%s skipped_locked=%s",
             payload.quiz_id,
             resolved_user_id,
             quiz.doc_id,
             quiz.kb_id,
             total,
+            skipped_missing_binding,
+            skipped_locked,
         )
 
     mastery_updates: list[MasteryUpdate] = []

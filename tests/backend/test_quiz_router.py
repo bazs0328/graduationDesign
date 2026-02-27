@@ -98,6 +98,7 @@ def test_quiz_generate_persists_hidden_keypoint_ids_but_response_omits_them(
     stored_questions = json.loads(quiz.questions_json)
     assert stored_questions
     assert stored_questions[0]["keypoint_ids"] == ["kp-bound-1"]
+    assert stored_questions[0]["primary_keypoint_id"] == "kp-bound-1"
 
 
 def test_quiz_generate_with_kb_id_success(client, seeded_session):
@@ -371,6 +372,8 @@ def test_quiz_submit_mastery_updates_track_final_level(client, db_session, seede
                         "answer_index": 0,
                         "explanation": "e1",
                         "concepts": ["链式法则"],
+                        "keypoint_ids": [keypoint_id],
+                        "primary_keypoint_id": keypoint_id,
                     },
                     {
                         "question": "q2",
@@ -378,6 +381,8 @@ def test_quiz_submit_mastery_updates_track_final_level(client, db_session, seede
                         "answer_index": 1,
                         "explanation": "e2",
                         "concepts": ["链式法则"],
+                        "keypoint_ids": [keypoint_id],
+                        "primary_keypoint_id": keypoint_id,
                     },
                 ]
             ),
@@ -385,18 +390,14 @@ def test_quiz_submit_mastery_updates_track_final_level(client, db_session, seede
     )
     db_session.commit()
 
-    with patch(
-        "app.routers.quiz._resolve_keypoints_for_question",
-        return_value=[keypoint_id],
-    ):
-        submit = client.post(
-            "/api/quiz/submit",
-            json={
-                "quiz_id": quiz_id,
-                "user_id": user_id,
-                "answers": [0, 0],  # first correct, second wrong
-            },
-        )
+    submit = client.post(
+        "/api/quiz/submit",
+        json={
+            "quiz_id": quiz_id,
+            "user_id": user_id,
+            "answers": [0, 0],  # first correct, second wrong
+        },
+    )
 
     assert submit.status_code == 200
     data = submit.json()
@@ -404,8 +405,8 @@ def test_quiz_submit_mastery_updates_track_final_level(client, db_session, seede
     update = data["mastery_updates"][0]
     assert update["keypoint_id"] == keypoint_id
     assert update["old_level"] == pytest.approx(0.2)
-    # EMA with alpha=0.3: 0.2 -> 0.44 (correct) -> 0.308 (wrong)
-    assert update["new_level"] == pytest.approx(0.308, abs=1e-6)
+    # EMA with alpha=0.15: 0.2 -> 0.32 (correct) -> 0.272 (wrong)
+    assert update["new_level"] == pytest.approx(0.272, abs=1e-6)
 
 
 def test_quiz_submit_uses_hidden_keypoint_ids_without_concept_matching(
@@ -470,6 +471,302 @@ def test_quiz_submit_uses_hidden_keypoint_ids_without_concept_matching(
     assert keypoint is not None
     assert int(keypoint.attempt_count or 0) == 1
     assert float(keypoint.mastery_level or 0.0) > 0.0
+
+
+def test_quiz_submit_updates_only_one_keypoint_with_multiple_bound_candidates(
+    client, db_session, seeded_session
+):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    primary_id = "kp-quiz-primary-only-1"
+    secondary_id = "kp-quiz-primary-only-2"
+    quiz_id = "quiz-primary-only-1"
+
+    db_session.add_all(
+        [
+            Keypoint(
+                id=primary_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="主知识点",
+                mastery_level=0.0,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            Keypoint(
+                id=secondary_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="次知识点",
+                mastery_level=0.0,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            Quiz(
+                id=quiz_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                difficulty="easy",
+                question_type="mcq",
+                questions_json=json.dumps(
+                    [
+                        {
+                            "question": "q1",
+                            "options": ["A", "B", "C", "D"],
+                            "answer_index": 0,
+                            "explanation": "e1",
+                            "concepts": ["主知识点", "次知识点"],
+                            "keypoint_ids": [primary_id, secondary_id],
+                        }
+                    ]
+                ),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    resp = client.post(
+        "/api/quiz/submit",
+        json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["mastery_updates"]) == 1
+    assert data["mastery_updates"][0]["keypoint_id"] == primary_id
+
+    db_session.expire_all()
+    primary = db_session.query(Keypoint).filter(Keypoint.id == primary_id).first()
+    secondary = db_session.query(Keypoint).filter(Keypoint.id == secondary_id).first()
+    assert primary is not None and secondary is not None
+    assert int(primary.attempt_count or 0) == 1
+    assert int(secondary.attempt_count or 0) == 0
+
+
+def test_quiz_submit_locked_primary_keypoint_is_skipped(
+    client, db_session, seeded_session
+):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    prereq_id = "kp-quiz-lock-prereq-1"
+    locked_id = "kp-quiz-lock-target-1"
+    quiz_id = "quiz-lock-target-1"
+
+    db_session.add_all(
+        [
+            Keypoint(
+                id=prereq_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="前置基础",
+                mastery_level=0.2,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            Keypoint(
+                id=locked_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="未解锁进阶",
+                mastery_level=0.0,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            KeypointDependency(
+                id="quiz-lock-dep-1",
+                kb_id=kb_id,
+                from_keypoint_id=prereq_id,
+                to_keypoint_id=locked_id,
+                relation=DEPENDENCY_RELATION,
+                confidence=0.95,
+            ),
+            Quiz(
+                id=quiz_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                difficulty="easy",
+                question_type="mcq",
+                questions_json=json.dumps(
+                    [
+                        {
+                            "question": "q1",
+                            "options": ["A", "B", "C", "D"],
+                            "answer_index": 0,
+                            "explanation": "e1",
+                            "concepts": ["未解锁进阶"],
+                            "keypoint_ids": [locked_id],
+                            "primary_keypoint_id": locked_id,
+                        }
+                    ]
+                ),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    resp = client.post(
+        "/api/quiz/submit",
+        json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mastery_updates"] == []
+
+    db_session.expire_all()
+    locked = db_session.query(Keypoint).filter(Keypoint.id == locked_id).first()
+    assert locked is not None
+    assert int(locked.attempt_count or 0) == 0
+    assert float(locked.mastery_level or 0.0) == pytest.approx(0.0)
+
+
+def test_quiz_submit_missing_binding_does_not_fallback_or_update(
+    client, db_session, seeded_session
+):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    quiz_id = "quiz-missing-binding-1"
+
+    db_session.add(
+        Quiz(
+            id=quiz_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            difficulty="easy",
+            question_type="mcq",
+            questions_json=json.dumps(
+                [
+                    {
+                        "question": "q1",
+                        "options": ["A", "B", "C", "D"],
+                        "answer_index": 0,
+                        "explanation": "e1",
+                        "concepts": ["概念A"],
+                    }
+                ]
+            ),
+        )
+    )
+    db_session.commit()
+
+    with (
+        patch("app.routers.quiz.match_keypoints_by_concepts") as mock_match_doc,
+        patch("app.routers.quiz.match_keypoints_by_kb") as mock_match_kb,
+    ):
+        resp = client.post(
+            "/api/quiz/submit",
+            json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mastery_updates"] == []
+    mock_match_doc.assert_not_called()
+    mock_match_kb.assert_not_called()
+
+
+def test_quiz_submit_locked_primary_uses_first_unlocked_bound_candidate(
+    client, db_session, seeded_session
+):
+    user_id = seeded_session["user_id"]
+    kb_id = seeded_session["kb_id"]
+    doc_id = seeded_session["doc_id"]
+    prereq_id = "kp-quiz-mixed-prereq-1"
+    locked_id = "kp-quiz-mixed-locked-1"
+    unlocked_id = "kp-quiz-mixed-unlocked-1"
+    quiz_id = "quiz-mixed-locked-unlocked-1"
+
+    db_session.add_all(
+        [
+            Keypoint(
+                id=prereq_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="前置约束概念",
+                mastery_level=0.2,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            Keypoint(
+                id=locked_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="被锁定概念",
+                mastery_level=0.0,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            Keypoint(
+                id=unlocked_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="可测概念",
+                mastery_level=0.0,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            KeypointDependency(
+                id="quiz-mixed-dep-1",
+                kb_id=kb_id,
+                from_keypoint_id=prereq_id,
+                to_keypoint_id=locked_id,
+                relation=DEPENDENCY_RELATION,
+                confidence=0.9,
+            ),
+            Quiz(
+                id=quiz_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                difficulty="medium",
+                question_type="mcq",
+                questions_json=json.dumps(
+                    [
+                        {
+                            "question": "q1",
+                            "options": ["A", "B", "C", "D"],
+                            "answer_index": 0,
+                            "explanation": "e1",
+                            "concepts": ["被锁定概念", "可测概念"],
+                            "primary_keypoint_id": locked_id,
+                            "keypoint_ids": [locked_id, unlocked_id],
+                        }
+                    ]
+                ),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    resp = client.post(
+        "/api/quiz/submit",
+        json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["mastery_updates"]) == 1
+    assert data["mastery_updates"][0]["keypoint_id"] == unlocked_id
+
+    db_session.expire_all()
+    locked = db_session.query(Keypoint).filter(Keypoint.id == locked_id).first()
+    unlocked = db_session.query(Keypoint).filter(Keypoint.id == unlocked_id).first()
+    assert locked is not None and unlocked is not None
+    assert int(locked.attempt_count or 0) == 0
+    assert int(unlocked.attempt_count or 0) == 1
 
 
 def test_resolve_keypoints_for_question_falls_back_to_question_then_explanation_text(
@@ -545,6 +842,8 @@ def test_quiz_submit_next_recommendation_focus_uses_mastery_concepts(
                         "answer_index": 0,
                         "explanation": "e",
                         "concepts": ["错题概念X"],
+                        "keypoint_ids": [keypoint_id],
+                        "primary_keypoint_id": keypoint_id,
                     }
                     for i in range(5)
                 ]
@@ -553,18 +852,14 @@ def test_quiz_submit_next_recommendation_focus_uses_mastery_concepts(
     )
     db_session.commit()
 
-    with patch(
-        "app.routers.quiz._resolve_keypoints_for_question",
-        return_value=[keypoint_id],
-    ):
-        submit = client.post(
-            "/api/quiz/submit",
-            json={
-                "quiz_id": quiz_id,
-                "user_id": user_id,
-                "answers": [1, 1, 1, 1, 1],  # all wrong to trigger next recommendation
-            },
-        )
+    submit = client.post(
+        "/api/quiz/submit",
+        json={
+            "quiz_id": quiz_id,
+            "user_id": user_id,
+            "answers": [1, 1, 1, 1, 1],  # all wrong to trigger next recommendation
+        },
+    )
 
     assert submit.status_code == 200
     data = submit.json()
@@ -611,6 +906,8 @@ def test_quiz_submit_duplicate_submission_returns_409_without_side_effects(
                         "answer_index": 0,
                         "explanation": "e1",
                         "concepts": ["极限定义"],
+                        "keypoint_ids": [keypoint_id],
+                        "primary_keypoint_id": keypoint_id,
                     }
                 ]
             ),
@@ -618,11 +915,10 @@ def test_quiz_submit_duplicate_submission_returns_409_without_side_effects(
     )
     db_session.commit()
 
-    with patch("app.routers.quiz._resolve_keypoints_for_question", return_value=[keypoint_id]):
-        first = client.post(
-            "/api/quiz/submit",
-            json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},
-        )
+    first = client.post(
+        "/api/quiz/submit",
+        json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},
+    )
     assert first.status_code == 200
 
     db_session.expire_all()
@@ -677,7 +973,7 @@ def test_quiz_submit_duplicate_submission_returns_409_without_side_effects(
     assert float(profile_after_second.theta or 0.0) == pytest.approx(profile_theta)
 
 
-def test_quiz_submit_kb_concept_matching_collapses_to_representative_keypoint(
+def test_quiz_submit_kb_bound_keypoint_collapses_to_representative_keypoint(
     client, db_session, seeded_session
 ):
     user_id = seeded_session["user_id"]
@@ -742,6 +1038,8 @@ def test_quiz_submit_kb_concept_matching_collapses_to_representative_keypoint(
                             "answer_index": 0,
                             "explanation": "e1",
                             "concepts": ["KB去重概念Alpha"],
+                            "keypoint_ids": [dup_id, rep_id, dup_id],
+                            "primary_keypoint_id": dup_id,
                         }
                     ]
                 ),
@@ -750,10 +1048,7 @@ def test_quiz_submit_kb_concept_matching_collapses_to_representative_keypoint(
     )
     db_session.commit()
 
-    with (
-        patch("app.routers.quiz.match_keypoints_by_kb", return_value=[dup_id, rep_id, dup_id]),
-        patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("no vector")),
-    ):
+    with patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("no vector")):
         resp = client.post(
             "/api/quiz/submit",
             json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},
@@ -772,7 +1067,7 @@ def test_quiz_submit_kb_concept_matching_collapses_to_representative_keypoint(
     assert int(dup.attempt_count or 0) == 0
 
 
-def test_quiz_submit_doc_context_still_collapses_to_kb_representative_keypoint(
+def test_quiz_submit_doc_context_bound_keypoint_still_collapses_to_kb_representative_keypoint(
     client, db_session, seeded_session
 ):
     user_id = seeded_session["user_id"]
@@ -837,6 +1132,8 @@ def test_quiz_submit_doc_context_still_collapses_to_kb_representative_keypoint(
                             "answer_index": 0,
                             "explanation": "e1",
                             "concepts": ["文档模式聚合概念"],
+                            "keypoint_ids": [dup_id],
+                            "primary_keypoint_id": dup_id,
                         }
                     ]
                 ),
@@ -845,10 +1142,7 @@ def test_quiz_submit_doc_context_still_collapses_to_kb_representative_keypoint(
     )
     db_session.commit()
 
-    with (
-        patch("app.routers.quiz.match_keypoints_by_concepts", return_value=[dup_id]),
-        patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("no vector")),
-    ):
+    with patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("no vector")):
         resp = client.post(
             "/api/quiz/submit",
             json={"quiz_id": quiz_id, "user_id": user_id, "answers": [0]},

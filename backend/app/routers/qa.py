@@ -26,7 +26,10 @@ from app.services.keypoint_dedup import (
     cluster_kb_keypoints,
     find_kb_representative_by_text,
 )
-from app.services.learning_path import invalidate_learning_path_result_cache
+from app.services.learning_path import (
+    get_unlocked_keypoint_ids,
+    invalidate_learning_path_result_cache,
+)
 from app.services.mastery import record_study_interaction
 from app.services.qa import (
     NO_RESULTS_ANSWER,
@@ -550,6 +553,25 @@ def ask_question_stream_get(
     return _qa_stream_response(payload, db)
 
 
+def _build_kb_mastery_guard_context(
+    db: Session,
+    user_id: str,
+    kb_id: str,
+) -> tuple[dict[str, str], set[str]]:
+    clusters = cluster_kb_keypoints(db, user_id, kb_id)
+    member_to_rep = build_keypoint_cluster_index(clusters)
+    representative_keypoints = [cluster.representative_keypoint for cluster in clusters]
+    cluster_map = {cluster.representative_id: cluster for cluster in clusters}
+    unlocked_ids = get_unlocked_keypoint_ids(
+        db,
+        user_id,
+        kb_id,
+        keypoints=representative_keypoints,
+        cluster_map=cluster_map,
+    )
+    return member_to_rep, unlocked_ids
+
+
 def _update_mastery_from_qa(
     db: Session,
     user_id: str,
@@ -564,6 +586,21 @@ def _update_mastery_from_qa(
         db, user_id, doc_id=doc_id, kb_id=kb_id
     )
     kb_member_to_rep: dict[str, str] | None = None
+    unlocked_ids: set[str] | None = None
+    updated_count = 0
+    skipped_locked = 0
+
+    def _ensure_kb_guard() -> tuple[dict[str, str] | None, set[str] | None]:
+        nonlocal kb_member_to_rep, unlocked_ids
+        if not effective_kb_id:
+            return None, None
+        if kb_member_to_rep is None or unlocked_ids is None:
+            kb_member_to_rep, unlocked_ids = _build_kb_mastery_guard_context(
+                db,
+                user_id,
+                effective_kb_id,
+            )
+        return kb_member_to_rep, unlocked_ids
 
     # 优先：如果指定了 focus_keypoint_text（从学习路径跳转），直接查找匹配的知识点
     if focus_keypoint_text and focus_keypoint_text.strip():
@@ -573,11 +610,29 @@ def _update_mastery_from_qa(
                 db, user_id, effective_kb_id, focus_text
             )
             if matched_rep:
+                _, unlocked = _ensure_kb_guard()
+                if unlocked is not None and str(matched_rep.id) not in unlocked:
+                    skipped_locked += 1
+                    logger.info(
+                        "QA mastery summary user_id=%s doc_id=%s kb_id=%s updated_count=%s skipped_locked=%s",
+                        user_id,
+                        doc_id,
+                        kb_id,
+                        updated_count,
+                        skipped_locked,
+                    )
+                    return
                 result = record_study_interaction(db, matched_rep.id)
                 if result:
-                    logger.info(
-                        f"QA mastery updated for keypoint {matched_rep.id} (focus KB representative match)"
-                    )
+                    updated_count += 1
+                logger.info(
+                    "QA mastery summary user_id=%s doc_id=%s kb_id=%s updated_count=%s skipped_locked=%s",
+                    user_id,
+                    doc_id,
+                    kb_id,
+                    updated_count,
+                    skipped_locked,
+                )
                 return
 
         query = db.query(Keypoint).filter(Keypoint.user_id == user_id)
@@ -603,21 +658,37 @@ def _update_mastery_from_qa(
         if matched_kp:
             target_id = str(matched_kp.id)
             if effective_kb_id:
-                if kb_member_to_rep is None:
-                    kb_member_to_rep = build_keypoint_cluster_index(
-                        cluster_kb_keypoints(db, user_id, effective_kb_id)
-                    )
+                member_to_rep, unlocked = _ensure_kb_guard()
                 target_id = resolve_keypoint_id_to_aggregate_target(
                     db,
                     user_id,
                     target_id,
                     doc_id=doc_id,
                     kb_id=effective_kb_id,
-                    member_to_rep=kb_member_to_rep,
+                    member_to_rep=member_to_rep,
                 )
+                if unlocked is not None and target_id not in unlocked:
+                    skipped_locked += 1
+                    logger.info(
+                        "QA mastery summary user_id=%s doc_id=%s kb_id=%s updated_count=%s skipped_locked=%s",
+                        user_id,
+                        doc_id,
+                        kb_id,
+                        updated_count,
+                        skipped_locked,
+                    )
+                    return
             result = record_study_interaction(db, target_id)
             if result:
-                logger.info(f"QA mastery updated for keypoint {target_id} (focus match)")
+                updated_count += 1
+            logger.info(
+                "QA mastery summary user_id=%s doc_id=%s kb_id=%s updated_count=%s skipped_locked=%s",
+                user_id,
+                doc_id,
+                kb_id,
+                updated_count,
+                skipped_locked,
+            )
             return
     
     # 回退：使用向量搜索匹配问题文本到知识点
@@ -637,12 +708,9 @@ def _update_mastery_from_qa(
         logger.debug(f"QA mastery: vector search failed: {e}", exc_info=True)
         return
 
-    updated_count = 0
     updated_ids: set[str] = set()
     if effective_kb_id:
-        kb_member_to_rep = build_keypoint_cluster_index(
-            cluster_kb_keypoints(db, user_id, effective_kb_id)
-        )
+        kb_member_to_rep, unlocked_ids = _ensure_kb_guard()
     for doc_result, score in results:
         if score > 1.0:
             continue
@@ -652,12 +720,21 @@ def _update_mastery_from_qa(
             target_id = str(kp_id)
             if kb_member_to_rep is not None:
                 target_id = kb_member_to_rep.get(target_id, target_id)
+            if unlocked_ids is not None and target_id not in unlocked_ids:
+                skipped_locked += 1
+                continue
             if target_id in updated_ids:
                 continue
             result = record_study_interaction(db, target_id)
             if result:
                 updated_ids.add(target_id)
                 updated_count += 1
-    
-    if updated_count > 0:
-        logger.info(f"QA mastery updated for {updated_count} keypoint(s) (vector search match)")
+
+    logger.info(
+        "QA mastery summary user_id=%s doc_id=%s kb_id=%s updated_count=%s skipped_locked=%s",
+        user_id,
+        doc_id,
+        kb_id,
+        updated_count,
+        skipped_locked,
+    )

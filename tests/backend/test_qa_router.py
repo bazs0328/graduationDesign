@@ -7,8 +7,9 @@ from unittest.mock import patch
 
 import pytest
 
-from app.models import ChatMessage, Document, Keypoint, KnowledgeBase, User
+from app.models import ChatMessage, Document, Keypoint, KeypointDependency, KnowledgeBase, User
 from app.routers.qa import QA_HISTORY_TOTAL_CHAR_BUDGET, _update_mastery_from_qa
+from app.services.learning_path import DEPENDENCY_RELATION
 from app.utils.chroma_filters import build_chroma_eq_filter
 
 
@@ -568,3 +569,157 @@ def test_update_mastery_from_qa_doc_vector_hits_collapse_to_kb_representative(db
     assert rep is not None and dup is not None
     assert float(rep.mastery_level or 0.0) > 0.0
     assert float(dup.mastery_level or 0.0) == pytest.approx(0.0)
+
+
+def test_update_mastery_from_qa_focus_match_skips_locked_keypoint(db_session):
+    user_id = "qa_focus_lock_user"
+    kb_id = "qa_focus_lock_kb"
+    doc_id = "qa_focus_lock_doc"
+    prereq_id = "qa_focus_lock_prereq"
+    locked_id = "qa_focus_lock_target"
+
+    db_session.add(User(id=user_id, username=user_id, password_hash="hash", name="User"))
+    db_session.add(KnowledgeBase(id=kb_id, user_id=user_id, name="KB"))
+    db_session.add(
+        Document(
+            id=doc_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            filename="focus-lock.txt",
+            file_type="txt",
+            text_path=f"/tmp/{doc_id}.txt",
+            num_chunks=1,
+            num_pages=1,
+            char_count=100,
+            status="ready",
+        )
+    )
+    db_session.add_all(
+        [
+            Keypoint(
+                id=prereq_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="基础前置",
+                mastery_level=0.2,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            Keypoint(
+                id=locked_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="未解锁概念",
+                mastery_level=0.0,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            KeypointDependency(
+                id="qa-focus-lock-dep",
+                kb_id=kb_id,
+                from_keypoint_id=prereq_id,
+                to_keypoint_id=locked_id,
+                relation=DEPENDENCY_RELATION,
+                confidence=0.9,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    with patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("no vector")):
+        _update_mastery_from_qa(
+            db_session,
+            user_id=user_id,
+            question="解释未解锁概念",
+            doc_id=doc_id,
+            kb_id=None,
+            focus_keypoint_text="未解锁概念",
+        )
+
+    db_session.expire_all()
+    locked = db_session.query(Keypoint).filter(Keypoint.id == locked_id).first()
+    assert locked is not None
+    assert int(locked.attempt_count or 0) == 0
+    assert float(locked.mastery_level or 0.0) == pytest.approx(0.0)
+
+
+def test_update_mastery_from_qa_vector_match_skips_locked_keypoint(db_session):
+    user_id = "qa_vector_lock_user"
+    kb_id = "qa_vector_lock_kb"
+    doc_id = "qa_vector_lock_doc"
+    prereq_id = "qa_vector_lock_prereq"
+    locked_id = "qa_vector_lock_target"
+
+    db_session.add(User(id=user_id, username=user_id, password_hash="hash", name="User"))
+    db_session.add(KnowledgeBase(id=kb_id, user_id=user_id, name="KB"))
+    db_session.add(
+        Document(
+            id=doc_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            filename="vector-lock.txt",
+            file_type="txt",
+            text_path=f"/tmp/{doc_id}.txt",
+            num_chunks=1,
+            num_pages=1,
+            char_count=100,
+            status="ready",
+        )
+    )
+    db_session.add_all(
+        [
+            Keypoint(
+                id=prereq_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="基础前置",
+                mastery_level=0.2,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            Keypoint(
+                id=locked_id,
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="未解锁向量命中概念",
+                mastery_level=0.0,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            KeypointDependency(
+                id="qa-vector-lock-dep",
+                kb_id=kb_id,
+                from_keypoint_id=prereq_id,
+                to_keypoint_id=locked_id,
+                relation=DEPENDENCY_RELATION,
+                confidence=0.9,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    def _search(question, k, filter):  # noqa: A002
+        assert k == 3
+        assert filter == build_chroma_eq_filter(type="keypoint", doc_id=doc_id)
+        return [(SimpleNamespace(metadata={"keypoint_id": locked_id, "doc_id": doc_id}), 0.1)]
+
+    vectorstore = SimpleNamespace(similarity_search_with_score=_search)
+    with patch("app.routers.qa.get_vectorstore", return_value=vectorstore):
+        with patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("no vector")):
+            _update_mastery_from_qa(
+                db_session,
+                user_id=user_id,
+                question="请解释这个概念",
+                doc_id=doc_id,
+                kb_id=None,
+            )
+
+    db_session.expire_all()
+    locked = db_session.query(Keypoint).filter(Keypoint.id == locked_id).first()
+    assert locked is not None
+    assert int(locked.attempt_count or 0) == 0
+    assert float(locked.mastery_level or 0.0) == pytest.approx(0.0)
