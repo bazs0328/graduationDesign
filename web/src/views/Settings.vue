@@ -8,9 +8,9 @@
             <SlidersHorizontal class="w-3.5 h-3.5" />
             设置中心
           </div>
-          <h1 class="text-2xl font-black tracking-tight">把常用配置从 `.env` 带回界面</h1>
+          <h1 class="text-2xl font-black tracking-tight">学习偏好设置</h1>
           <p class="text-sm text-muted-foreground max-w-3xl leading-relaxed">
-            面向非技术用户开放常用问答/测验偏好；系统级模型、OCR 和密钥配置仍由管理员在后端维护。
+            默认只展示学习常用选项；系统级模型、文档识别能力与密钥状态可在高级诊断中查看。
           </p>
         </div>
         <div class="grid grid-cols-2 gap-2 text-xs">
@@ -29,72 +29,91 @@
     </section>
 
     <section class="space-y-4">
-      <div class="flex items-center justify-between gap-3">
-        <h2 class="text-lg font-bold tracking-tight flex items-center gap-2">
-          <ShieldCheck class="w-5 h-5 text-primary" />
-          系统状态（只读）
-        </h2>
-        <button
-          type="button"
-          class="px-3 py-2 rounded-lg border border-input text-sm font-semibold hover:bg-accent disabled:opacity-50"
-          :disabled="settingsStore.loading"
-          @click="reloadSettings(true)"
-        >
-          {{ settingsStore.loading ? '刷新中…' : '刷新状态' }}
-        </button>
+      <div class="rounded-2xl border border-border bg-card p-4 sm:p-5 shadow-sm">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="space-y-1">
+            <h2 class="text-lg font-bold tracking-tight flex items-center gap-2">
+              <ShieldCheck class="w-5 h-5 text-primary" />
+              高级设置与诊断
+            </h2>
+            <p class="text-xs text-muted-foreground">
+              日常学习无需调整本区域；仅在排查模型或系统问题时展开。
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="px-3 py-2 rounded-lg border border-input text-sm font-semibold hover:bg-accent disabled:opacity-50"
+              :disabled="settingsStore.loading"
+              @click="reloadSettings(true)"
+            >
+              {{ settingsStore.loading ? '刷新中…' : '刷新状态' }}
+            </button>
+            <button
+              type="button"
+              class="px-3 py-2 rounded-lg border border-input text-sm font-semibold hover:bg-accent"
+              @click="advancedDiagnosticsOpen = !advancedDiagnosticsOpen"
+            >
+              {{ advancedDiagnosticsOpen ? '收起高级诊断' : '展开高级诊断' }}
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div v-if="settingsStore.loading && !systemStatus" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div v-if="advancedDiagnosticsOpen && settingsStore.loading && !systemStatus" class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div v-for="idx in 3" :key="idx" class="rounded-2xl border border-border bg-card p-4">
           <SkeletonBlock type="list" :lines="4" />
         </div>
       </div>
 
-      <div v-else class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div v-else-if="advancedDiagnosticsOpen" class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-sm">
-          <div class="text-xs font-bold uppercase tracking-widest text-muted-foreground">模型配置</div>
+          <div class="text-xs font-bold uppercase tracking-widest text-muted-foreground">模型状态（高级）</div>
           <div class="space-y-2">
             <div class="flex items-center justify-between gap-2">
-              <span class="text-sm text-muted-foreground">LLM</span>
+              <span class="text-sm text-muted-foreground">文本模型</span>
               <span class="px-2 py-1 rounded-full bg-primary/10 text-primary text-xs font-semibold">
                 {{ systemStatus?.llm_provider || '—' }}
               </span>
             </div>
+            <div class="text-[11px] text-muted-foreground">
+              配置值：{{ systemStatus?.llm_provider_configured || '—' }} · 来源：{{ providerSourceLabel(systemStatus?.llm_provider_source) }}
+            </div>
             <div class="flex items-center justify-between gap-2">
-              <span class="text-sm text-muted-foreground">Embedding</span>
+              <span class="text-sm text-muted-foreground">{{ UX_TEXT.vectorModelLabel }}</span>
               <span class="px-2 py-1 rounded-full bg-secondary text-secondary-foreground text-xs font-semibold">
                 {{ systemStatus?.embedding_provider || '—' }}
               </span>
             </div>
+            <div class="text-[11px] text-muted-foreground">
+              配置值：{{ systemStatus?.embedding_provider_configured || '—' }} · 来源：{{ providerSourceLabel(systemStatus?.embedding_provider_source) }}
+            </div>
           </div>
-          <p class="text-xs text-muted-foreground leading-relaxed">
-            模型与密钥仍由后端 `.env` 管理，本页仅展示状态并提供用户侧体验参数。
-          </p>
         </div>
 
         <div class="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-sm">
-          <div class="text-xs font-bold uppercase tracking-widest text-muted-foreground">RAG 默认值</div>
+          <div class="text-xs font-bold uppercase tracking-widest text-muted-foreground">检索策略默认值（高级）</div>
           <div class="grid grid-cols-2 gap-2 text-sm">
             <div class="rounded-lg border border-border bg-background/50 px-3 py-2">
-              <div class="text-xs text-muted-foreground">top_k</div>
+              <div class="text-xs text-muted-foreground">{{ UX_TEXT.referenceCountLabel }}</div>
               <div class="font-semibold">{{ systemStatus?.qa_defaults_from_env?.qa_top_k ?? '—' }}</div>
             </div>
             <div class="rounded-lg border border-border bg-background/50 px-3 py-2">
-              <div class="text-xs text-muted-foreground">fetch_k</div>
+              <div class="text-xs text-muted-foreground">{{ UX_TEXT.candidateRangeLabel }}</div>
               <div class="font-semibold">{{ systemStatus?.qa_defaults_from_env?.qa_fetch_k ?? '—' }}</div>
             </div>
             <div class="rounded-lg border border-border bg-background/50 px-3 py-2 col-span-2">
-              <div class="text-xs text-muted-foreground">RAG 模式</div>
+              <div class="text-xs text-muted-foreground">{{ UX_TEXT.retrievalStrategyLabel }}</div>
               <div class="font-semibold">{{ systemStatus?.qa_defaults_from_env?.rag_mode ?? '—' }}</div>
             </div>
           </div>
         </div>
 
         <div class="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-sm">
-          <div class="text-xs font-bold uppercase tracking-widest text-muted-foreground">能力开关</div>
+          <div class="text-xs font-bold uppercase tracking-widest text-muted-foreground">能力与密钥状态（高级）</div>
           <div class="space-y-2 text-sm">
             <div class="flex items-center justify-between gap-2">
-              <span class="text-muted-foreground">OCR</span>
+              <span class="text-muted-foreground">文档识别能力</span>
               <span
                 class="px-2 py-1 rounded-full text-[10px] font-semibold border"
                 :class="systemStatus?.ocr_enabled ? 'border-green-200 bg-green-50 text-green-700' : 'border-border bg-background text-muted-foreground'"
@@ -112,7 +131,7 @@
               </span>
             </div>
             <div class="flex items-center justify-between gap-2">
-              <span class="text-muted-foreground">PDF Parser</span>
+              <span class="text-muted-foreground">文档解析模式</span>
               <span class="text-xs font-semibold">{{ systemStatus?.pdf_parser_mode || '—' }}</span>
             </div>
           </div>
@@ -131,6 +150,138 @@
           </div>
         </div>
       </div>
+
+      <div v-if="advancedDiagnosticsOpen" class="rounded-2xl border border-border bg-card p-4 sm:p-5 shadow-sm space-y-3">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground">系统高级参数（可编辑）</h3>
+            <p class="mt-1 text-xs text-muted-foreground">
+              这里的值会覆盖后端默认参数并持久化保存，适合减少 `.env` 维护负担。
+            </p>
+          </div>
+          <div class="text-xs text-muted-foreground space-y-1">
+            <div>可编辑键：{{ systemAdvanced.editableKeys.length }} 项</div>
+            <div>当前覆盖：{{ Object.keys(systemAdvancedDraft || {}).length }} 项</div>
+          </div>
+        </div>
+
+        <div v-if="systemSchemaGroups.length === 0" class="rounded-xl border border-dashed border-border bg-background/40 p-4 text-sm text-muted-foreground">
+          未获取到系统参数 schema，请稍后刷新重试。
+        </div>
+
+        <div v-else class="space-y-4">
+          <div
+            v-for="group in systemSchemaGroups"
+            :key="group.id"
+            class="rounded-xl border border-border/80 bg-background/40 p-4 space-y-3"
+          >
+            <h4 class="text-xs font-bold uppercase tracking-widest text-muted-foreground">{{ group.label }}</h4>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div
+                v-for="field in fieldsForGroup(group.id)"
+                :key="field.key"
+                class="rounded-lg border border-border bg-card p-3 space-y-2"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <label class="text-sm font-semibold">{{ field.label }}</label>
+                  <span
+                    class="text-[10px] font-semibold px-2 py-0.5 rounded-full border"
+                    :class="hasSystemOverride(field.key) ? 'border-primary/30 bg-primary/10 text-primary' : 'border-border bg-background text-muted-foreground'"
+                  >
+                    {{ hasSystemOverride(field.key) ? '已覆盖' : '跟随默认' }}
+                  </span>
+                </div>
+
+                <p v-if="field.description" class="text-xs text-muted-foreground">{{ field.description }}</p>
+
+                <div v-if="field.input_type === 'switch'" class="flex items-center justify-between rounded-lg border border-border px-3 py-2 bg-background">
+                  <span class="text-sm text-muted-foreground">状态</span>
+                  <input
+                    type="checkbox"
+                    class="h-4 w-4"
+                    :checked="Boolean(getSystemDisplayValue(field))"
+                    @change="onSystemSwitchChange(field, $event.target.checked)"
+                  />
+                </div>
+
+                <select
+                  v-else-if="field.input_type === 'select'"
+                  :value="selectInputValue(field)"
+                  class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                  @change="onSystemSelectChange(field, $event.target.value)"
+                >
+                  <option
+                    v-for="option in field.options"
+                    :key="`${field.key}-${optionKey(option.value)}`"
+                    :value="optionKey(option.value)"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+
+                <input
+                  v-else-if="field.input_type === 'number'"
+                  type="number"
+                  :value="numberInputValue(field)"
+                  :min="field.min ?? undefined"
+                  :max="field.max ?? undefined"
+                  :step="field.step ?? undefined"
+                  class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                  @input="onSystemNumberInput(field, $event.target.value)"
+                />
+
+                <input
+                  v-else
+                  type="text"
+                  :value="textInputValue(field)"
+                  class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                  @input="onSystemTextInput(field, $event.target.value)"
+                />
+
+                <div class="flex items-center justify-between gap-2 text-xs">
+                  <span class="text-muted-foreground">
+                    当前生效：{{ formatSystemValue(getSystemEffectiveValue(field.key), field) }}
+                  </span>
+                  <button
+                    v-if="hasSystemOverride(field.key)"
+                    type="button"
+                    class="px-2 py-1 rounded border border-input hover:bg-accent"
+                    @click="clearSystemOverride(field.key)"
+                  >
+                    清除覆盖
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p v-if="systemOverridesError" class="text-sm text-destructive">{{ systemOverridesError }}</p>
+
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <p class="text-xs text-muted-foreground">
+            系统参数会优先采用“覆盖值”；清除覆盖后自动回退到默认值。
+          </p>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="px-3 py-2 rounded-lg border border-input text-sm font-semibold hover:bg-accent disabled:opacity-50"
+              :disabled="settingsStore.savingSystem || Object.keys(systemAdvanced.overrides || {}).length === 0"
+              @click="resetSystemAdvancedSettings"
+            >
+              恢复系统默认
+            </button>
+            <button
+              type="button"
+              class="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-50"
+              :disabled="settingsStore.savingSystem || !settingsStore.systemAdvancedDirty"
+              @click="saveSystemAdvancedSettings"
+            >
+              {{ settingsStore.savingSystem ? '保存中…' : '保存系统参数' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <SettingsPanel
@@ -140,7 +291,7 @@
       :saving="settingsStore.savingUser"
       :error="panelError('user')"
       :advanced-open="userAdvancedOpen"
-      advanced-label="高级检索参数"
+      advanced-label="高级学习参数"
       @update:advanced-open="userAdvancedOpen = $event"
       @save="saveUserDefaults"
       @reset="resetUserDefaults"
@@ -255,7 +406,7 @@
       <template #advanced>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div class="space-y-2">
-            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">手动 top_k（可空）</label>
+            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">手动参考片段数量（可空）</label>
             <input
               type="number"
               min="1"
@@ -267,7 +418,7 @@
             />
           </div>
           <div class="space-y-2">
-            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">手动 fetch_k（可空）</label>
+            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">手动候选范围（可空）</label>
             <input
               type="number"
               min="1"
@@ -281,7 +432,7 @@
         </div>
         <div class="flex items-center justify-between gap-3 text-xs">
           <p class="text-muted-foreground">
-            当手动值为空时，系统将按预设自动映射（如 `balanced` -> `top_k=4`, `fetch_k=12`）。
+            当手动值为空时，系统会自动按预设估算参考片段数量与候选范围。
           </p>
           <button
             type="button"
@@ -295,7 +446,7 @@
     </SettingsPanel>
 
     <SettingsPanel
-      v-if="selectedKbId"
+      v-if="selectedKbId && advancedDiagnosticsOpen"
       title="当前知识库覆盖设置"
       description="只覆盖当前知识库的问答与测验偏好；留空表示跟随用户默认设置。"
       :dirty="settingsStore.kbDirty"
@@ -397,7 +548,7 @@
       <template #advanced>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div class="space-y-2">
-            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">top_k 覆盖（可空）</label>
+            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">参考片段数量覆盖（可空）</label>
             <input
               type="number"
               min="1"
@@ -409,7 +560,7 @@
             />
           </div>
           <div class="space-y-2">
-            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">fetch_k 覆盖（可空）</label>
+            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">候选范围覆盖（可空）</label>
             <input
               type="number"
               min="1"
@@ -427,8 +578,15 @@
       </template>
     </SettingsPanel>
 
-    <div v-else class="rounded-2xl border border-dashed border-border bg-card p-6 text-sm text-muted-foreground">
+    <div
+      v-else-if="!selectedKbId"
+      class="rounded-2xl border border-dashed border-border bg-card p-6 text-sm text-muted-foreground"
+    >
       当前未选择知识库。先在侧边栏或上传页选择一个知识库后，即可配置该知识库覆盖设置。
+    </div>
+
+    <div v-else class="rounded-2xl border border-dashed border-border bg-card p-6 text-sm text-muted-foreground">
+      知识库单独设置已隐藏。展开“高级设置与诊断”后可按知识库微调。
     </div>
   </div>
 </template>
@@ -439,6 +597,7 @@ import { SlidersHorizontal, ShieldCheck } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
 import { useAppContextStore } from '../stores/appContext'
 import { useSettingsStore } from '../stores/settings'
+import { UX_TEXT } from '../constants/uxText'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import KbSelector from '../components/context/KbSelector.vue'
 import SettingsPanel from '../components/settings/SettingsPanel.vue'
@@ -450,8 +609,10 @@ const settingsStore = useSettingsStore()
 
 const userAdvancedOpen = ref(false)
 const kbAdvancedOpen = ref(false)
+const advancedDiagnosticsOpen = ref(false)
 const lastUserActionError = ref('')
 const lastKbActionError = ref('')
+const systemOverridesError = ref('')
 
 const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
 const kbs = computed(() => appContext.kbs)
@@ -465,6 +626,10 @@ const selectedKbName = computed(() => {
 })
 
 const systemStatus = computed(() => settingsStore.systemStatus)
+const systemAdvanced = computed(() => settingsStore.systemAdvanced)
+const systemAdvancedDraft = computed(() => settingsStore.systemAdvancedDraft || {})
+const systemSchemaGroups = computed(() => systemAdvanced.value?.schema?.groups || [])
+const systemSchemaFields = computed(() => systemAdvanced.value?.schema?.fields || [])
 const userDraft = computed(() => settingsStore.userDraft)
 const kbDraft = computed(() => settingsStore.kbDraft)
 
@@ -516,6 +681,12 @@ function updateKbSection(section, patch) {
 function panelError(scope) {
   if (scope === 'user') return lastUserActionError.value || ''
   return lastKbActionError.value || ''
+}
+
+function providerSourceLabel(value) {
+  if (value === 'auto') return '自动'
+  if (value === 'manual') return '手动'
+  return '—'
 }
 
 async function reloadSettings(force = false) {
@@ -575,6 +746,142 @@ async function resetKbOverrides() {
   }
 }
 
+function buildSystemOverridesPatch(current, next) {
+  const patch = {}
+  for (const key of Object.keys(current || {})) {
+    if (!Object.prototype.hasOwnProperty.call(next || {}, key)) {
+      patch[key] = null
+    }
+  }
+  for (const [key, value] of Object.entries(next || {})) {
+    patch[key] = value
+  }
+  return patch
+}
+
+function fieldsForGroup(groupId) {
+  return systemSchemaFields.value.filter((field) => field.group === groupId)
+}
+
+function hasSystemOverride(key) {
+  return Object.prototype.hasOwnProperty.call(systemAdvancedDraft.value || {}, key)
+}
+
+function getSystemEffectiveValue(key) {
+  return systemAdvanced.value?.effective?.[key]
+}
+
+function getSystemDisplayValue(field) {
+  if (hasSystemOverride(field.key)) {
+    return systemAdvancedDraft.value[field.key]
+  }
+  return getSystemEffectiveValue(field.key)
+}
+
+function setSystemDraft(next) {
+  settingsStore.setSystemAdvancedDraft(next || {})
+}
+
+function setSystemOverrideValue(key, value) {
+  const next = { ...(systemAdvancedDraft.value || {}) }
+  next[key] = value
+  setSystemDraft(next)
+}
+
+function clearSystemOverride(key) {
+  const next = { ...(systemAdvancedDraft.value || {}) }
+  delete next[key]
+  setSystemDraft(next)
+}
+
+function optionKey(value) {
+  return JSON.stringify(value)
+}
+
+function selectInputValue(field) {
+  const current = getSystemDisplayValue(field)
+  const key = optionKey(current)
+  if ((field.options || []).some((option) => optionKey(option.value) === key)) {
+    return key
+  }
+  const first = (field.options || [])[0]
+  return first ? optionKey(first.value) : ''
+}
+
+function onSystemSelectChange(field, rawValue) {
+  const resolved = (field.options || []).find((option) => optionKey(option.value) === rawValue)
+  if (!resolved) return
+  setSystemOverrideValue(field.key, resolved.value)
+}
+
+function numberInputValue(field) {
+  const value = getSystemDisplayValue(field)
+  if (value === null || value === undefined) return ''
+  return String(value)
+}
+
+function onSystemNumberInput(field, rawValue) {
+  const text = String(rawValue ?? '').trim()
+  if (!text) {
+    if (field.nullable) clearSystemOverride(field.key)
+    return
+  }
+  const num = Number(text)
+  if (!Number.isFinite(num)) return
+  const isIntegerField = Number.isInteger(Number(field.step)) && Number(field.step) >= 1
+  const normalized = isIntegerField ? Math.round(num) : num
+  setSystemOverrideValue(field.key, normalized)
+}
+
+function textInputValue(field) {
+  const value = getSystemDisplayValue(field)
+  if (value === null || value === undefined) return ''
+  return String(value)
+}
+
+function onSystemTextInput(field, rawValue) {
+  const value = String(rawValue ?? '')
+  if (!value && field.nullable) {
+    clearSystemOverride(field.key)
+    return
+  }
+  setSystemOverrideValue(field.key, value)
+}
+
+function onSystemSwitchChange(field, checked) {
+  setSystemOverrideValue(field.key, Boolean(checked))
+}
+
+function formatSystemValue(value, field) {
+  if (value === null || value === undefined || value === '') return '（空）'
+  if (field?.input_type === 'switch') return value ? '开启' : '关闭'
+  return String(value)
+}
+
+async function saveSystemAdvancedSettings() {
+  systemOverridesError.value = ''
+  try {
+    const patch = buildSystemOverridesPatch(
+      systemAdvanced.value?.overrides || {},
+      systemAdvancedDraft.value || {},
+    )
+    await settingsStore.saveSystemAdvanced(patch)
+    showToast('系统高级参数已保存', 'success')
+  } catch (err) {
+    systemOverridesError.value = err?.message || '保存失败'
+  }
+}
+
+async function resetSystemAdvancedSettings() {
+  systemOverridesError.value = ''
+  try {
+    await settingsStore.resetSystemAdvanced()
+    showToast('系统高级参数已恢复默认', 'success')
+  } catch (err) {
+    systemOverridesError.value = err?.message || '重置失败'
+  }
+}
+
 onMounted(async () => {
   try {
     if (!appContext.kbs.length) {
@@ -589,4 +896,12 @@ onMounted(async () => {
 watch(selectedKbId, async () => {
   await reloadSettings(true)
 })
+
+watch(
+  () => systemAdvanced.value?.overrides,
+  (next) => {
+    settingsStore.setSystemAdvancedDraft(next || {})
+  },
+  { deep: true, immediate: true },
+)
 </script>

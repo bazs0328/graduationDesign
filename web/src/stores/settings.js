@@ -1,5 +1,13 @@
 import { defineStore } from 'pinia'
-import { getSettings, patchKbSettings, patchUserSettings, resetSettings } from '../api'
+import {
+  getSettings,
+  getSystemSettings,
+  patchKbSettings,
+  patchSystemSettings,
+  patchUserSettings,
+  resetSettings,
+  resetSystemSettings,
+} from '../api'
 
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value ?? null))
@@ -67,11 +75,53 @@ function stableStringify(value) {
   return JSON.stringify(value ?? null)
 }
 
+function normalizeSystemSettingsShape(value = {}) {
+  const editableKeys = Array.isArray(value?.editable_keys) ? [...value.editable_keys] : []
+  const overrides = value?.overrides && typeof value.overrides === 'object' ? { ...value.overrides } : {}
+  const effective = value?.effective && typeof value.effective === 'object' ? { ...value.effective } : {}
+  const groups = Array.isArray(value?.schema?.groups)
+    ? value.schema.groups
+      .filter((item) => item && typeof item.id === 'string')
+      .map((item) => ({ id: String(item.id), label: String(item.label || item.id) }))
+    : []
+  const fields = Array.isArray(value?.schema?.fields)
+    ? value.schema.fields
+      .filter((item) => item && typeof item.key === 'string')
+      .map((item) => ({
+        key: String(item.key),
+        label: String(item.label || item.key),
+        group: String(item.group || 'misc'),
+        input_type: String(item.input_type || 'text'),
+        nullable: Boolean(item.nullable),
+        description: typeof item.description === 'string' ? item.description : '',
+        options: Array.isArray(item.options)
+          ? item.options.map((option) => ({
+            value: option?.value,
+            label: String(option?.label ?? option?.value ?? ''),
+          }))
+          : [],
+        min: Number.isFinite(Number(item.min)) ? Number(item.min) : null,
+        max: Number.isFinite(Number(item.max)) ? Number(item.max) : null,
+        step: Number.isFinite(Number(item.step)) ? Number(item.step) : null,
+      }))
+    : []
+  return {
+    editableKeys,
+    overrides,
+    effective,
+    schema: {
+      groups,
+      fields,
+    },
+  }
+}
+
 export const useSettingsStore = defineStore('settings', {
   state: () => ({
     loading: false,
     savingUser: false,
     savingKb: false,
+    savingSystem: false,
     resetting: false,
     error: '',
 
@@ -83,6 +133,8 @@ export const useSettingsStore = defineStore('settings', {
     userDefaults: normalizeUserSettingsShape(),
     kbOverrides: null,
     effective: normalizeUserSettingsShape(),
+    systemAdvanced: normalizeSystemSettingsShape(),
+    systemAdvancedDraft: {},
 
     userDraft: normalizeUserSettingsShape(),
     kbDraft: normalizeKbSettingsShape(),
@@ -102,9 +154,19 @@ export const useSettingsStore = defineStore('settings', {
     hasKbContext(state) {
       return Boolean(state.loadedKbId)
     },
+    systemAdvancedDirty(state) {
+      return stableStringify(state.systemAdvancedDraft) !== stableStringify(state.systemAdvanced.overrides)
+    },
   },
 
   actions: {
+    _applySystemSettingsResponse(response) {
+      const normalized = normalizeSystemSettingsShape(response || {})
+      this.systemAdvanced = normalized
+      this.systemAdvancedDraft = deepClone(normalized.overrides) || {}
+      return normalized
+    },
+
     _applyResponse(response, context = {}) {
       this.systemStatus = response?.system_status || null
       this.meta = response?.meta || null
@@ -143,6 +205,14 @@ export const useSettingsStore = defineStore('settings', {
       this.kbDraft = this.kbOverrides ? normalizeKbSettingsShape(this.kbOverrides) : normalizeKbSettingsShape()
     },
 
+    setSystemAdvancedDraft(value = {}) {
+      this.systemAdvancedDraft = deepClone(value) || {}
+    },
+
+    discardSystemAdvancedDraft() {
+      this.systemAdvancedDraft = deepClone(this.systemAdvanced.overrides) || {}
+    },
+
     async load(options = {}) {
       const userId = options.userId || ''
       const kbId = options.kbId || ''
@@ -155,8 +225,12 @@ export const useSettingsStore = defineStore('settings', {
       this.loading = true
       this.error = ''
       try {
-        const response = await getSettings({ userId: userId || undefined, kbId: kbId || undefined })
+        const [response, systemResponse] = await Promise.all([
+          getSettings({ userId: userId || undefined, kbId: kbId || undefined }),
+          getSystemSettings(),
+        ])
         this._applyResponse(response, { userId, kbId })
+        this._applySystemSettingsResponse(systemResponse)
         return this
       } catch (err) {
         this.error = err?.message || '加载设置失败'
@@ -221,6 +295,40 @@ export const useSettingsStore = defineStore('settings', {
         throw err
       } finally {
         this.resetting = false
+      }
+    },
+
+    async saveSystemAdvanced(values = null) {
+      this.savingSystem = true
+      this.error = ''
+      try {
+        const payloadValues = values && typeof values === 'object'
+          ? deepClone(values)
+          : deepClone(this.systemAdvancedDraft)
+        const response = await patchSystemSettings({ values: payloadValues || {} })
+        this._applySystemSettingsResponse(response)
+        return response
+      } catch (err) {
+        this.error = err?.message || '保存系统高级设置失败'
+        throw err
+      } finally {
+        this.savingSystem = false
+      }
+    },
+
+    async resetSystemAdvanced(keys = null) {
+      this.savingSystem = true
+      this.error = ''
+      try {
+        const payload = keys && Array.isArray(keys) ? { keys } : {}
+        const response = await resetSystemSettings(payload)
+        this._applySystemSettingsResponse(response)
+        return response
+      } catch (err) {
+        this.error = err?.message || '重置系统高级设置失败'
+        throw err
+      } finally {
+        this.savingSystem = false
       }
     },
   },

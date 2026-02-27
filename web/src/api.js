@@ -376,3 +376,15 @@ export async function patchKbSettings(kbId, payload) {
 export async function resetSettings(payload) {
   return apiPost('/api/settings/reset', payload)
 }
+
+export async function getSystemSettings() {
+  return apiGet('/api/settings/system')
+}
+
+export async function patchSystemSettings(payload) {
+  return apiPatch('/api/settings/system', payload)
+}
+
+export async function resetSystemSettings(payload = {}) {
+  return apiPost('/api/settings/system/reset', payload)
+}

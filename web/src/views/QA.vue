@@ -383,10 +383,10 @@
           </p>
           <div class="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
             <span v-if="qaFlow.retrievedCount > 0" class="px-2 py-1 rounded border border-border bg-accent/20">
-              检索片段 {{ qaFlow.retrievedCount }}
+              {{ UX_TEXT.retrievedContentLabel }} {{ qaFlow.retrievedCount }}
             </span>
             <span v-if="qaFlow.timings.retrieve_ms" class="px-2 py-1 rounded border border-border bg-accent/20">
-              检索 {{ qaFlow.timings.retrieve_ms }} ms
+              {{ UX_TEXT.retrievalDurationLabel }} {{ qaFlow.timings.retrieve_ms }} ms
             </span>
             <span v-if="qaFlow.timings.generate_ms" class="px-2 py-1 rounded border border-border bg-accent/20">
               生成 {{ qaFlow.timings.generate_ms }} ms
@@ -395,7 +395,7 @@
 
           <div v-if="busy.qa && qaSourcePanelSources.length === 0" class="space-y-2">
             <SkeletonBlock type="list" :lines="3" />
-            <p class="text-xs text-muted-foreground">正在收集检索来源...</p>
+            <p class="text-xs text-muted-foreground">{{ UX_TEXT.collectingSources }}</p>
           </div>
 
           <div v-else-if="qaSourcePanelSources.length" class="space-y-2 max-h-56 overflow-y-auto pr-1">
@@ -420,7 +420,7 @@
             :icon="FileText"
             title="暂无来源"
             description="提问后会在这里显示本次回答引用的文档片段。"
-            :hint="busy.qa ? '正在等待检索结果...' : '点击来源项可查看原文片段。'"
+            :hint="busy.qa ? UX_TEXT.waitingSources : '点击来源项可查看原文片段。'"
             size="sm"
           />
         </div>
@@ -537,6 +537,7 @@ import KnowledgeScopePicker from '../components/context/KnowledgeScopePicker.vue
 import { parseExplainMarkdownSections } from '../utils/qaExplain'
 import { renderMarkdown } from '../utils/markdown'
 import { parseRouteContext } from '../utils/routeContext'
+import { UX_TEXT } from '../constants/uxText'
 
 const { showToast } = useToast()
 const appContext = useAppContextStore()
@@ -598,7 +599,7 @@ const lastQaSubmitFingerprint = ref('')
 const lastQaSubmitAt = ref(0)
 
 const QA_FLOW_STAGES = [
-  { key: 'retrieving', label: '检索中' },
+  { key: 'retrieving', label: UX_TEXT.retrievalInProgress },
   { key: 'generating', label: '生成中' },
   { key: 'saving', label: '保存中' },
   { key: 'done', label: '完成' },
@@ -690,7 +691,7 @@ const qaEmptyTitle = computed(() => {
   return '开始你的第一次提问'
 })
 const qaEmptyDescription = computed(() => {
-  if (!hasAnyKb.value) return '当前还没有知识库，上传文档后即可基于知识库进行 RAG 问答。'
+  if (!hasAnyKb.value) return '当前还没有知识库，上传文档后即可开始基于资料的学习问答。'
   if (!selectedKbId.value) return '在右侧上下文面板选择知识库后，输入框会自动解锁。'
   return '可以提问概念解释、公式推导、对比分析，AI 会结合知识库内容回答。'
 })
@@ -732,7 +733,7 @@ const qaSourcePanelSources = computed(() => {
 })
 const qaFlowPanelBadgeText = computed(() => {
   const phase = qaFlow.value.phase
-  if (phase === 'retrieving') return '检索中'
+  if (phase === 'retrieving') return UX_TEXT.retrievalInProgress
   if (phase === 'generating') return '生成中'
   if (phase === 'saving') return '保存中'
   if (phase === 'done' && qaFlow.value.result === 'no_results') return '无结果'
@@ -1414,7 +1415,7 @@ async function askQuestion() {
   resetQaFlow()
   updateQaFlow({
     phase: 'retrieving',
-    message: '正在检索相关片段...',
+    message: '正在查找相关参考内容...',
   })
   busy.value.qa = true
   scrollToBottom()

@@ -3,12 +3,23 @@ import { createPinia, setActivePinia } from 'pinia'
 
 vi.mock('../../src/api', () => ({
   getSettings: vi.fn(),
+  getSystemSettings: vi.fn(),
   patchKbSettings: vi.fn(),
+  patchSystemSettings: vi.fn(),
   patchUserSettings: vi.fn(),
   resetSettings: vi.fn(),
+  resetSystemSettings: vi.fn(),
 }))
 
-import { getSettings, patchKbSettings, patchUserSettings, resetSettings } from '../../src/api'
+import {
+  getSettings,
+  getSystemSettings,
+  patchKbSettings,
+  patchSystemSettings,
+  patchUserSettings,
+  resetSettings,
+  resetSystemSettings,
+} from '../../src/api'
 import { useSettingsStore } from '../../src/stores/settings'
 
 function buildSettingsResponse(overrides = {}) {
@@ -16,6 +27,10 @@ function buildSettingsResponse(overrides = {}) {
     system_status: {
       llm_provider: 'qwen',
       embedding_provider: 'dashscope',
+      llm_provider_configured: 'qwen',
+      embedding_provider_configured: 'dashscope',
+      llm_provider_source: 'manual',
+      embedding_provider_source: 'manual',
       qa_defaults_from_env: { qa_top_k: 4, qa_fetch_k: 12, rag_mode: 'hybrid' },
       ocr_enabled: true,
       pdf_parser_mode: 'auto',
@@ -52,6 +67,15 @@ function buildSettingsResponse(overrides = {}) {
   }
 }
 
+function buildSystemSettingsResponse(overrides = {}) {
+  return {
+    editable_keys: ['qa_top_k', 'qa_fetch_k', 'rag_mode', 'ocr_enabled'],
+    overrides: { qa_top_k: 4, qa_fetch_k: 12, rag_mode: 'hybrid' },
+    effective: { qa_top_k: 4, qa_fetch_k: 12, rag_mode: 'hybrid', ocr_enabled: true },
+    ...overrides,
+  }
+}
+
 describe('settings store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -60,6 +84,7 @@ describe('settings store', () => {
 
   it('loads settings and tracks dirty state for user defaults save', async () => {
     getSettings.mockResolvedValueOnce(buildSettingsResponse())
+    getSystemSettings.mockResolvedValueOnce(buildSystemSettingsResponse())
     patchUserSettings.mockResolvedValueOnce(
       buildSettingsResponse({
         user_defaults: {
@@ -102,6 +127,7 @@ describe('settings store', () => {
   })
 
   it('saves kb overrides with qa/quiz payload only and can reset kb scope', async () => {
+    getSystemSettings.mockResolvedValueOnce(buildSystemSettingsResponse())
     getSettings.mockResolvedValueOnce(
       buildSettingsResponse({
         kb_overrides: {
@@ -143,5 +169,40 @@ describe('settings store', () => {
       expect.objectContaining({ scope: 'kb', user_id: 'user-a', kb_id: 'kb-1' })
     )
   })
-})
 
+  it('saves and resets system advanced overrides', async () => {
+    getSettings.mockResolvedValueOnce(buildSettingsResponse())
+    getSystemSettings.mockResolvedValueOnce(buildSystemSettingsResponse())
+    patchSystemSettings.mockResolvedValueOnce(
+      buildSystemSettingsResponse({
+        overrides: { qa_top_k: 6, rag_mode: 'dense' },
+        effective: { qa_top_k: 6, qa_fetch_k: 12, rag_mode: 'dense', ocr_enabled: true },
+      })
+    )
+    resetSystemSettings.mockResolvedValueOnce(
+      buildSystemSettingsResponse({
+        overrides: {},
+        effective: { qa_top_k: 4, qa_fetch_k: 12, rag_mode: 'hybrid', ocr_enabled: true },
+      })
+    )
+
+    const store = useSettingsStore()
+    await store.load({ userId: 'user-a', kbId: 'kb-1' })
+
+    store.setSystemAdvancedDraft({ qa_top_k: 6, rag_mode: 'dense' })
+    expect(store.systemAdvancedDirty).toBe(true)
+
+    await store.saveSystemAdvanced()
+    expect(patchSystemSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        values: expect.objectContaining({ qa_top_k: 6, rag_mode: 'dense' }),
+      })
+    )
+    expect(store.systemAdvanced.overrides.qa_top_k).toBe(6)
+    expect(store.systemAdvancedDirty).toBe(false)
+
+    await store.resetSystemAdvanced()
+    expect(resetSystemSettings).toHaveBeenCalledWith({})
+    expect(store.systemAdvanced.overrides).toEqual({})
+  })
+})

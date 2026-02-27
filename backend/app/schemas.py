@@ -90,6 +90,10 @@ class SettingsResetRequest(BaseModel):
 class SettingsSystemStatus(BaseModel):
     llm_provider: str
     embedding_provider: str
+    llm_provider_configured: Optional[str] = None
+    embedding_provider_configured: Optional[str] = None
+    llm_provider_source: Optional[Literal["auto", "manual"]] = None
+    embedding_provider_source: Optional[Literal["auto", "manual"]] = None
     qa_defaults_from_env: Dict[str, Any] = {}
     ocr_enabled: bool
     pdf_parser_mode: str
@@ -113,6 +117,55 @@ class SettingsResponse(BaseModel):
     kb_overrides: Optional[KbSettingsPayload] = None
     effective: UserSettingsPayload
     meta: SettingsMeta
+
+
+class SystemSettingOption(BaseModel):
+    value: Any
+    label: str
+
+
+class SystemSettingField(BaseModel):
+    key: str
+    label: str
+    group: str
+    input_type: Literal["switch", "number", "select", "text"]
+    nullable: bool = False
+    description: Optional[str] = None
+    options: List[SystemSettingOption] = []
+    min: Optional[float] = None
+    max: Optional[float] = None
+    step: Optional[float] = None
+
+
+class SystemSettingGroup(BaseModel):
+    id: str
+    label: str
+
+
+class SystemSettingsSchema(BaseModel):
+    groups: List[SystemSettingGroup] = []
+    fields: List[SystemSettingField] = []
+
+
+class SystemSettingsResponse(BaseModel):
+    editable_keys: List[str] = []
+    overrides: Dict[str, Any] = {}
+    effective: Dict[str, Any] = {}
+    settings_schema: Optional[SystemSettingsSchema] = Field(default=None, alias="schema")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SystemSettingsPatchRequest(BaseModel):
+    values: Dict[str, Any]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SystemSettingsResetRequest(BaseModel):
+    keys: Optional[List[str]] = None
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class DocumentOut(BaseModel):

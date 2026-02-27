@@ -10,6 +10,7 @@ from app.core.auth import (
 )
 from app.core.config import settings
 from app.core.paths import ensure_data_dirs
+from app.core.runtime_overrides import load_system_overrides
 from app.db import Base, engine, ensure_schema
 from app.routers import (
     activity,
@@ -32,6 +33,7 @@ from app.routers import (
 
 def create_app() -> FastAPI:
     ensure_data_dirs()
+    load_system_overrides()
     Base.metadata.create_all(bind=engine)
     ensure_schema()
 

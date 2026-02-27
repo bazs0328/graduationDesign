@@ -67,7 +67,7 @@
               删除非空知识库时会二次确认是否级联删除其下文档。
             </p>
             <p class="text-xs text-muted-foreground">
-              系统级解析参数（如 OCR / PDF 解析）由管理员维护；问答与测验常用偏好可在
+              系统级文档识别能力与解析策略由管理员维护；问答与测验常用偏好可在
               <router-link to="/settings" class="font-semibold text-primary hover:underline">设置中心</router-link>
               调整。
             </p>

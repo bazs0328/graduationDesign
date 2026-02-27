@@ -7,6 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.knowledge_bases import ensure_kb
+from app.core.llm import embedding_provider_status, llm_provider_status
+from app.core.runtime_overrides import (
+    get_system_settings_payload,
+    patch_system_overrides,
+    reset_system_overrides,
+)
 from app.core.users import ensure_user
 from app.db import get_db
 from app.models import KnowledgeBase, User
@@ -17,6 +23,9 @@ from app.schemas import (
     SettingsResetRequest,
     SettingsResponse,
     SettingsSystemStatus,
+    SystemSettingsPatchRequest,
+    SystemSettingsResetRequest,
+    SystemSettingsResponse,
     UserSettingsPayload,
 )
 
@@ -139,6 +148,8 @@ def _effective_user_settings(user_defaults: dict[str, Any], kb_overrides: dict[s
 
 
 def _system_status() -> SettingsSystemStatus:
+    llm_status = llm_provider_status()
+    embedding_status = embedding_provider_status(resolved_llm_provider=llm_status["resolved"])
     secrets_configured = {
         "openai_api_key": bool(settings.openai_api_key),
         "google_api_key": bool(settings.google_api_key),
@@ -147,8 +158,12 @@ def _system_status() -> SettingsSystemStatus:
         "auth_secret_key_customized": bool(settings.auth_secret_key and settings.auth_secret_key != "gradtutor-dev-secret"),
     }
     return SettingsSystemStatus(
-        llm_provider=settings.llm_provider,
-        embedding_provider=settings.embedding_provider,
+        llm_provider=llm_status["resolved"],
+        embedding_provider=embedding_status["resolved"],
+        llm_provider_configured=llm_status["configured"],
+        embedding_provider_configured=embedding_status["configured"],
+        llm_provider_source=llm_status["source"],
+        embedding_provider_source=embedding_status["source"],
         qa_defaults_from_env={
             "qa_top_k": settings.qa_top_k,
             "qa_fetch_k": settings.qa_fetch_k,
@@ -282,3 +297,26 @@ def reset_settings(payload: SettingsResetRequest, db: Session = Depends(get_db))
     db.add(kb)
     db.commit()
     return _build_response(db, resolved_user_id=resolved_user_id, kb_id=kb.id)
+
+
+@router.get("/system", response_model=SystemSettingsResponse)
+def get_system_settings():
+    return SystemSettingsResponse.model_validate(get_system_settings_payload())
+
+
+@router.patch("/system", response_model=SystemSettingsResponse)
+def patch_system_settings(payload: SystemSettingsPatchRequest):
+    try:
+        patch_system_overrides(payload.values)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SystemSettingsResponse.model_validate(get_system_settings_payload())
+
+
+@router.post("/system/reset", response_model=SystemSettingsResponse)
+def reset_system_settings(payload: SystemSettingsResetRequest):
+    try:
+        reset_system_overrides(payload.keys)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SystemSettingsResponse.model_validate(get_system_settings_payload())

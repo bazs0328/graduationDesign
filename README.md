@@ -59,44 +59,18 @@ npm install <package-name>
 Open the UI at http://localhost:5173
 
 ## Configuration
-Backend settings are in `backend/.env`:
-- `LLM_PROVIDER=openai` or `gemini` or `deepseek` or `qwen`
-- `EMBEDDING_PROVIDER=openai|gemini|deepseek|qwen|dashscope`
-- `OPENAI_API_KEY=...`
-- `GOOGLE_API_KEY=...`
-- `DEEPSEEK_API_KEY=...` (DeepSeek is OpenAI-compatible; see `.env.example` for base_url)
-- `QWEN_API_KEY=...` (Qwen is OpenAI-compatible; see `.env.example` for base_url)
-- `DASHSCOPE_EMBEDDING_MODEL=...` (DashScope SDK embedding using `QWEN_API_KEY`, e.g. `qwen3-vl-embedding`)
-- DeepSeek embedding is optional; if not provided, embeddings fall back to OpenAI when `OPENAI_API_KEY` is set.
-- `INDEX_TEXT_CLEANUP_ENABLED=true|false` (enable index cleanup before chunking)
-- `INDEX_TEXT_CLEANUP_MODE=conservative` (PDF-oriented cleanup mode)
-- `INDEX_TEXT_CLEANUP_NON_PDF_MODE=structure_preserving` (non-PDF cleanup mode; keeps markdown/code structure)
-- `NOISE_FILTER_LEVEL=balanced|conservative|aggressive|structure_preserving` (shared noise filter level for QA/Preview/Quiz)
-- Text cleanup includes common normalization (NFKC, invisible-char cleanup, whitespace normalization, Chinese-context punctuation normalization, hard line-break repair) plus conservative Latin noise-line filtering.
-- PDF chunking also applies conservative header/footer cleanup (repeated edge lines + page-number lines) before indexing.
-- Existing documents are not auto-migrated: use document `reprocess` to apply new cleanup rules to historical files.
-- `NOISE_DROP_LOW_QUALITY_HITS=true|false` (drop low-quality retrieval hits before building sources/context)
-- `QA_TOP_K=4`, `QA_FETCH_K=12` (base retrieval window for normal QA)
-- `QA_SUMMARY_AUTO_EXPAND_ENABLED=true|false` (auto expand retrieval for summary-like questions)
-- `QA_SUMMARY_TOP_K=8`, `QA_SUMMARY_FETCH_K=28` (summary-like question retrieval floor; system keeps larger manual values)
-- `LEXICAL_STOPWORDS_ENABLED=true|false` (enable conservative stopword filtering for BM25 lexical tokens)
-- `LEXICAL_STOPWORDS_GLOBAL_PATH=data/lexical/stopwords.txt` (global stopword file; one token per line, `#` for comments)
-- `LEXICAL_USERDICT_GLOBAL_PATH=data/lexical/userdict.txt` (global jieba user dictionary file)
-- `LEXICAL_STOPWORDS_KB_REL_PATH=rag_storage/lexicon/stopwords.txt` (KB-level stopword file relative to each KB directory)
-- `LEXICAL_USERDICT_KB_REL_PATH=rag_storage/lexicon/userdict.txt` (KB-level jieba user dictionary file relative to each KB directory)
-- `LEXICAL_TOKENIZER_VERSION=v2` (lexical tokenization schema/version marker for BM25 entries)
-- `OCR_ENABLED=true|false` (enable OCR fallback for scanned PDFs)
-- `OCR_ENGINE=rapidocr|tesseract|cloud` (primary OCR engine, `cloud` reserved for future)
-- `OCR_FALLBACK_ENGINES=rapidocr` (comma-separated OCR fallback chain, de-duplicated; default is no Tesseract fallback)
-- `OCR_LANGUAGE=chi_sim+eng` (Tesseract language packs)
-- `OCR_TESSERACT_LANGUAGE=chi_sim+eng` (optional; overrides `OCR_LANGUAGE` for Tesseract only)
-- `OCR_MIN_TEXT_LENGTH=10` (per-page min chars before OCR fallback)
-- `OCR_RENDER_DPI=360` (PDF render DPI for OCR pages)
-- `OCR_CHECK_PAGES=3` (how many leading pages to inspect for scanned-PDF detection)
-- `OCR_PREPROCESS_ENABLED=true|false` (grayscale/denoise/binarize before OCR)
-- `OCR_DESKEW_ENABLED=true|false` (light deskew during OCR preprocessing)
-- `OCR_LOW_CONFIDENCE_THRESHOLD=0.78` (fallback to next OCR engine when confidence is low)
-- To re-enable Tesseract fallback manually: set `OCR_FALLBACK_ENGINES=rapidocr,tesseract` (and keep Tesseract installed).
+Backend settings are in `backend/.env`.
+
+### Minimal setup (recommended)
+1) Copy `backend/.env.example` to `backend/.env`.
+2) Keep `LLM_PROVIDER=auto` and `EMBEDDING_PROVIDER=auto`.
+3) Fill at least one key: `OPENAI_API_KEY` / `QWEN_API_KEY` / `GOOGLE_API_KEY` / `DEEPSEEK_API_KEY`.
+
+### Advanced setup
+- Prefer frontend configuration: `设置中心 -> 高级设置与诊断 -> 系统高级参数（可编辑）`.
+- Most advanced runtime tuning can now be done in frontend form controls (switch/number/select/text).
+- `backend/.env.advanced.example` remains only as a fallback template for headless/server-only deployments.
+- Existing `.env` files remain compatible (no mandatory migration).
 
 ## OCR Dependencies (Local Development)
 
