@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 from app.models import Document, Keypoint, KnowledgeBase, User
+from app.services.learner_profile import get_weak_concepts_for_kb
 
 
 def test_get_profile_returns_200_and_schema(client, seeded_session):
@@ -124,6 +125,89 @@ def test_get_profile_weak_concepts_derive_from_mastery_level(client, db_session,
     assert "特征值分解" in data["weak_concepts"]
     assert "线性变换" not in data["weak_concepts"]
     assert "未学习默认项" not in data["weak_concepts"]
+
+
+def test_get_weak_concepts_for_kb_filters_untouched_and_deduplicates(db_session):
+    user_id = "weak_kb_user"
+    kb_id = "weak_kb_1"
+    doc_id = "weak_doc_1"
+    db_session.add(User(id=user_id, username=user_id, password_hash="hash", name="User"))
+    db_session.add(KnowledgeBase(id=kb_id, user_id=user_id, name="KB"))
+    db_session.add(
+        Document(
+            id=doc_id,
+            user_id=user_id,
+            kb_id=kb_id,
+            filename="weak.txt",
+            file_type="txt",
+            text_path=f"/tmp/{doc_id}.txt",
+            num_chunks=1,
+            num_pages=1,
+            char_count=100,
+            status="ready",
+        )
+    )
+    db_session.add_all(
+        [
+            Keypoint(
+                id="weak-kp-1",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="同名概念",
+                mastery_level=0.05,
+                attempt_count=2,
+                correct_count=0,
+            ),
+            Keypoint(
+                id="weak-kp-2",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="同名概念",
+                mastery_level=0.05,
+                attempt_count=5,
+                correct_count=0,
+            ),
+            Keypoint(
+                id="weak-kp-3",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="次弱概念",
+                mastery_level=0.2,
+                attempt_count=1,
+                correct_count=0,
+            ),
+            Keypoint(
+                id="weak-kp-4",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="未学习默认项",
+                mastery_level=0.0,
+                attempt_count=0,
+                correct_count=0,
+            ),
+            Keypoint(
+                id="weak-kp-5",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc_id,
+                text="已掌握概念",
+                mastery_level=0.9,
+                attempt_count=3,
+                correct_count=3,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    weak = get_weak_concepts_for_kb(db_session, user_id, kb_id, limit=10)
+
+    assert weak == ["同名概念", "次弱概念"]
+    assert "未学习默认项" not in weak
+    assert "已掌握概念" not in weak
 
 
 def test_get_profile_mastery_metrics_use_aggregate_keypoints(client, db_session):

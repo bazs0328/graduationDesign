@@ -271,6 +271,10 @@ def test_generate_learning_path_result_cache_hits_and_invalidates(db_session):
     assert stage_calls["count"] == 2
 
 
+def test_learning_path_result_cache_ttl_matches_freshness_window():
+    assert learning_path_service._LEARNING_PATH_RESULT_CACHE_TTL_SECONDS == 180
+
+
 def test_generate_learning_path_deduplicates_multi_doc_keypoints(db_session):
     user_id = "lp_dedup_user_1"
     kb_id = "lp_dedup_kb_1"

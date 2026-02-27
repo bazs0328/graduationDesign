@@ -45,7 +45,6 @@ from app.services.keypoint_dedup import (
 )
 from app.services.learning_path import (
     get_unlocked_keypoint_ids,
-    invalidate_learning_path_result_cache,
 )
 from app.services.mastery import record_quiz_result
 from app.services.quiz import filter_quiz_questions_quality, generate_quiz
@@ -831,8 +830,6 @@ def submit_quiz(payload: QuizSubmitRequest, db: Session = Depends(get_db)):
         if "quiz_attempts" in msg and ("user_id" in msg and "quiz_id" in msg):
             raise HTTPException(status_code=409, detail="Quiz already submitted") from exc
         raise
-    invalidate_learning_path_result_cache(db, effective_kb_id)
-
     return QuizSubmitResponse(
         score=score,
         correct=correct,

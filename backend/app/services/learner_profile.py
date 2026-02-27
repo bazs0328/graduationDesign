@@ -4,7 +4,7 @@ from typing import Iterable, List, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.models import LearnerProfile
+from app.models import Keypoint, LearnerProfile
 from app.schemas import DifficultyPlan, ProfileDelta
 from app.services.aggregate_mastery import list_user_aggregate_mastery_points
 from app.services.mastery import is_weak_mastery
@@ -99,6 +99,52 @@ def get_weak_concepts_by_mastery(
         candidates.append((concept, mastery, attempts))
 
     # weaker first, then more attempts first to prioritize repeatedly problematic concepts
+    candidates.sort(key=lambda item: (item[1], -item[2], item[0]))
+
+    weak_concepts: List[str] = []
+    seen: set[str] = set()
+    for concept, _, _ in candidates:
+        if concept in seen:
+            continue
+        seen.add(concept)
+        weak_concepts.append(concept)
+        if len(weak_concepts) >= max(1, limit):
+            break
+    return weak_concepts
+
+
+def get_weak_concepts_for_kb(
+    db: Session,
+    user_id: str,
+    kb_id: str,
+    limit: int = WEAK_CONCEPT_LIMIT,
+) -> List[str]:
+    """Return weak concepts for a specific KB using lightweight keypoint queries."""
+    if not kb_id:
+        return []
+
+    rows = (
+        db.query(Keypoint.text, Keypoint.mastery_level, Keypoint.attempt_count)
+        .filter(
+            Keypoint.user_id == user_id,
+            Keypoint.kb_id == kb_id,
+        )
+        .all()
+    )
+
+    candidates = []
+    for text, mastery_raw, attempts_raw in rows:
+        concept = str(text or "").strip()
+        if not concept:
+            continue
+        mastery = float(mastery_raw or 0.0)
+        attempts = int(attempts_raw or 0)
+        if attempts == 0 and mastery <= 0.0:
+            continue
+        if not is_weak_mastery(mastery):
+            continue
+        candidates.append((concept, mastery, attempts))
+
     candidates.sort(key=lambda item: (item[1], -item[2], item[0]))
 
     weak_concepts: List[str] = []

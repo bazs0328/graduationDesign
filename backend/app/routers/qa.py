@@ -28,7 +28,6 @@ from app.services.keypoint_dedup import (
 )
 from app.services.learning_path import (
     get_unlocked_keypoint_ids,
-    invalidate_learning_path_result_cache,
 )
 from app.services.mastery import record_study_interaction
 from app.services.qa import (
@@ -272,7 +271,6 @@ def _persist_qa_result(
         payload.focus,
     )
     db.commit()
-    invalidate_learning_path_result_cache(db, ctx.kb_id)
 
 
 def _sse_event(event: str, data: dict) -> str:

@@ -548,7 +548,8 @@ const STAGE_COLOR_MAP = {
   application: '#ef4444',
 }
 const PROGRESS_REC_CACHE_TTL_MS = 5 * 60 * 1000
-const PROGRESS_REC_CACHE_PREFIX = 'gradtutor_progress_rec_v1:'
+const PROGRESS_REC_CACHE_PREFIX = 'gradtutor_progress_rec_v2:'
+const PROGRESS_PATH_CACHE_PREFIX = 'gradtutor_progress_path_v1:'
 
 const router = useRouter()
 const route = useRoute()
@@ -940,8 +941,12 @@ function recommendationCacheKey(kbId) {
   return `${PROGRESS_REC_CACHE_PREFIX}${resolvedUserId.value || 'default'}:${kbId}`
 }
 
-function readRecommendationCache(kbId) {
-  const key = recommendationCacheKey(kbId)
+function learningPathCacheKey(kbId) {
+  if (!kbId) return ''
+  return `${PROGRESS_PATH_CACHE_PREFIX}${resolvedUserId.value || 'default'}:${kbId}`
+}
+
+function readProgressCache(key) {
   if (!key) return null
   try {
     const raw = sessionStorage.getItem(key)
@@ -959,33 +964,46 @@ function readRecommendationCache(kbId) {
   }
 }
 
-function writeRecommendationCache(kbId) {
-  const key = recommendationCacheKey(kbId)
+function writeProgressCache(key, payload) {
   if (!key) return
   try {
     sessionStorage.setItem(key, JSON.stringify({
       saved_at: Date.now(),
-      payload: {
-        items: recommendations.value || [],
-        next_step: nextRecommendation.value || null,
-        generated_at: recommendationsUpdatedAt.value || '',
-        learning_path: learningPath.value || [],
-        learning_path_edges: learningPathEdges.value || [],
-        learning_path_stages: learningPathStages.value || [],
-        learning_path_modules: learningPathModules.value || [],
-        learning_path_summary: learningPathSummary.value || {},
-      },
+      payload,
     }))
   } catch {
     // ignore cache write failures
   }
 }
 
+function readRecommendationCache(kbId) {
+  return readProgressCache(recommendationCacheKey(kbId))
+}
+
+function writeRecommendationCache(kbId) {
+  writeProgressCache(recommendationCacheKey(kbId), {
+    items: recommendations.value || [],
+    next_step: nextRecommendation.value || null,
+    generated_at: recommendationsUpdatedAt.value || '',
+  })
+}
+
+function readLearningPathCache(kbId) {
+  return readProgressCache(learningPathCacheKey(kbId))
+}
+
+function writeLearningPathCache(kbId) {
+  writeProgressCache(learningPathCacheKey(kbId), {
+    items: learningPath.value || [],
+    edges: learningPathEdges.value || [],
+    stages: learningPathStages.value || [],
+    modules: learningPathModules.value || [],
+    path_summary: learningPathSummary.value || {},
+  })
+}
+
 function applyRecommendationsPayload(payload = {}, options = {}) {
-  const {
-    hydrateLearningPath = true,
-    kbId = '',
-  } = options
+  const { kbId = '' } = options
   recommendations.value = normalizeRecommendationItems(payload?.items || [])
   nextRecommendation.value = payload?.next_step || null
   recommendationsUpdatedAt.value = payload?.generated_at || ''
@@ -993,15 +1011,12 @@ function applyRecommendationsPayload(payload = {}, options = {}) {
     recommendationsStateKbId.value = kbId
     recommendationsLoadedKbId.value = kbId
   }
-  if (hydrateLearningPath) {
-    applyLearningPathPayload(payload, { kbId })
-  }
 }
 
-function hydrateRecommendationsFromCache(kbId, options = {}) {
+function hydrateRecommendationsFromCache(kbId) {
   const payload = readRecommendationCache(kbId)
   if (!payload) return false
-  applyRecommendationsPayload(payload, { ...options, kbId })
+  applyRecommendationsPayload(payload, { kbId })
   return true
 }
 
@@ -1028,41 +1043,39 @@ function applyLearningPathPayload(payload = {}, options = {}) {
   }
 }
 
+function hydrateLearningPathFromCache(kbId) {
+  const payload = readLearningPathCache(kbId)
+  if (!payload) return false
+  applyLearningPathPayload(payload, { kbId })
+  return true
+}
+
 async function fetchRecommendations(options = {}) {
   const {
-    hydrateLearningPath = true,
     preferCache = false,
     refreshAfterCache = false,
   } = options
   if (!selectedKbId.value) {
     resetRecommendationsState()
-    if (hydrateLearningPath) resetLearningPathState()
     return
   }
   const requestKbId = selectedKbId.value
   const hadSameKbRecommendations = recommendationsStateKbId.value === requestKbId
-  const hadSameKbLearningPath = learningPathStateKbId.value === requestKbId
 
-  if (preferCache && hydrateRecommendationsFromCache(requestKbId, { hydrateLearningPath })) {
+  if (preferCache && hydrateRecommendationsFromCache(requestKbId)) {
     if (!refreshAfterCache) {
       return
     }
   }
 
   busy.value.recommendations = true
-  if (hydrateLearningPath) {
-    busy.value.pathLoad = true
-    if (!hadSameKbLearningPath && learningPathStateKbId.value !== requestKbId) {
-      resetLearningPathState({ clearLoaded: false })
-    }
-  }
   if (!hadSameKbRecommendations && recommendationsStateKbId.value !== requestKbId) {
     resetRecommendationsState({ clearLoaded: false })
   }
   try {
-    const res = await apiGet(`/api/recommendations?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(requestKbId)}&limit=6`)
+    const res = await apiGet(`/api/recommendations?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(requestKbId)}&limit=6&include_learning_path=0`)
     if (selectedKbId.value !== requestKbId) return
-    applyRecommendationsPayload(res, { hydrateLearningPath, kbId: requestKbId })
+    applyRecommendationsPayload(res, { kbId: requestKbId })
     writeRecommendationCache(requestKbId)
   } catch {
     if (selectedKbId.value === requestKbId) {
@@ -1071,33 +1084,37 @@ async function fetchRecommendations(options = {}) {
         recommendationsStateKbId.value = requestKbId
       }
       recommendationsLoadedKbId.value = requestKbId
-      if (hydrateLearningPath) {
-        if (!hadSameKbLearningPath) {
-          resetLearningPathState({ clearLoaded: false })
-          learningPathStateKbId.value = requestKbId
-        }
-        learningPathLoadedKbId.value = requestKbId
-      }
     }
     // error toast handled globally
   } finally {
     busy.value.recommendations = false
-    if (hydrateLearningPath) {
-      busy.value.pathLoad = false
-    }
   }
 }
 
-async function fetchLearningPath() {
+async function fetchLearningPath(options = {}) {
+  const {
+    preferCache = false,
+    refreshAfterCache = false,
+  } = options
   if (!selectedKbId.value) return
   const requestKbId = selectedKbId.value
   const hadSameKbLearningPath = learningPathStateKbId.value === requestKbId
+
+  if (preferCache && hydrateLearningPathFromCache(requestKbId)) {
+    if (!refreshAfterCache) {
+      return
+    }
+  }
+
   busy.value.pathLoad = true
+  if (!hadSameKbLearningPath && learningPathStateKbId.value !== requestKbId) {
+    resetLearningPathState({ clearLoaded: false })
+  }
   try {
     const res = await apiGet(`/api/learning-path?user_id=${encodeURIComponent(resolvedUserId.value)}&kb_id=${encodeURIComponent(requestKbId)}&limit=20`)
     if (selectedKbId.value !== requestKbId) return
     applyLearningPathPayload(res, { kbId: requestKbId })
-    writeRecommendationCache(requestKbId)
+    writeLearningPathCache(requestKbId)
   } catch {
     if (selectedKbId.value === requestKbId) {
       if (!hadSameKbLearningPath) {
@@ -1713,12 +1730,17 @@ async function refreshProgressPageData(options = {}) {
     fetchActivity(),
     selectedKbId.value
       ? fetchRecommendations({
-        hydrateLearningPath: true,
         preferCache: preferRecommendationCache,
         refreshAfterCache: refreshRecommendationAfterCache,
       })
       : Promise.resolve(),
   ])
+  if (selectedKbId.value) {
+    void fetchLearningPath({
+      preferCache: preferRecommendationCache,
+      refreshAfterCache: refreshRecommendationAfterCache,
+    })
+  }
 }
 
 onMounted(async () => {
@@ -1764,7 +1786,10 @@ watch(selectedKbId, (nextKbId, prevKbId) => {
   if (nextKbId) {
     clearKbScopedProgressState(nextKbId)
     void fetchRecommendations({
-      hydrateLearningPath: true,
+      preferCache: true,
+      refreshAfterCache: true,
+    })
+    void fetchLearningPath({
       preferCache: true,
       refreshAfterCache: true,
     })

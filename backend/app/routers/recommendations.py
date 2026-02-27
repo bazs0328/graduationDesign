@@ -1,4 +1,5 @@
 import logging
+import time
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -23,10 +24,9 @@ from app.schemas import (
     RecommendationNextStep,
     RecommendationsResponse,
 )
-from app.services.aggregate_mastery import list_kb_aggregate_mastery_points
 from app.services.learner_profile import (
     get_or_create_profile,
-    get_weak_concepts_by_mastery,
+    get_weak_concepts_for_kb,
 )
 from app.services.learning_path import generate_learning_path
 from app.services.mastery import (
@@ -144,6 +144,7 @@ def get_recommendations(
     user_id: str | None = None,
     kb_id: str | None = None,
     limit: int = 5,
+    include_learning_path: bool = True,
     db: Session = Depends(get_db),
 ):
     resolved_user_id = ensure_user(db, user_id)
@@ -152,9 +153,15 @@ def get_recommendations(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    total_started = time.perf_counter()
+    docs_query_ms = 0
+    counts_query_ms = 0
+    learning_path_ms = 0
+    rank_ms = 0
+
     limit = max(1, min(limit, 20))
     profile = get_or_create_profile(db, resolved_user_id)
-    profile_weak_concepts = get_weak_concepts_by_mastery(db, resolved_user_id)
+    profile_weak_concepts = get_weak_concepts_for_kb(db, resolved_user_id, kb.id)
     practice_difficulty = PRACTICE_DIFFICULTY_BY_ABILITY.get(
         profile.ability_level, "medium"
     )
@@ -162,6 +169,7 @@ def get_recommendations(
         profile.ability_level, "hard"
     )
 
+    docs_started = time.perf_counter()
     docs = (
         db.query(Document)
         .filter(
@@ -172,11 +180,26 @@ def get_recommendations(
         .order_by(Document.created_at.desc())
         .all()
     )
+    docs_query_ms = int((time.perf_counter() - docs_started) * 1000)
     if not docs:
+        total_ms = int((time.perf_counter() - total_started) * 1000)
+        logger.info(
+            "Recommendations timing user_id=%s kb_id=%s total_ms=%d docs_query_ms=%d counts_query_ms=%d learning_path_ms=%d rank_ms=%d items_count=%d learning_path_items_count=%d",
+            resolved_user_id,
+            kb.id,
+            total_ms,
+            docs_query_ms,
+            counts_query_ms,
+            learning_path_ms,
+            rank_ms,
+            0,
+            0,
+        )
         return RecommendationsResponse(kb_id=kb.id, kb_name=kb.name, items=[])
 
     doc_ids = [doc.id for doc in docs]
 
+    counts_started = time.perf_counter()
     summary_counts = {
         row[0]: int(row[1] or 0)
         for row in db.query(SummaryRecord.doc_id, func.count(SummaryRecord.id))
@@ -247,37 +270,77 @@ def get_recommendations(
         .all()
     }
 
-    keypoints_by_doc: dict[str, list[dict]] = defaultdict(list)
-    for point in list_kb_aggregate_mastery_points(db, resolved_user_id, kb.id):
-        for source_doc_id in point.source_doc_ids:
-            if source_doc_id not in doc_ids:
-                continue
-            keypoints_by_doc[source_doc_id].append(
-                {
-                    "text": str(point.text or "").strip(),
-                    "mastery_level": float(point.mastery_level or 0.0),
-                    "attempt_count": int(point.attempt_count or 0),
-                }
-            )
+    keypoint_best_by_doc: dict[str, dict[str, dict]] = defaultdict(dict)
+    keypoint_rows = (
+        db.query(
+            Keypoint.doc_id,
+            Keypoint.text,
+            Keypoint.mastery_level,
+            Keypoint.attempt_count,
+        )
+        .filter(
+            Keypoint.user_id == resolved_user_id,
+            Keypoint.doc_id.in_(doc_ids),
+        )
+        .all()
+    )
+    for row in keypoint_rows:
+        source_doc_id = str(row[0] or "")
+        text = str(row[1] or "").strip()
+        if not source_doc_id or not text:
+            continue
+        mastery_level = float(row[2] or 0.0)
+        attempt_count = int(row[3] or 0)
+        existing = keypoint_best_by_doc[source_doc_id].get(text)
+        if existing is None:
+            keypoint_best_by_doc[source_doc_id][text] = {
+                "text": text,
+                "mastery_level": mastery_level,
+                "attempt_count": attempt_count,
+            }
+            continue
+        if mastery_level < float(existing["mastery_level"]):
+            keypoint_best_by_doc[source_doc_id][text] = {
+                "text": text,
+                "mastery_level": mastery_level,
+                "attempt_count": attempt_count,
+            }
+            continue
+        if (
+            mastery_level == float(existing["mastery_level"])
+            and attempt_count > int(existing["attempt_count"])
+        ):
+            keypoint_best_by_doc[source_doc_id][text] = {
+                "text": text,
+                "mastery_level": mastery_level,
+                "attempt_count": attempt_count,
+            }
+    keypoints_by_doc = {
+        source_doc_id: list(concept_map.values())
+        for source_doc_id, concept_map in keypoint_best_by_doc.items()
+    }
+    counts_query_ms = int((time.perf_counter() - counts_started) * 1000)
 
-    try:
-        (
-            learning_path,
-            learning_path_edges,
-            learning_path_stages,
-            learning_path_modules,
-            learning_path_summary,
-        ) = generate_learning_path(db, resolved_user_id, kb.id, limit=max(20, limit * 4))
-    except Exception:
-        logger.exception("Failed to generate learning path, returning empty")
+    learning_path_started = time.perf_counter()
+    if include_learning_path:
+        try:
+            (
+                learning_path,
+                learning_path_edges,
+                learning_path_stages,
+                learning_path_modules,
+                learning_path_summary,
+            ) = generate_learning_path(db, resolved_user_id, kb.id, limit=max(20, limit * 4))
+        except Exception:
+            logger.exception("Failed to generate learning path, returning empty")
+            learning_path, learning_path_edges = [], []
+            learning_path_stages, learning_path_modules, learning_path_summary = [], [], {}
+    else:
         learning_path, learning_path_edges = [], []
         learning_path_stages, learning_path_modules, learning_path_summary = [], [], {}
+    learning_path_ms = int((time.perf_counter() - learning_path_started) * 1000)
 
-    learning_focus_by_doc: dict[str, list[str]] = defaultdict(list)
-    for item in learning_path:
-        if item.priority == "completed":
-            continue
-        learning_focus_by_doc[item.doc_id].append((item.text or "").strip())
+    rank_started = time.perf_counter()
 
     ranked_items: list[tuple[float, float, RecommendationItem]] = []
     for doc in docs:
@@ -303,9 +366,7 @@ def get_recommendations(
         ]
 
         focus_concepts = _unique_nonempty(
-            [item["text"] for item in weak_keypoints]
-            + learning_focus_by_doc.get(doc_id, [])
-            + profile_weak_concepts,
+            [item["text"] for item in weak_keypoints] + profile_weak_concepts,
             limit=3,
         )
 
@@ -430,10 +491,6 @@ def get_recommendations(
             and (not mastery_values or stable_mastery_rate >= 0.7)
         ):
             challenge_params = {"difficulty": challenge_difficulty}
-            if learning_focus_by_doc.get(doc_id):
-                challenge_params["focus_concepts"] = _unique_nonempty(
-                    learning_focus_by_doc[doc_id], limit=2
-                )
             _add_action(
                 actions_by_type,
                 action_type="challenge",
@@ -446,10 +503,8 @@ def get_recommendations(
             _add_action(
                 actions_by_type,
                 action_type="review",
-                reason="当前进展平稳，建议按学习路径继续推进。",
-                params={"focus_concepts": learning_focus_by_doc.get(doc_id, [])[:1]}
-                if learning_focus_by_doc.get(doc_id)
-                else None,
+                reason="当前进展平稳，建议继续复习巩固。",
+                params={"focus_concepts": focus_concepts[:1]} if focus_concepts else None,
                 cta="继续学习",
                 priority=50,
             )
@@ -490,6 +545,21 @@ def get_recommendations(
             action=items[0].primary_action,
             reason=items[0].summary,
         )
+
+    rank_ms = int((time.perf_counter() - rank_started) * 1000)
+    total_ms = int((time.perf_counter() - total_started) * 1000)
+    logger.info(
+        "Recommendations timing user_id=%s kb_id=%s total_ms=%d docs_query_ms=%d counts_query_ms=%d learning_path_ms=%d rank_ms=%d items_count=%d learning_path_items_count=%d",
+        resolved_user_id,
+        kb.id,
+        total_ms,
+        docs_query_ms,
+        counts_query_ms,
+        learning_path_ms,
+        rank_ms,
+        len(items),
+        len(learning_path),
+    )
 
     return RecommendationsResponse(
         kb_id=kb.id,

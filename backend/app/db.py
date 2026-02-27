@@ -33,12 +33,15 @@ def _ensure_sqlite_indexes(conn) -> None:
         "CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_documents_user_kb_id ON documents(user_id, kb_id)",
         "CREATE INDEX IF NOT EXISTS idx_documents_user_created_at ON documents(user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_documents_user_kb_status_created_at ON documents(user_id, kb_id, status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_summaries_user_id ON summaries(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_summaries_doc_id ON summaries(doc_id)",
         "CREATE INDEX IF NOT EXISTS idx_summaries_user_doc_id ON summaries(user_id, doc_id)",
         "CREATE INDEX IF NOT EXISTS idx_keypoints_user_id ON keypoints(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_keypoints_doc_id ON keypoints(doc_id)",
         "CREATE INDEX IF NOT EXISTS idx_keypoints_user_doc_id ON keypoints(user_id, doc_id)",
+        "CREATE INDEX IF NOT EXISTS idx_keypoints_v2_user_doc ON keypoints_v2(user_id, doc_id)",
+        "CREATE INDEX IF NOT EXISTS idx_keypoints_v2_user_kb_doc_created_id ON keypoints_v2(user_id, kb_id, doc_id, created_at, id)",
         "CREATE INDEX IF NOT EXISTS idx_qa_records_user_id ON qa_records(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_qa_records_doc_id ON qa_records(doc_id)",
         "CREATE INDEX IF NOT EXISTS idx_qa_records_user_doc_id ON qa_records(user_id, doc_id)",
@@ -52,6 +55,7 @@ def _ensure_sqlite_indexes(conn) -> None:
         "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_keypoint_dependencies_from_id ON keypoint_dependencies(from_keypoint_id)",
         "CREATE INDEX IF NOT EXISTS idx_keypoint_dependencies_to_id ON keypoint_dependencies(to_keypoint_id)",
+        "CREATE INDEX IF NOT EXISTS idx_keypoint_dependencies_kb_relation ON keypoint_dependencies(kb_id, relation)",
     ]
     for stmt in statements:
         _create_sqlite_index(conn, stmt)

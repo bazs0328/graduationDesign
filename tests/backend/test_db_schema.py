@@ -29,7 +29,39 @@ def test_hot_path_non_unique_indexes_exist():
         doc_indexes = _index_names(conn, "documents")
         qa_indexes = _index_names(conn, "qa_records")
         summary_indexes = _index_names(conn, "summaries")
+        keypoints_v2_indexes = _index_names(conn, "keypoints_v2")
+        dependency_indexes = _index_names(conn, "keypoint_dependencies")
 
     assert "idx_documents_user_kb_id" in doc_indexes
+    assert "idx_documents_user_kb_status_created_at" in doc_indexes
     assert "idx_qa_records_user_kb_id" in qa_indexes
     assert "idx_summaries_user_doc_id" in summary_indexes
+    assert "idx_keypoints_v2_user_doc" in keypoints_v2_indexes
+    assert "idx_keypoints_v2_user_kb_doc_created_id" in keypoints_v2_indexes
+    assert "idx_keypoint_dependencies_kb_relation" in dependency_indexes
+
+
+def test_new_composite_hot_path_index_columns_match_expected_order():
+    ensure_schema()
+    with engine.connect() as conn:
+        assert _index_columns(conn, "idx_documents_user_kb_status_created_at") == [
+            "user_id",
+            "kb_id",
+            "status",
+            "created_at",
+        ]
+        assert _index_columns(conn, "idx_keypoints_v2_user_kb_doc_created_id") == [
+            "user_id",
+            "kb_id",
+            "doc_id",
+            "created_at",
+            "id",
+        ]
+        assert _index_columns(conn, "idx_keypoints_v2_user_doc") == [
+            "user_id",
+            "doc_id",
+        ]
+        assert _index_columns(conn, "idx_keypoint_dependencies_kb_relation") == [
+            "kb_id",
+            "relation",
+        ]

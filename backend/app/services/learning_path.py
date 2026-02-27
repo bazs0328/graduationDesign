@@ -36,7 +36,7 @@ DEPENDENCY_GRAPH_VERSION = "v2"
 DEPENDENCY_RELATION = f"prerequisite:{DEPENDENCY_GRAPH_VERSION}"
 _LEARNING_PATH_CACHE_SCHEMA_VERSION = "lpv2"
 
-_LEARNING_PATH_RESULT_CACHE_TTL_SECONDS = 300
+_LEARNING_PATH_RESULT_CACHE_TTL_SECONDS = 180
 _LEARNING_PATH_RESULT_CACHE_MAX_ENTRIES = 64
 _learning_path_result_cache: dict[tuple[str, str, int, str], tuple[float, Any]] = {}
 _learning_path_result_cache_lock = Lock()
