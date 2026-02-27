@@ -7,6 +7,7 @@ from app.core.users import ensure_user
 from app.db import get_db
 from app.models import Document, KeypointRecord, QARecord, Quiz, QuizAttempt, SummaryRecord
 from app.schemas import ActivityItem, ActivityResponse
+from app.utils.pagination import normalize_page_args
 
 router = APIRouter()
 
@@ -36,8 +37,7 @@ def get_activity(
     db: Session = Depends(get_db),
 ):
     resolved_user_id = ensure_user(db, user_id)
-    offset = max(0, int(offset or 0))
-    limit = max(1, min(limit, 100))
+    offset, limit = normalize_page_args(offset=offset, limit=limit, default=20, max_limit=100)
     fetch_window = offset + limit
 
     doc_query = db.query(Document)

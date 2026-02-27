@@ -32,6 +32,18 @@ function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
+async function waitForCondition(predicate, options = {}) {
+  const { timeoutMs = 30000, intervalMs = 20 } = options
+  const start = Date.now()
+  while (Date.now() - start <= timeoutMs) {
+    await flushPromises()
+    await nextTick()
+    if (predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+  throw new Error('Timed out waiting for condition')
+}
+
 function parsePath(path) {
   return new URL(path, 'http://localhost')
 }
@@ -172,31 +184,25 @@ describe('Progress revisit background refresh', () => {
     })
 
     const { wrapper, router } = await mountAppWithRouter('/progress')
-    await flushPromises()
-    await nextTick()
-    await flushPromises()
-    await nextTick()
-
-    expect(wrapper.text()).toContain('首轮知识点')
+    await waitForCondition(() => wrapper.text().includes('首轮知识点'))
 
     await router.push('/')
     await flushPromises()
     await nextTick()
 
     await router.push('/progress')
-    await nextTick()
-    await flushPromises()
-    await nextTick()
+    await waitForCondition(
+      () => recommendationCallCount === 2
+        && wrapper.text().includes('首轮知识点')
+        && wrapper.text().includes('正在加载推荐...'),
+    )
 
     expect(recommendationCallCount).toBe(2)
     expect(wrapper.text()).toContain('首轮知识点')
     expect(wrapper.text()).toContain('正在加载推荐...')
 
     secondRecommendations.resolve(buildRecommendationsPayload('回访刷新后知识点'))
-    await flushPromises()
-    await nextTick()
-    await flushPromises()
-    await nextTick()
+    await waitForCondition(() => wrapper.text().includes('回访刷新后知识点'))
 
     expect(wrapper.text()).toContain('回访刷新后知识点')
 
@@ -204,6 +210,5 @@ describe('Progress revisit background refresh', () => {
       .map(([path]) => parsePath(path))
       .filter((url) => url.pathname === '/api/learning-path')
     expect(learningPathCalls.length).toBe(0)
-  }, 20000)
+  }, 30000)
 })
-

@@ -4,6 +4,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.llm import get_llm
+from app.services.sampling import sample_evenly
 
 SUMMARY_SYSTEM = (
     "你是一位文档摘要专家。你的任务是以清晰、结构化、简洁的方式从教育材料中提取和组织核心内容。\n\n"
@@ -76,21 +77,13 @@ _SUMMARY_CHUNK_OVERLAP = 300
 _MAX_CHUNKS = 20
 
 
-def _sample_chunks(chunks: list[str], max_count: int) -> list[str]:
-    """Evenly sample chunks when there are too many."""
-    if len(chunks) <= max_count:
-        return chunks
-    step = len(chunks) / max_count
-    return [chunks[int(i * step)] for i in range(max_count)]
-
-
 async def summarize_text(text: str) -> str:
     llm = get_llm(temperature=0.2)
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=_SUMMARY_CHUNK_SIZE, chunk_overlap=_SUMMARY_CHUNK_OVERLAP
     )
     chunks = splitter.split_text(text)
-    chunks = _sample_chunks(chunks, _MAX_CHUNKS)
+    chunks = sample_evenly(chunks, _MAX_CHUNKS)
 
     async def _summarize_chunk(chunk: str) -> str:
         msg = CHUNK_PROMPT.format_messages(chunk=chunk)

@@ -396,30 +396,23 @@ import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { Upload, FileText, Database, X, RefreshCw } from 'lucide-vue-next'
 import { apiDelete, apiGet, apiPatch, apiPost, apiUploadWithProgress } from '../api'
 import { useToast } from '../composables/useToast'
-import { useAppContextStore } from '../stores/appContext'
+import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import KbSelector from '../components/context/KbSelector.vue'
 
 const { showToast } = useToast()
-const appContext = useAppContextStore()
-appContext.hydrate()
+const { appContext, resolvedUserId, kbs, selectedKbId } = useAppKnowledgeScope()
 
 const UPLOAD_ALLOWED_EXTENSIONS = new Set(['.pdf', '.txt', '.md', '.docx', '.pptx'])
 const UPLOAD_MAX_FILE_BYTES = 50 * 1024 * 1024
 
-const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
 const docs = ref([])
 const docsTotal = ref(0)
 const docsOffset = ref(0)
 const docsLimit = ref(20)
 const docsHasMore = ref(false)
-const kbs = computed(() => appContext.kbs)
-const selectedKbId = computed({
-  get: () => appContext.selectedKbId,
-  set: (value) => appContext.setSelectedKbId(value),
-})
 const kbNameInput = ref('')
 const kbRenameInput = ref('')
 const kbNameInputRef = ref(null)

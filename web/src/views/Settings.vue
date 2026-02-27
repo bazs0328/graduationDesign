@@ -595,7 +595,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { SlidersHorizontal, ShieldCheck } from 'lucide-vue-next'
 import { useToast } from '../composables/useToast'
-import { useAppContextStore } from '../stores/appContext'
+import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import { useSettingsStore } from '../stores/settings'
 import { UX_TEXT } from '../constants/uxText'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
@@ -603,8 +603,7 @@ import KbSelector from '../components/context/KbSelector.vue'
 import SettingsPanel from '../components/settings/SettingsPanel.vue'
 
 const { showToast } = useToast()
-const appContext = useAppContextStore()
-appContext.hydrate()
+const { appContext, resolvedUserId, kbs, selectedKbId } = useAppKnowledgeScope()
 const settingsStore = useSettingsStore()
 
 const userAdvancedOpen = ref(false)
@@ -614,12 +613,6 @@ const lastUserActionError = ref('')
 const lastKbActionError = ref('')
 const systemOverridesError = ref('')
 
-const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
-const kbs = computed(() => appContext.kbs)
-const selectedKbId = computed({
-  get: () => appContext.selectedKbId,
-  set: (value) => appContext.setSelectedKbId(value),
-})
 const selectedKbName = computed(() => {
   const kb = kbs.value.find((item) => item.id === selectedKbId.value)
   return kb?.name || ''

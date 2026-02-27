@@ -202,6 +202,64 @@ def _similarity_search_focus_seed_docs(
     return _dedupe_search_docs([*merged, *fallback], limit=target_k)
 
 
+def _build_context_from_scope(
+    *,
+    user_id: str,
+    kb_scope: bool,
+    focus_concepts: Optional[List[str]],
+    cleaned_focus: list[str],
+    query: str,
+    target_count: int,
+    search_filter: dict[str, Any],
+    log_scope_label: str,
+    default_kb_id: Optional[str] = None,
+) -> tuple[str, List[str]]:
+    vectorstore = get_vectorstore(user_id)
+    k = _context_seed_search_k(target_count, kb_scope=kb_scope, focus_concepts=focus_concepts)
+    docs = _similarity_search_focus_seed_docs(
+        vectorstore=vectorstore,
+        focus_concepts=cleaned_focus,
+        fallback_query=query,
+        k=k,
+        search_filter=search_filter,
+    )
+    if not docs:
+        raise ValueError("No relevant context found for quiz generation")
+
+    max_chars = _context_char_budget(target_count, kb_scope=kb_scope)
+    context = ""
+    if bool(getattr(settings, "quiz_context_reconstruct_enabled", True)):
+        try:
+            build_kwargs: dict[str, Any] = {
+                "user_id": user_id,
+                "seed_docs": list(docs),
+                "max_chars": max_chars,
+                "kb_scope": kb_scope,
+            }
+            if kb_scope and default_kb_id:
+                build_kwargs["default_kb_id"] = default_kb_id
+            built = build_quiz_context_from_seeds(**build_kwargs)
+            context = built.text or ""
+            logger.info(
+                "Quiz context build %s seeds=%s filtered=%s reconstructed=%s modes=%s fallback=%s used=%s",
+                log_scope_label,
+                built.stats.get("seed_count", 0),
+                built.stats.get("filtered_seed_count", 0),
+                built.stats.get("reconstructed_count", 0),
+                built.stats.get("build_modes", {}),
+                built.stats.get("fallback_used", False),
+                built.stats.get("used_passage_count", 0),
+            )
+        except Exception:
+            logger.exception(
+                "Quiz context reconstruction failed for %s; fallback to raw chunks",
+                log_scope_label,
+            )
+    if not context:
+        context = _build_context_text(docs, max_chars=max_chars)
+    return context, _extract_keypoint_ids(docs)
+
+
 def _build_context(
     user_id: str,
     doc_id: Optional[str],
@@ -221,80 +279,28 @@ def _build_context(
         if cleaned_focus:
             query = ", ".join(cleaned_focus)
     if doc_id:
-        vectorstore = get_vectorstore(user_id)
-        k = _context_seed_search_k(target_count, kb_scope=False, focus_concepts=focus_concepts)
-        docs = _similarity_search_focus_seed_docs(
-            vectorstore=vectorstore,
-            focus_concepts=cleaned_focus,
-            fallback_query=query,
-            k=k,
+        return _build_context_from_scope(
+            user_id=user_id,
+            kb_scope=False,
+            focus_concepts=focus_concepts,
+            cleaned_focus=cleaned_focus,
+            query=query,
+            target_count=target_count,
             search_filter={"doc_id": doc_id},
+            log_scope_label="doc_scope",
         )
-        if not docs:
-            raise ValueError("No relevant context found for quiz generation")
-        max_chars = _context_char_budget(target_count, kb_scope=False)
-        context = ""
-        if bool(getattr(settings, "quiz_context_reconstruct_enabled", True)):
-            try:
-                built = build_quiz_context_from_seeds(
-                    user_id=user_id,
-                    seed_docs=list(docs),
-                    max_chars=max_chars,
-                    kb_scope=False,
-                )
-                context = built.text or ""
-                logger.info(
-                    "Quiz context build doc_scope seeds=%s filtered=%s reconstructed=%s modes=%s fallback=%s used=%s",
-                    built.stats.get("seed_count", 0),
-                    built.stats.get("filtered_seed_count", 0),
-                    built.stats.get("reconstructed_count", 0),
-                    built.stats.get("build_modes", {}),
-                    built.stats.get("fallback_used", False),
-                    built.stats.get("used_passage_count", 0),
-                )
-            except Exception:
-                logger.exception("Quiz context reconstruction failed for doc scope; fallback to raw chunks")
-        if not context:
-            context = _build_context_text(docs, max_chars=max_chars)
-        return context, _extract_keypoint_ids(docs)
     if kb_id:
-        vectorstore = get_vectorstore(user_id)
-        k = _context_seed_search_k(target_count, kb_scope=True, focus_concepts=focus_concepts)
-        docs = _similarity_search_focus_seed_docs(
-            vectorstore=vectorstore,
-            focus_concepts=cleaned_focus,
-            fallback_query=query,
-            k=k,
+        return _build_context_from_scope(
+            user_id=user_id,
+            kb_scope=True,
+            focus_concepts=focus_concepts,
+            cleaned_focus=cleaned_focus,
+            query=query,
+            target_count=target_count,
             search_filter={"kb_id": kb_id},
+            log_scope_label="kb_scope",
+            default_kb_id=kb_id,
         )
-        if not docs:
-            raise ValueError("No relevant context found for quiz generation")
-        max_chars = _context_char_budget(target_count, kb_scope=True)
-        context = ""
-        if bool(getattr(settings, "quiz_context_reconstruct_enabled", True)):
-            try:
-                built = build_quiz_context_from_seeds(
-                    user_id=user_id,
-                    seed_docs=list(docs),
-                    max_chars=max_chars,
-                    kb_scope=True,
-                    default_kb_id=kb_id,
-                )
-                context = built.text or ""
-                logger.info(
-                    "Quiz context build kb_scope seeds=%s filtered=%s reconstructed=%s modes=%s fallback=%s used=%s",
-                    built.stats.get("seed_count", 0),
-                    built.stats.get("filtered_seed_count", 0),
-                    built.stats.get("reconstructed_count", 0),
-                    built.stats.get("build_modes", {}),
-                    built.stats.get("fallback_used", False),
-                    built.stats.get("used_passage_count", 0),
-                )
-            except Exception:
-                logger.exception("Quiz context reconstruction failed for kb scope; fallback to raw chunks")
-        if not context:
-            context = _build_context_text(docs, max_chars=max_chars)
-        return context, _extract_keypoint_ids(docs)
     if reference_questions:
         text = reference_questions.strip()
         if len(text) > REFERENCE_QUESTIONS_MAX_CHARS:

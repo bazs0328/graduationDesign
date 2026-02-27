@@ -10,28 +10,26 @@ def _metadata_path(user_id: str, kb_id: str) -> str:
     return os.path.join(kb_base_dir(user_id, kb_id), "metadata.json")
 
 
+def _build_default_metadata(kb_id: str) -> Dict[str, Any]:
+    return {
+        "kb_id": kb_id,
+        "created_at": datetime.utcnow().isoformat(),
+        "last_updated": None,
+        "rag_provider": "chroma",
+        "file_hashes": {},
+    }
+
+
 def load_kb_metadata(user_id: str, kb_id: str) -> Dict[str, Any]:
     ensure_kb_dirs(user_id, kb_id)
     path = _metadata_path(user_id, kb_id)
     if not os.path.exists(path):
-        return {
-            "kb_id": kb_id,
-            "created_at": datetime.utcnow().isoformat(),
-            "last_updated": None,
-            "rag_provider": "chroma",
-            "file_hashes": {},
-        }
+        return _build_default_metadata(kb_id)
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
-        return {
-            "kb_id": kb_id,
-            "created_at": datetime.utcnow().isoformat(),
-            "last_updated": None,
-            "rag_provider": "chroma",
-            "file_hashes": {},
-        }
+        return _build_default_metadata(kb_id)
 
 
 def save_kb_metadata(user_id: str, kb_id: str, metadata: Dict[str, Any]) -> None:

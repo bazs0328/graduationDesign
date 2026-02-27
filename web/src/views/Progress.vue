@@ -507,7 +507,7 @@ import {
 } from 'lucide-vue-next'
 import { apiGet, getProfile, buildLearningPath } from '../api'
 import { useToast } from '../composables/useToast'
-import { useAppContextStore } from '../stores/appContext'
+import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import KbSelector from '../components/context/KbSelector.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -552,9 +552,7 @@ const PROGRESS_REC_CACHE_PREFIX = 'gradtutor_progress_rec_v1:'
 
 const router = useRouter()
 const route = useRoute()
-const appContext = useAppContextStore()
-appContext.hydrate()
-const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
+const { appContext, resolvedUserId, kbs, selectedKbId } = useAppKnowledgeScope()
 const progress = ref(null)
 const profile = ref(null)
 const activity = ref([])
@@ -576,11 +574,6 @@ const recommendationsStateKbId = ref('')
 const recommendationsLoadedKbId = ref('')
 const learningPathStateKbId = ref('')
 const learningPathLoadedKbId = ref('')
-const kbs = computed(() => appContext.kbs)
-const selectedKbId = computed({
-  get: () => appContext.selectedKbId,
-  set: (value) => appContext.setSelectedKbId(value),
-})
 const busy = ref({
   init: false,
   progress: false,

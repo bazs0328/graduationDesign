@@ -12,6 +12,7 @@ from app.core.llm import get_llm
 from app.core.vectorstore import get_vectorstore
 from app.models import Keypoint
 from app.services.keypoint_dedup import normalize_keypoint_text
+from app.services.sampling import sample_evenly
 from app.utils.chroma_filters import build_chroma_eq_filter
 from app.utils.json_tools import safe_json_loads
 
@@ -93,14 +94,6 @@ _KP_HEADING_LIKE_PATTERNS = [
 _KP_COMPARE_REMOVE_RE = re.compile(
     r"[\s\-_—·•、，,。；;：:()（）\[\]{}<>《》\"'“”‘’]+"
 )
-
-
-def _sample_chunks(chunks: list[str], max_count: int) -> list[str]:
-    """Evenly sample chunks when there are too many."""
-    if len(chunks) <= max_count:
-        return chunks
-    step = len(chunks) / max_count
-    return [chunks[int(i * step)] for i in range(max_count)]
 
 
 def _parse_point(p) -> dict:
@@ -410,7 +403,7 @@ async def extract_keypoints(
         chunk_size=_KP_CHUNK_SIZE, chunk_overlap=_KP_CHUNK_OVERLAP
     )
     chunks = splitter.split_text(text)
-    chunks = _sample_chunks(chunks, _MAX_CHUNKS)
+    chunks = sample_evenly(chunks, _MAX_CHUNKS)
 
     async def _process_chunk(chunk_index: int, chunk: str) -> list[dict]:
         safe_chunk = chunk.replace("{", "{{").replace("}", "}}")

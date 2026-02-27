@@ -52,12 +52,14 @@ from app.services.lexical import move_doc_chunks, remove_doc_chunks, update_doc_
 from app.services.ingest_tasks import process_document_task
 from app.services.layout_sidecar import (
     build_text_preview_from_sidecar,
+    extract_snippet_window,
     load_layout_sidecar,
     resolve_block_id,
     should_skip_text_sidecar_preview,
 )
 from app.services.text_noise_guard import clean_fragment, infer_format_hint, is_low_quality
 from app.utils.document_validator import DocumentValidator
+from app.utils.pagination import normalize_page_args
 
 router = APIRouter()
 
@@ -134,12 +136,6 @@ def _apply_docs_sort(query, sort_by: str = "created_at", sort_order: str = "desc
     return query.order_by(*order_clauses)
 
 
-def _normalize_page_args(offset: int = 0, limit: int = 20) -> tuple[int, int]:
-    normalized_offset = max(0, int(offset or 0))
-    normalized_limit = max(1, min(int(limit or 20), 100))
-    return normalized_offset, normalized_limit
-
-
 @router.get("/docs", response_model=list[DocumentOut])
 def list_docs(
     user_id: str | None = None,
@@ -177,7 +173,7 @@ def list_docs_page(
     db: Session = Depends(get_db),
 ):
     resolved_user_id = ensure_user(db, user_id)
-    offset, limit = _normalize_page_args(offset=offset, limit=limit)
+    offset, limit = normalize_page_args(offset=offset, limit=limit, default=20, max_limit=100)
     query = _build_docs_list_query(
         db,
         user_id=resolved_user_id,
@@ -250,22 +246,6 @@ def _contains_query(text: str, query: str) -> bool:
     if not tokens:
         return False
     return sum(1 for token in tokens if token in text_l) >= max(1, len(tokens) // 2)
-
-
-def _extract_snippet_window(text: str, query: str | None, window_chars: int = 220) -> str:
-    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not normalized:
-        return ""
-    if not query or not query.strip():
-        return normalized[: window_chars * 2]
-    query_l = query.lower().strip()
-    text_l = normalized.lower()
-    idx = text_l.find(query_l)
-    if idx < 0:
-        return normalized[: window_chars * 2]
-    start = max(0, idx - window_chars)
-    end = min(len(normalized), idx + len(query_l) + window_chars)
-    return normalized[start:end]
 
 
 def _clean_preview_snippet(
@@ -357,7 +337,7 @@ def _build_source_preview(
         )
         if not snippet:
             fallback_text = str(selected_entry.get("content", "") or "")
-            snippet = _extract_snippet_window(fallback_text, query_text or None)
+            snippet = extract_snippet_window(fallback_text, query_text or None)
             if should_skip_text_sidecar_preview(metadata, sidecar):
                 matched_by = "ocr_override_text"
         source_name = metadata.get("source") if isinstance(metadata.get("source"), str) else doc.filename
@@ -376,7 +356,7 @@ def _build_source_preview(
     if doc.text_path and os.path.exists(doc.text_path):
         with open(doc.text_path, "r", encoding="utf-8", errors="ignore") as f:
             full_text = f.read()
-        snippet = _extract_snippet_window(full_text, query_text or None, window_chars=260)
+        snippet = extract_snippet_window(full_text, query_text or None, window_chars=260)
         snippet = _clean_preview_snippet(
             snippet,
             source_name=doc.filename,

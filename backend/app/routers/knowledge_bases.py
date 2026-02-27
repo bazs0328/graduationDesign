@@ -33,6 +33,17 @@ from app.schemas import (
 from app.services.lexical import remove_doc_chunks
 
 router = APIRouter()
+	
+	
+def _get_kb_or_404(db: Session, *, user_id: str, kb_id: str) -> KnowledgeBase:
+    kb = (
+        db.query(KnowledgeBase)
+        .filter(KnowledgeBase.id == kb_id, KnowledgeBase.user_id == user_id)
+        .first()
+    )
+    if not kb:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    return kb
 
 
 @router.get("/kb", response_model=list[KnowledgeBaseOut])
@@ -85,13 +96,7 @@ def update_kb(
     db: Session = Depends(get_db),
 ):
     resolved_user_id = ensure_user(db, payload.user_id)
-    kb = (
-        db.query(KnowledgeBase)
-        .filter(KnowledgeBase.id == kb_id, KnowledgeBase.user_id == resolved_user_id)
-        .first()
-    )
-    if not kb:
-        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    kb = _get_kb_or_404(db, user_id=resolved_user_id, kb_id=kb_id)
 
     changed = False
     if payload.name is not None:
@@ -131,13 +136,7 @@ def delete_kb(
     db: Session = Depends(get_db),
 ):
     resolved_user_id = ensure_user(db, user_id)
-    kb = (
-        db.query(KnowledgeBase)
-        .filter(KnowledgeBase.id == kb_id, KnowledgeBase.user_id == resolved_user_id)
-        .first()
-    )
-    if not kb:
-        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    kb = _get_kb_or_404(db, user_id=resolved_user_id, kb_id=kb_id)
 
     docs = (
         db.query(Document)

@@ -17,6 +17,7 @@ from app.schemas import (
     ChatSessionUpdateRequest,
     SourceSnippet,
 )
+from app.utils.pagination import normalize_page_args
 
 router = APIRouter()
 
@@ -61,12 +62,6 @@ def _get_session_or_404(db: Session, session_id: str, user_id: str) -> ChatSessi
     return session
 
 
-def _normalize_page_args(offset: int = 0, limit: int = 20) -> tuple[int, int]:
-    normalized_offset = max(0, int(offset or 0))
-    normalized_limit = max(1, min(int(limit or 20), 100))
-    return normalized_offset, normalized_limit
-
-
 def _ordered_sessions_query(db: Session, user_id: str):
     return (
         db.query(ChatSession)
@@ -89,7 +84,7 @@ def list_sessions_page(
     db: Session = Depends(get_db),
 ):
     resolved_user_id = ensure_user(db, user_id)
-    offset, limit = _normalize_page_args(offset=offset, limit=limit)
+    offset, limit = normalize_page_args(offset=offset, limit=limit, default=20, max_limit=100)
     base_query = db.query(ChatSession).filter(ChatSession.user_id == resolved_user_id)
     total = base_query.count()
     items = (

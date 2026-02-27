@@ -334,9 +334,8 @@ import { ref, onMounted, onActivated, watch, computed, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { FileText, Sparkles, Layers } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
-import { useKbDocuments } from '../composables/useKbDocuments'
+import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import { useToast } from '../composables/useToast'
-import { useAppContextStore } from '../stores/appContext'
 import KnowledgeScopePicker from '../components/context/KnowledgeScopePicker.vue'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -347,23 +346,13 @@ import { renderMarkdown } from '../utils/markdown'
 import { buildRouteContextQuery, parseRouteContext } from '../utils/routeContext'
 
 const { showToast } = useToast()
-const appContext = useAppContextStore()
-appContext.hydrate()
+const { appContext, resolvedUserId, kbs, selectedKbId, selectedDocId, kbDocs } = useAppKnowledgeScope({
+  withDocs: true,
+})
+const docs = kbDocs.docs
 
 const router = useRouter()
 const route = useRoute()
-const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
-const kbs = computed(() => appContext.kbs)
-const selectedKbId = computed({
-  get: () => appContext.selectedKbId,
-  set: (value) => appContext.setSelectedKbId(value),
-})
-const selectedDocId = computed({
-  get: () => appContext.selectedDocId,
-  set: (value) => appContext.setSelectedDocId(value),
-})
-const kbDocs = useKbDocuments({ userId: resolvedUserId, kbId: selectedKbId })
-const docs = kbDocs.docs
 const summary = ref('')
 const summaryCached = ref(false)
 const keypoints = ref([])

@@ -158,19 +158,23 @@ async function consumeSseResponse(res, handlers = {}) {
   dispatchSseEvent(tailBlock, handlers)
 }
 
-export async function apiSsePost(path, body, handlers = {}, options = {}) {
+async function apiSseRequest(method, path, handlers = {}, options = {}, body) {
   const fullUrl = `${API_BASE}${path}`
   const { headers } = buildAuthHeaders(path, options.headers)
   headers.set('Accept', 'text/event-stream')
-  headers.set('Content-Type', 'application/json')
+
+  const requestOptions = {
+    method,
+    ...options,
+    headers,
+  }
+  if (body !== undefined) {
+    headers.set('Content-Type', 'application/json')
+    requestOptions.body = JSON.stringify(body)
+  }
 
   try {
-    const res = await fetch(fullUrl, {
-      method: 'POST',
-      ...options,
-      headers,
-      body: JSON.stringify(body)
-    })
+    const res = await fetch(fullUrl, requestOptions)
     if (!res.ok) {
       await parseErrorResponse(res)
     }
@@ -181,24 +185,12 @@ export async function apiSsePost(path, body, handlers = {}, options = {}) {
   }
 }
 
+export async function apiSsePost(path, body, handlers = {}, options = {}) {
+  return apiSseRequest('POST', path, handlers, options, body)
+}
+
 export async function apiSseGet(path, handlers = {}, options = {}) {
-  const fullUrl = `${API_BASE}${path}`
-  const { headers } = buildAuthHeaders(path, options.headers)
-  headers.set('Accept', 'text/event-stream')
-  try {
-    const res = await fetch(fullUrl, {
-      method: 'GET',
-      ...options,
-      headers
-    })
-    if (!res.ok) {
-      await parseErrorResponse(res)
-    }
-    await consumeSseResponse(res, handlers)
-  } catch (err) {
-    maybeShowGlobalErrorToast(err)
-    throw err
-  }
+  return apiSseRequest('GET', path, handlers, options)
 }
 
 export async function apiGet(path) {

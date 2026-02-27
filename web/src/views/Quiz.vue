@@ -398,8 +398,7 @@ import { PenTool, Sparkles, CheckCircle2, XCircle, SlidersHorizontal } from 'luc
 import { apiGet, apiPost } from '../api'
 import AnimatedNumber from '../components/ui/AnimatedNumber.vue'
 import { useToast } from '../composables/useToast'
-import { useKbDocuments } from '../composables/useKbDocuments'
-import { useAppContextStore } from '../stores/appContext'
+import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import { useSettingsStore } from '../stores/settings'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -410,25 +409,20 @@ import { renderMarkdown, renderMarkdownInline } from '../utils/markdown'
 import { buildRouteContextQuery, normalizeDifficulty, parseRouteContext } from '../utils/routeContext'
 
 const { showToast } = useToast()
-const appContext = useAppContextStore()
 const settingsStore = useSettingsStore()
-appContext.hydrate()
 const router = useRouter()
 const route = useRoute()
 
-const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
-const kbs = computed(() => appContext.kbs)
-const selectedKbId = computed({
-  get: () => appContext.selectedKbId,
-  set: (value) => appContext.setSelectedKbId(value),
-})
-const selectedDocId = computed({
-  get: () => appContext.selectedDocId,
-  set: (value) => appContext.setSelectedDocId(value),
-})
-const kbDocs = useKbDocuments({ userId: resolvedUserId, kbId: selectedKbId })
-const docsInKb = kbDocs.docs
-const docsInKbLoading = kbDocs.loading
+const {
+  appContext,
+  resolvedUserId,
+  kbs,
+  selectedKbId,
+  selectedDocId,
+  kbDocs,
+  docsInKb,
+  docsInKbLoading,
+} = useAppKnowledgeScope({ withDocs: true })
 const quiz = ref(null)
 const quizAnswers = ref({})
 const quizResult = ref(null)

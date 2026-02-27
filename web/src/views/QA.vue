@@ -526,8 +526,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { MessageSquare, Send, Trash2, Database, FileText, Sparkles, User, Bot, SlidersHorizontal } from 'lucide-vue-next'
 import { apiDelete, apiGet, apiPatch, apiPost, apiSsePost } from '../api'
 import { useToast } from '../composables/useToast'
-import { useKbDocuments } from '../composables/useKbDocuments'
-import { useAppContextStore } from '../stores/appContext'
+import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import { useSettingsStore } from '../stores/settings'
 import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
@@ -540,31 +539,26 @@ import { parseRouteContext } from '../utils/routeContext'
 import { UX_TEXT } from '../constants/uxText'
 
 const { showToast } = useToast()
-const appContext = useAppContextStore()
 const settingsStore = useSettingsStore()
-appContext.hydrate()
 const router = useRouter()
 const route = useRoute()
 
-const resolvedUserId = computed(() => appContext.resolvedUserId || 'default')
-const kbs = computed(() => appContext.kbs)
+const {
+  appContext,
+  resolvedUserId,
+  kbs,
+  selectedKbId,
+  selectedDocId,
+  kbDocs,
+  docsInKb,
+  docsInKbLoading,
+} = useAppKnowledgeScope({ withDocs: true })
 const sessions = ref([])
 const sessionCacheMap = ref({})
 const sessionsTotal = ref(0)
 const sessionsOffset = ref(0)
 const sessionsLimit = ref(20)
 const sessionsHasMore = ref(false)
-const selectedKbId = computed({
-  get: () => appContext.selectedKbId,
-  set: (value) => appContext.setSelectedKbId(value),
-})
-const selectedDocId = computed({
-  get: () => appContext.selectedDocId,
-  set: (value) => appContext.setSelectedDocId(value),
-})
-const kbDocs = useKbDocuments({ userId: resolvedUserId, kbId: selectedKbId })
-const docsInKb = kbDocs.docs
-const docsInKbLoading = kbDocs.loading
 const selectedSessionId = ref('')
 const sessionTitleInput = ref('')
 const qaInput = ref('')

@@ -262,7 +262,12 @@ def _tokenize_impl(
     return tokens
 
 
-def tokenize_for_index(text: str, *, user_id: str | None, kb_id: str | None) -> list[str]:
+def _tokenize_with_stopword_fallback(
+    text: str,
+    *,
+    user_id: str | None,
+    kb_id: str | None,
+) -> list[str]:
     stopwords_enabled = bool(getattr(settings, "lexical_stopwords_enabled", True))
     tokens = _tokenize_impl(
         text,
@@ -280,24 +285,11 @@ def tokenize_for_index(text: str, *, user_id: str | None, kb_id: str | None) -> 
             apply_stopwords=False,
         )
     return tokens
+
+
+def tokenize_for_index(text: str, *, user_id: str | None, kb_id: str | None) -> list[str]:
+    return _tokenize_with_stopword_fallback(text, user_id=user_id, kb_id=kb_id)
 
 
 def tokenize_for_query(text: str, *, user_id: str | None, kb_id: str | None) -> list[str]:
-    stopwords_enabled = bool(getattr(settings, "lexical_stopwords_enabled", True))
-    tokens = _tokenize_impl(
-        text,
-        user_id=user_id,
-        kb_id=kb_id,
-        apply_stopwords=stopwords_enabled,
-    )
-    if tokens:
-        return tokens
-    if stopwords_enabled:
-        return _tokenize_impl(
-            text,
-            user_id=user_id,
-            kb_id=kb_id,
-            apply_stopwords=False,
-        )
-    return tokens
-
+    return _tokenize_with_stopword_fallback(text, user_id=user_id, kb_id=kb_id)
