@@ -407,10 +407,9 @@
                     </div>
                   </div>
                   <button v-if="item.priority !== 'completed'"
-                    class="flex-shrink-0 px-3 py-1 bg-primary/10 text-primary rounded-md text-xs font-medium hover:bg-primary/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-primary/10"
-                    :disabled="isLearningPathItemBlocked(item)"
+                    class="flex-shrink-0 px-3 py-1 bg-primary/10 text-primary rounded-md text-xs font-medium hover:bg-primary/20 transition-colors"
                     @click="goToAction(item)">
-                    {{ actionBtnLabel(item.action) }}
+                    {{ actionBtnLabel(item.action, isLearningPathItemBlocked(item)) }}
                   </button>
                 </div>
               </div>
@@ -1654,12 +1653,26 @@ function stepBadgeClass(priority) {
   return map[priority] || map.medium
 }
 
-function actionBtnLabel(action) {
+function actionBtnLabel(action, blocked = false) {
+  if (blocked) return '先学前置'
   const map = { study: '去学习', quiz: '去测验', review: '去复习' }
   return map[action] || '去学习'
 }
 
 function goToAction(item) {
+  if (!item) return
+  if (isLearningPathItemBlocked(item)) {
+    const prereqText = unmetPrereqLabels(item)[0] || ''
+    if (!prereqText) return
+    router.push({
+      path: '/qa',
+      query: buildRouteContextQuery({
+        kbId: selectedKbId.value,
+        focus: prereqText,
+      }),
+    })
+    return
+  }
   if (item.action === 'quiz') {
     router.push({
       path: '/quiz',

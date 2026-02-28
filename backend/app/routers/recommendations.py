@@ -341,6 +341,47 @@ def get_recommendations(
     learning_path_ms = int((time.perf_counter() - learning_path_started) * 1000)
 
     rank_started = time.perf_counter()
+    learning_path_text_by_id: dict[str, str] = {}
+    blocked_concepts: set[str] = set()
+    blocked_unmet_prereqs_by_text: dict[str, list[str]] = {}
+    if learning_path:
+        concept_unlock_state: dict[str, bool] = {}
+        blocked_unmet_prereq_ids_by_text: dict[str, set[str]] = {}
+        for path_item in learning_path:
+            path_keypoint_id = str(path_item.keypoint_id or "").strip()
+            path_text = str(path_item.text or "").strip()
+            if path_keypoint_id and path_text:
+                learning_path_text_by_id[path_keypoint_id] = path_text
+            if not path_text:
+                continue
+
+            is_unlocked = bool(path_item.is_unlocked)
+            previous_state = concept_unlock_state.get(path_text)
+            if previous_state is None:
+                concept_unlock_state[path_text] = is_unlocked
+            elif is_unlocked:
+                # Keep concept actionable as long as one merged source is unlocked.
+                concept_unlock_state[path_text] = True
+
+            if not is_unlocked:
+                unmet_ids = [
+                    str(prereq_id or "").strip()
+                    for prereq_id in (path_item.unmet_prerequisite_ids or [])
+                    if str(prereq_id or "").strip()
+                ]
+                if unmet_ids:
+                    blocked_unmet_prereq_ids_by_text.setdefault(path_text, set()).update(
+                        unmet_ids
+                    )
+
+        blocked_concepts = {
+            concept for concept, unlocked in concept_unlock_state.items() if not unlocked
+        }
+        for concept, unmet_ids in blocked_unmet_prereq_ids_by_text.items():
+            blocked_unmet_prereqs_by_text[concept] = _unique_nonempty(
+                [learning_path_text_by_id.get(prereq_id, "") for prereq_id in sorted(unmet_ids)],
+                limit=max(3, len(unmet_ids)),
+            )
 
     ranked_items: list[tuple[float, float, RecommendationItem]] = []
     for doc in docs:
@@ -362,13 +403,43 @@ def get_recommendations(
         weak_keypoints = [
             item
             for item in sorted(keypoint_infos, key=lambda x: x["mastery_level"])
-            if is_weak_mastery(item["mastery_level"]) and item["text"]
+            if is_weak_mastery(item["mastery_level"])
+            and item["text"]
+            and not (
+                int(item.get("attempt_count", 0) or 0) == 0
+                and float(item.get("mastery_level", 0.0) or 0.0) <= 0.0
+            )
         ]
 
+        blocked_weak_prereqs: list[str] = []
+        if blocked_concepts and weak_keypoints:
+            actionable_weak_keypoints: list[dict[str, float | int | str]] = []
+            for weak_item in weak_keypoints:
+                weak_text = str(weak_item.get("text") or "").strip()
+                if not weak_text:
+                    continue
+                if weak_text in blocked_concepts:
+                    blocked_weak_prereqs.extend(
+                        blocked_unmet_prereqs_by_text.get(weak_text, [])
+                    )
+                    continue
+                actionable_weak_keypoints.append(weak_item)
+            weak_keypoints = actionable_weak_keypoints
+
+        filtered_profile_weak_concepts = [
+            concept
+            for concept in profile_weak_concepts
+            if str(concept or "").strip() not in blocked_concepts
+        ]
         focus_concepts = _unique_nonempty(
-            [item["text"] for item in weak_keypoints] + profile_weak_concepts,
+            [item["text"] for item in weak_keypoints] + filtered_profile_weak_concepts,
             limit=3,
         )
+        if not focus_concepts and blocked_weak_prereqs:
+            focus_concepts = _unique_nonempty(
+                blocked_weak_prereqs + filtered_profile_weak_concepts,
+                limit=3,
+            )
 
         status = _build_doc_status(
             has_summary=has_summary,
@@ -383,8 +454,8 @@ def get_recommendations(
         keypoint_component = 1.0 if has_keypoints else 0.0
         quiz_component = _clamp(attempt_count / 2.0, 0.0, 1.0)
         qa_component = _clamp(qa_count / 2.0, 0.0, 1.0)
-        # Keep recommendation completion aligned with learning-path completion:
-        # both use "mastered keypoint ratio" as the mastery completion signal.
+        # Keep recommendation completion aligned with profile completion:
+        # both use weighted mastery completion (mastered=1.0, partial=0.5).
         mastery_component = mastery_completion if has_keypoints else 0.0
         completion_score = _round_score(
             100

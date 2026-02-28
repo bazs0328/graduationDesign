@@ -61,8 +61,24 @@ def mastery_ratio(levels: Sequence[float], *, threshold: float) -> float:
 
 
 def mastery_completion_rate(levels: Sequence[float]) -> float:
-    """Completion rate based on mastered keypoints."""
-    return mastery_ratio(levels, threshold=MASTERY_MASTERED)
+    """
+    Weighted completion rate for overall learning progress.
+
+    - mastered (>= MASTERY_MASTERED): 1.0
+    - partial  (>= MASTERY_PARTIAL): 0.5
+    - weak     (<  MASTERY_PARTIAL): 0.0
+    """
+    if not levels:
+        return 0.0
+
+    total = 0.0
+    for level in levels:
+        normalized = normalize_mastery(level)
+        if normalized >= MASTERY_MASTERED:
+            total += 1.0
+        elif normalized >= MASTERY_PARTIAL:
+            total += 0.5
+    return round(total / len(levels), 4)
 
 
 def mastery_average(levels: Sequence[float]) -> float:
