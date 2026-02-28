@@ -77,6 +77,6 @@ const docRequired = computed(() => props.mode === 'kb-and-required-doc')
 const showDocSelector = computed(() => props.mode !== 'kb-only' && Boolean(props.kbId))
 const docPlaceholder = computed(() => {
   if (docRequired.value) return '请选择文档'
-  return props.mode === 'kb-and-optional-doc' ? '不限定（整库）' : '不限定'
+  return props.mode === 'kb-and-optional-doc' ? '不限定（当前知识库范围）' : '不限定'
 })
 </script>

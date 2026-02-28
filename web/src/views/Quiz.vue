@@ -105,7 +105,10 @@
                 </option>
               </select>
               <p class="text-[10px] text-muted-foreground">
-                选项来自知识库聚合知识点；若已选择文档，仅显示该文档相关的聚合知识点。留空则按整库/文档自动出题。
+                选项来自“当前范围内已解锁”的聚合知识点；若已选择文档，仅显示该文档相关聚合知识点。基础模式与蓝图模式都受此范围约束。
+              </p>
+              <p class="text-[10px] text-muted-foreground">
+                当前可出题范围：{{ scopeConceptCount }} 个聚合知识点
               </p>
               <div v-if="quizFocusConcepts.length" class="flex flex-wrap gap-2">
                 <span
@@ -238,7 +241,7 @@
             <Button
               class="w-full"
               size="lg"
-              :disabled="!selectedKbId"
+              :disabled="!selectedKbId || !canGenerateQuiz"
               :loading="busy.quiz"
               @click="generateQuiz"
             >
@@ -704,6 +707,11 @@ const quizFocusSelectPlaceholder = computed(() => {
   if (busy.value.focusKeypoints) return '正在加载知识点...'
   if (filteredQuizFocusOptions.value.length) return '请选择知识点'
   return selectedDocId.value ? '该文档暂无可选聚合知识点' : '暂无可选聚合知识点'
+})
+const scopeConceptCount = computed(() => collectScopeConceptsForGenerate().length)
+const canGenerateQuiz = computed(() => {
+  if (busy.value.focusKeypoints) return false
+  return scopeConceptCount.value > 0
 })
 const paperSectionTotalCount = computed(() => {
   return (paperSections.value || []).reduce((sum, section) => {
@@ -1201,6 +1209,11 @@ async function refreshDocsInKb() {
 
 async function generateQuiz(options = {}) {
   if (!selectedKbId.value) return
+  const scopeConcepts = collectScopeConceptsForGenerate()
+  if (!scopeConcepts.length) {
+    showToast('当前范围内暂无可用于出题的已解锁聚合知识点，请先调整范围或完成前置学习。', 'warning')
+    return
+  }
   busy.value.quiz = true
   quiz.value = null
   quizAnswers.value = {}
@@ -1215,7 +1228,7 @@ async function generateQuiz(options = {}) {
     if (selectedDocId.value) {
       payload.doc_id = selectedDocId.value
     }
-    payload.scope_concepts = collectScopeConceptsForGenerate()
+    payload.scope_concepts = scopeConcepts
     const explicitFocusConcepts = normalizeQuizFocusConcepts(options.focusConcepts || quizFocusConcepts.value)
     if (explicitFocusConcepts.length) {
       payload.focus_concepts = explicitFocusConcepts
