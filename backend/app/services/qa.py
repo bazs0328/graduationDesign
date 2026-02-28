@@ -38,6 +38,20 @@ _SUMMARY_QUERY_PATTERNS = [
 _QA_HUMAN_TEMPLATE = (
     "Conversation history:\n{history}\n\nQuestion: {question}\n\nContext:\n{context}\n\nAnswer:"
 )
+_QA_REWRITE_MAX_QUESTION_CHARS = 30
+_QA_REWRITE_HISTORY_CHAR_BUDGET = 1400
+_QA_REWRITE_RESULT_CHAR_BUDGET = 180
+_QA_REWRITE_SYSTEM_TEMPLATE = (
+    "你是学习问答系统中的查询改写助手。"
+    "任务是把依赖上下文的简短追问改写为可独立检索的问题。"
+)
+_QA_REWRITE_HUMAN_TEMPLATE = (
+    "根据下面的对话历史和后续问题，将后续问题改写为一个含义完整的独立问题。\n"
+    "只输出改写后的问题，不要回答，不要解释。\n\n"
+    "对话历史：\n{history}\n\n"
+    "后续问题：{question}\n\n"
+    "改写后的独立问题："
+)
 
 _QA_INLINE_SOURCE_MARKER_RE = re.compile(r"\[(\d{1,3})\]")
 _QA_PAGE_CHUNK_MARKER_RE = re.compile(r"\bp\.\d+\s*c\.\d+\b", re.IGNORECASE)
@@ -76,10 +90,14 @@ def normalize_qa_mode(mode: str | None) -> str:
 
 
 def _is_summary_like_question(question: str | None) -> bool:
-    normalized = " ".join(str(question or "").strip().split())
+    normalized = _normalize_question_text(question)
     if not normalized:
         return False
     return any(pattern.search(normalized) for pattern in _SUMMARY_QUERY_PATTERNS)
+
+
+def _normalize_question_text(question: str | None) -> str:
+    return " ".join(str(question or "").strip().split())
 
 
 def _clamp_int(value: int, *, lower: int, upper: int) -> int:
@@ -88,6 +106,24 @@ def _clamp_int(value: int, *, lower: int, upper: int) -> int:
     if value > upper:
         return upper
     return value
+
+
+def _truncate_text(value: str, limit: int) -> str:
+    normalized = " ".join(str(value or "").replace("\r", "\n").split())
+    if limit <= 0:
+        return ""
+    if len(normalized) <= limit:
+        return normalized
+    if limit <= 3:
+        return normalized[:limit]
+    return normalized[: limit - 3].rstrip() + "..."
+
+
+def _should_rewrite_question(question: str | None, history: str | None) -> bool:
+    normalized = _normalize_question_text(question)
+    if not normalized or not history:
+        return False
+    return len(normalized) <= _QA_REWRITE_MAX_QUESTION_CHARS
 
 
 def _resolve_retrieval_window(
@@ -131,6 +167,47 @@ def _resolve_retrieval_window(
     return resolved_k, resolved_fetch
 
 
+def _rewrite_standalone_question(question: str, history: str | None, llm: Any) -> str:
+    """Rewrite short follow-up questions into standalone retrieval queries."""
+    normalized_question = _normalize_question_text(question)
+    if not normalized_question:
+        return ""
+    if not _should_rewrite_question(normalized_question, history):
+        return normalized_question
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", _QA_REWRITE_SYSTEM_TEMPLATE),
+            ("human", _QA_REWRITE_HUMAN_TEMPLATE),
+        ]
+    )
+    compact_history = _truncate_text(history or "", _QA_REWRITE_HISTORY_CHAR_BUDGET)
+    try:
+        result = llm.invoke(
+            prompt.format_messages(
+                history=compact_history or "None",
+                question=normalized_question,
+            )
+        )
+    except Exception:
+        logger.exception("Failed to rewrite QA short follow-up question")
+        return normalized_question
+
+    rewritten = _coerce_text_content(getattr(result, "content", result)).strip()
+    if not rewritten:
+        return normalized_question
+    rewritten = rewritten.replace("\r", "\n").split("\n", 1)[0].strip()
+    rewritten = re.sub(
+        r"^(改写后的独立问题|改写后的问题|独立问题|rewrite(?:d)?\s*question)\s*[:：]\s*",
+        "",
+        rewritten,
+        flags=re.IGNORECASE,
+    ).strip()
+    if not rewritten:
+        return normalized_question
+    return _truncate_text(rewritten, _QA_REWRITE_RESULT_CHAR_BUDGET)
+
+
 def build_adaptive_system_prompt(
     ability_level: str = "intermediate",
     weak_concepts: list[str] | None = None,
@@ -165,6 +242,10 @@ def build_adaptive_system_prompt(
         "仅根据提供的上下文回答问题。如果上下文中没有相关信息，请明确说明不知道。"
         "不要输出来源编号（如 [1]、[2]、[3]）或页块定位标记（如 p.19 c.177）。"
         "来源信息会由系统单独展示。"
+    )
+    prompt_parts.append(
+        "如果用户当前提问非常简短（如“需要”“好的”“继续”），请优先结合 Conversation history 判断真实意图，"
+        "不要把这类简短回复当作词语释义题。"
     )
     return "\n".join(prompt_parts)
 
@@ -245,9 +326,18 @@ def prepare_qa_answer(
     mode: str | None = None,
 ) -> dict:
     resolved_mode = normalize_qa_mode(mode)
+    normalized_question = _normalize_question_text(question)
+    retrieval_question = normalized_question or str(question or "")
+    if _should_rewrite_question(retrieval_question, history):
+        rewrite_llm = get_llm(temperature=0.0)
+        retrieval_question = _rewrite_standalone_question(
+            question=retrieval_question,
+            history=history,
+            llm=rewrite_llm,
+        )
     docs = retrieve_documents(
         user_id=user_id,
-        question=question,
+        question=retrieval_question,
         doc_id=doc_id,
         kb_id=kb_id,
         top_k=top_k,

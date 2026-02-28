@@ -2,15 +2,20 @@
   <div class="h-full flex flex-col max-w-6xl mx-auto space-y-0">
     <!-- Learning Path Context Banner -->
     <section
-      v-if="entryFocusContext"
+      v-if="effectiveQaFocusContext"
       class="bg-primary/5 border border-primary/20 rounded-xl px-4 py-3 mb-4 space-y-1"
     >
-      <p class="text-[10px] font-bold uppercase tracking-widest text-primary">学习路径上下文</p>
+      <p class="text-[10px] font-bold uppercase tracking-widest text-primary">
+        {{ entryFocusContext ? '学习路径上下文' : '问答聚焦上下文' }}
+      </p>
       <p class="text-sm text-muted-foreground">
-        当前学习目标：<span class="font-semibold text-foreground">{{ entryFocusContext }}</span>
+        当前学习目标：<span class="font-semibold text-foreground">{{ effectiveQaFocusContext }}</span>
       </p>
       <p class="text-xs text-muted-foreground mt-1">
         你可以针对这个知识点提问，AI 会为你详细讲解。
+      </p>
+      <p v-if="qaManualFocus" class="text-xs text-primary mt-1">
+        该目标来自你在本页手动选择的已解锁聚合知识点。
       </p>
       <p v-if="selectedKbId" class="text-xs text-muted-foreground mt-1">
         该学习目标可能关联同一知识库中的多个文档来源。
@@ -247,7 +252,7 @@
             <textarea
               v-model="qaInput"
               @keydown.enter.prevent="askQuestion"
-              :placeholder="entryFocusContext ? `关于「${entryFocusContext}」，你想了解什么？` : '在此输入你的问题…'"
+              :placeholder="effectiveQaFocusContext ? `关于「${effectiveQaFocusContext}」，你想了解什么？` : '在此输入你的问题…'"
               class="flex-1 bg-background border border-input rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary resize-none h-[88px] sm:h-[52px]"
               :disabled="!selectedKbId || busy.qa"
             ></textarea>
@@ -295,6 +300,55 @@
               常用问答偏好可在设置中心配置；这里保留页面内临时切换。
             </p>
           </KnowledgeScopePicker>
+          <div v-if="selectedKbId" class="space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">重点聚合知识点（可选）</label>
+              <button
+                v-if="qaManualFocus"
+                type="button"
+                class="text-[10px] text-muted-foreground hover:text-foreground"
+                @click="clearQaManualFocus"
+              >
+                清空
+              </button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+              <input
+                v-model="qaFocusSearch"
+                type="text"
+                placeholder="搜索聚合知识点（如：牛顿定律）"
+                class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
+                @keydown.enter.prevent="applySelectedQaFocusCandidate"
+              />
+              <button
+                type="button"
+                class="px-3 py-2 rounded-lg border border-input bg-background text-sm hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                :disabled="busy.focusKeypoints || !qaFocusCandidate"
+                @click="applySelectedQaFocusCandidate"
+              >
+                应用
+              </button>
+            </div>
+            <select
+              v-model="qaFocusCandidate"
+              class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
+              :disabled="busy.focusKeypoints || !filteredQaFocusOptions.length"
+            >
+              <option value="">{{ qaFocusSelectPlaceholder }}</option>
+              <option v-for="item in filteredQaFocusOptions" :key="item.id" :value="item.text">
+                {{ item.text }}
+              </option>
+            </select>
+            <p class="text-[10px] text-muted-foreground">
+              选项来自“当前范围内已解锁”的聚合知识点；若已选择文档，仅显示该文档相关聚合知识点。
+            </p>
+            <p class="text-[10px] text-muted-foreground">
+              当前生效聚焦：{{ effectiveQaFocusContext || '未设置' }}
+            </p>
+            <p v-if="qaManualFocus" class="text-[10px] text-primary">
+              已手动设置，将优先于学习路径带入目标。
+            </p>
+          </div>
         </div>
 
         <div v-if="qaAutoAdapt" class="bg-card border border-border rounded-xl p-4 shadow-sm space-y-3">
@@ -642,6 +696,10 @@ const qaMessages = ref([])
 const qaAbilityLevel = ref('intermediate')
 const qaMode = ref('normal')
 const qaAutoAdapt = ref(true)
+const qaFocusSearch = ref('')
+const qaFocusCandidate = ref('')
+const qaFocusOptions = ref([])
+const qaManualFocus = ref('')
 const adaptiveProfile = ref(null)
 const adaptivePlan = ref(null)
 const adaptiveLoading = ref(false)
@@ -666,6 +724,7 @@ const busy = ref({
   qa: false,
   init: false,
   docs: false,
+  focusKeypoints: false,
   sessions: false,
   sessionAction: false
 })
@@ -753,8 +812,8 @@ const qaEmptyDescription = computed(() => {
 const qaEmptyHint = computed(() => {
   if (!hasAnyKb.value) return '上传并解析完成后，可按知识库或文档范围提问。'
   if (!selectedKbId.value) return '如需限定范围，可继续选择某个文档进行问答。'
-  return entryFocusContext.value
-    ? `已带入学习目标「${entryFocusContext.value}」，可直接围绕该知识点提问。`
+  return effectiveQaFocusContext.value
+    ? `已聚焦知识点「${effectiveQaFocusContext.value}」，可直接围绕该知识点提问。`
     : '点击下方按钮可自动填入一个示例问题。'
 })
 const qaEmptyPrimaryAction = computed(() => {
@@ -803,6 +862,39 @@ const adaptivePlanSummary = computed(() => (
 const adaptiveReasonText = computed(() => adaptiveInsight.value.reasonText || '系统会根据学习画像动态调整回答策略。')
 const adaptiveWeakConcepts = computed(() => adaptiveInsight.value.weakConceptsTop3 || [])
 const entryFocusContext = computed(() => appContext.routeContext.focus)
+const effectiveQaFocusContext = computed(() => {
+  const manual = String(qaManualFocus.value || '').trim()
+  if (manual) return manual
+  return String(entryFocusContext.value || '').trim()
+})
+const scopedQaFocusOptions = computed(() => {
+  const options = Array.isArray(qaFocusOptions.value) ? qaFocusOptions.value : []
+  const docId = String(selectedDocId.value || '').trim()
+  if (!docId) return options
+  return options.filter((item) => {
+    const sourceDocIds = Array.isArray(item?.sourceDocIds) ? item.sourceDocIds : []
+    return sourceDocIds.includes(docId)
+  })
+})
+const filteredQaFocusOptions = computed(() => {
+  const keyword = String(qaFocusSearch.value || '').trim().toLowerCase()
+  const selectedText = String(qaManualFocus.value || '').trim().toLowerCase()
+  const options = Array.isArray(scopedQaFocusOptions.value) ? scopedQaFocusOptions.value : []
+  return options
+    .filter((item) => {
+      const text = String(item?.text || '').trim()
+      if (!text) return false
+      if (selectedText && text.toLowerCase() === selectedText) return false
+      if (!keyword) return true
+      return text.toLowerCase().includes(keyword)
+    })
+    .slice(0, 80)
+})
+const qaFocusSelectPlaceholder = computed(() => {
+  if (busy.value.focusKeypoints) return '正在加载知识点...'
+  if (filteredQaFocusOptions.value.length) return '请选择知识点'
+  return selectedDocId.value ? '该文档暂无可选聚合知识点' : '暂无可选聚合知识点'
+})
 const entryDocContextId = computed(() => parseRouteContext(route.query).docId)
 const qaFlowStages = QA_FLOW_STAGES
 const latestAssistantMessage = computed(() => {
@@ -1098,8 +1190,8 @@ function buildQaPayload(question, activeSessionId) {
   } else {
     payload.kb_id = selectedKbId.value
   }
-  if (entryFocusContext.value) {
-    payload.focus = entryFocusContext.value
+  if (effectiveQaFocusContext.value) {
+    payload.focus = effectiveQaFocusContext.value
   }
   return payload
 }
@@ -1113,6 +1205,7 @@ function buildQaSubmitFingerprint(question) {
     selectedSessionId.value || '',
     normalizeQaMode(qaMode.value),
     qaAutoAdapt.value ? 'adaptive-on' : 'adaptive-off',
+    effectiveQaFocusContext.value || '',
     normalizedQuestion,
   ].join('::')
 }
@@ -1136,8 +1229,8 @@ function goToUpload() {
 }
 
 function fillSampleQuestion() {
-  if (entryFocusContext.value) {
-    qaInput.value = `请用通俗的方式讲解「${entryFocusContext.value}」，并给出一个简单例子。`
+  if (effectiveQaFocusContext.value) {
+    qaInput.value = `请用通俗的方式讲解「${effectiveQaFocusContext.value}」，并给出一个简单例子。`
     return
   }
   qaInput.value = '请先概括这个知识库中最重要的3个概念，并说明它们之间的关系。'
@@ -1150,6 +1243,115 @@ function handleQaEmptyPrimary() {
   }
   if (!selectedKbId.value) return
   fillSampleQuestion()
+}
+
+function normalizeQaFocusOptions(items = []) {
+  const seenIndex = new Map()
+  const out = []
+  for (const item of items) {
+    const id = String(item?.id || '').trim()
+    const text = String(item?.text || '').trim()
+    if (!text) continue
+    const key = text.toLowerCase()
+    const sourceDocIds = [
+      ...new Set(
+        (Array.isArray(item?.source_doc_ids) ? item.source_doc_ids : [])
+          .map((docId) => String(docId || '').trim())
+          .filter(Boolean)
+      )
+    ]
+    if (seenIndex.has(key)) {
+      const existingIndex = seenIndex.get(key)
+      const existing = out[existingIndex]
+      const mergedSourceDocIds = [
+        ...new Set([...(existing.sourceDocIds || []), ...sourceDocIds])
+      ]
+      existing.sourceDocIds = mergedSourceDocIds
+      existing.sourceDocCount = mergedSourceDocIds.length
+      existing.memberCount = Math.max(
+        Number(existing.memberCount || 1),
+        Number(item?.member_count || 1),
+      )
+      continue
+    }
+    seenIndex.set(key, out.length)
+    out.push({
+      id: id || text,
+      text,
+      memberCount: Number(item?.member_count || 1),
+      sourceDocCount: sourceDocIds.length,
+      sourceDocIds,
+    })
+  }
+  return out
+}
+
+function syncQaFocusCandidateSelection() {
+  if (
+    qaFocusCandidate.value
+    && !filteredQaFocusOptions.value.some((item) => item.text === qaFocusCandidate.value)
+  ) {
+    qaFocusCandidate.value = ''
+  }
+}
+
+function applySelectedQaFocusCandidate() {
+  const text = String(qaFocusCandidate.value || '').trim()
+  if (!text) return
+  qaManualFocus.value = text
+  qaFocusCandidate.value = ''
+}
+
+function clearQaManualFocus() {
+  qaManualFocus.value = ''
+  qaFocusSearch.value = ''
+  qaFocusCandidate.value = ''
+}
+
+function pruneQaManualFocusToCurrentDocScope() {
+  if (!selectedDocId.value) return
+  if (!Array.isArray(qaFocusOptions.value)) return
+  if (!qaFocusOptions.value.length && busy.value.focusKeypoints) return
+  const current = String(qaManualFocus.value || '').trim()
+  if (!current) return
+  const allowed = new Set(
+    (Array.isArray(scopedQaFocusOptions.value) ? scopedQaFocusOptions.value : [])
+      .map((item) => String(item?.text || '').trim())
+      .filter(Boolean)
+  )
+  if (!allowed.has(current)) {
+    qaManualFocus.value = ''
+  }
+}
+
+async function refreshQaFocusOptions() {
+  if (!selectedKbId.value) {
+    qaFocusOptions.value = []
+    qaFocusCandidate.value = ''
+    busy.value.focusKeypoints = false
+    return
+  }
+  busy.value.focusKeypoints = true
+  const requestKbId = selectedKbId.value
+  try {
+    const params = new URLSearchParams()
+    params.set('user_id', resolvedUserId.value)
+    params.set('grouped', 'true')
+    params.set('only_unlocked', 'true')
+    const res = await apiGet(`/api/keypoints/kb/${encodeURIComponent(requestKbId)}?${params.toString()}`)
+    if (selectedKbId.value !== requestKbId) return
+    qaFocusOptions.value = normalizeQaFocusOptions(Array.isArray(res?.keypoints) ? res.keypoints : [])
+  } catch {
+    if (selectedKbId.value !== requestKbId) return
+    qaFocusOptions.value = []
+    // error toast handled globally
+  } finally {
+    if (selectedKbId.value === requestKbId) {
+      busy.value.focusKeypoints = false
+    }
+  }
+  pruneQaManualFocusToCurrentDocScope()
+  syncQaFocusCandidateSelection()
 }
 
 async function refreshDocsInKb() {
@@ -1764,6 +1966,7 @@ onMounted(async () => {
     } else {
       docsInKb.value = []
     }
+    await refreshQaFocusOptions()
   } finally {
     busy.value.init = false
   }
@@ -1775,6 +1978,7 @@ onActivated(async () => {
     ensureKbs: !appContext.kbs.length,
     refreshDocs: false,
   })
+  await refreshQaFocusOptions()
 })
 
 watch(
@@ -1792,9 +1996,14 @@ watch(selectedKbId, async () => {
     qaMessages.value = []
     resetQaFlow()
   }
+  qaManualFocus.value = ''
+  qaFocusSearch.value = ''
+  qaFocusCandidate.value = ''
+  qaFocusOptions.value = []
   selectedDocId.value = ''
   await Promise.all([refreshDocsInKb(), loadQaViewSettings(true)])
   applyDocContextSelection()
+  await refreshQaFocusOptions()
 })
 
 watch(docsInKbLoading, (loading) => {
@@ -1808,6 +2017,8 @@ watch(selectedDocId, () => {
     qaMessages.value = []
     resetQaFlow()
   }
+  pruneQaManualFocusToCurrentDocScope()
+  syncQaFocusCandidateSelection()
 })
 
 watch(selectedSessionId, async (sessionId) => {
