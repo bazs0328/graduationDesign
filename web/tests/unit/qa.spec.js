@@ -6,7 +6,7 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 
 import App from '@/App.vue'
 import { routes } from '@/router'
-import { apiGet, apiPost, apiSsePost } from '@/api'
+import { apiGet, apiPost, apiSsePost, getDifficultyPlan, getProfile } from '@/api'
 
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal()
@@ -14,7 +14,9 @@ vi.mock('@/api', async (importOriginal) => {
     ...actual,
     apiGet: vi.fn(),
     apiPost: vi.fn(),
-    apiSsePost: vi.fn()
+    apiSsePost: vi.fn(),
+    getProfile: vi.fn(),
+    getDifficultyPlan: vi.fn(),
   }
 })
 
@@ -36,6 +38,18 @@ const qaResponse = {
   answer: 'A matrix is a rectangular array of numbers.',
   sources: [{ source: 'doc p.1 c.0', snippet: 'Matrix definition...' }],
   mode: 'normal'
+}
+const profileResponse = {
+  ability_level: 'intermediate',
+  recent_accuracy: 0.62,
+  frustration_score: 0.32,
+  total_attempts: 8,
+  weak_concepts: ['矩阵乘法', '特征值', '向量空间'],
+}
+const difficultyPlanResponse = {
+  easy: 0.3,
+  medium: 0.5,
+  hard: 0.2,
 }
 const explainAnswer = [
   '## 题意理解',
@@ -81,6 +95,8 @@ beforeEach(() => {
   apiGet.mockReset()
   apiPost.mockReset()
   apiSsePost.mockReset()
+  getProfile.mockReset()
+  getDifficultyPlan.mockReset()
   localStorage.clear()
 
   apiGet.mockImplementation((path) => {
@@ -115,7 +131,6 @@ beforeEach(() => {
         { id: 'session-qa-1', title: 'What is a matrix?', kb_id: 'kb-1', doc_id: null }
       ])
     }
-    if (path.startsWith('/api/profile')) return Promise.resolve({ ability_level: 'intermediate' })
     if (path.startsWith('/api/progress')) {
       return Promise.resolve({
         total_docs: 1,
@@ -138,6 +153,9 @@ beforeEach(() => {
     if (path === '/api/qa') return Promise.resolve(qaResponse)
     return Promise.resolve({})
   })
+
+  getProfile.mockResolvedValue(profileResponse)
+  getDifficultyPlan.mockResolvedValue(difficultyPlanResponse)
 
   apiSsePost.mockImplementation(async (path, body, handlers) => {
     if (path !== '/api/qa/stream') return
@@ -188,6 +206,48 @@ describe('Q&A', () => {
     )
   })
 
+  it('hides adaptive card when adaptive is disabled', async () => {
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await router.push('/qa')
+    await flushPromises()
+    await nextTick()
+    await nextTick()
+
+    const kbSelect = wrapper.find('select')
+    expect(kbSelect.exists()).toBe(true)
+    await kbSelect.setValue('kb-1')
+    await flushPromises()
+    await nextTick()
+
+    let html = wrapper.html()
+    expect(html).toContain('自适应依据')
+    expect(html).toContain('自适应开')
+
+    const adaptiveToggle = wrapper.findAll('button').find((btn) => btn.text().includes('自适应开'))
+    expect(adaptiveToggle).toBeTruthy()
+    await adaptiveToggle.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    html = wrapper.html()
+    expect(html).toContain('自适应关')
+    expect(html).not.toContain('自适应依据')
+
+    const textarea = wrapper.find('textarea')
+    await textarea.setValue('What is a matrix?')
+    await nextTick()
+    await textarea.trigger('keydown.enter')
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+
+    const payload = apiSsePost.mock.calls.at(-1)?.[1] || {}
+    expect(payload.user_id).toBe('test')
+    expect(payload.kb_id).toBe('kb-1')
+  })
+
   it('renders streamed answer and sources in qa-log', async () => {
     const { wrapper, router } = await mountAppWithRouter()
 
@@ -217,6 +277,39 @@ describe('Q&A', () => {
     expect(html).toContain('doc')
     expect(html).toContain('来源可能来自该知识库下多个文档片段')
     expect(html).toContain('回答生成完成')
+    expect(html).toContain('自适应依据')
+    expect(html).toContain('薄弱知识点 Top 3')
+    expect(html).toContain('矩阵乘法')
+    expect(html).toContain('30%')
+    expect(html).toContain('50%')
+    expect(html).toContain('20%')
+  })
+
+  it('refreshes adaptive transparency after stream done', async () => {
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await router.push('/qa')
+    await flushPromises()
+    await nextTick()
+    await nextTick()
+
+    const beforePlanCalls = getDifficultyPlan.mock.calls.length
+
+    const kbSelect = wrapper.find('select')
+    await kbSelect.setValue('kb-1')
+    await flushPromises()
+    await nextTick()
+
+    await wrapper.find('textarea').setValue('What is a matrix?')
+    await nextTick()
+    await wrapper.find('textarea').trigger('keydown.enter')
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+
+    const afterPlanCalls = getDifficultyPlan.mock.calls.length
+    expect(afterPlanCalls).toBeGreaterThan(beforePlanCalls)
   })
 
   it('falls back to POST /api/qa when stream fails', async () => {

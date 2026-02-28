@@ -216,6 +216,16 @@
               </div>
               <button
                 type="button"
+                class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-semibold transition-colors"
+                :class="qaAutoAdapt ? 'border-primary/30 bg-primary/10 text-primary' : 'border-border bg-background text-muted-foreground hover:bg-accent'"
+                :disabled="busy.qa"
+                @click="setQaAutoAdapt(!qaAutoAdapt)"
+              >
+                <span>{{ qaAutoAdapt ? '自适应开' : '自适应关' }}</span>
+                <span class="hidden sm:inline">{{ qaAutoAdapt ? '按画像动态调整' : '固定回答策略' }}</span>
+              </button>
+              <button
+                type="button"
                 class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-2 text-xs font-semibold hover:bg-accent transition-colors disabled:opacity-50"
                 :disabled="busy.qa || settingsStore.savingUser"
                 @click="saveCurrentQaModeAsDefault"
@@ -257,7 +267,7 @@
 
       <!-- Right: Knowledge Base Selection -->
       <aside
-        class="w-full lg:w-72 space-y-4 lg:space-y-6 flex-col"
+        class="w-full lg:w-72 space-y-4 lg:space-y-6 flex-col min-h-0 overflow-y-auto pr-1"
         :class="qaSidebarOpen ? 'flex' : 'hidden lg:flex'"
       >
         <div class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
@@ -285,6 +295,77 @@
               常用问答偏好可在设置中心配置；这里保留页面内临时切换。
             </p>
           </KnowledgeScopePicker>
+        </div>
+
+        <div v-if="qaAutoAdapt" class="bg-card border border-border rounded-xl p-4 shadow-sm space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">自适应依据</p>
+            <span
+              v-if="adaptiveLoading"
+              class="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-border text-muted-foreground"
+            >
+              更新中…
+            </span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-sm font-semibold">{{ currentLevelMeta.text }}</p>
+              <p class="text-[11px] text-muted-foreground">{{ adaptiveModeSummary }}</p>
+            </div>
+            <span class="text-[10px] font-semibold px-2 py-1 rounded-full border" :class="currentLevelMeta.badgeClass">
+              {{ currentLevelMeta.code }}
+            </span>
+          </div>
+
+          <div class="space-y-2">
+            <div class="flex items-center justify-between text-[11px] text-muted-foreground">
+              <span>难度分配</span>
+              <span>{{ adaptivePlanSummary }}</span>
+            </div>
+            <div class="space-y-1.5">
+              <div v-for="item in adaptivePlanBars" :key="item.key" class="space-y-1">
+                <div class="flex items-center justify-between text-[11px]">
+                  <span class="text-muted-foreground">{{ item.label }}</span>
+                  <span class="font-semibold">{{ item.percent }}%</span>
+                </div>
+                <div class="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div class="h-full transition-all duration-300" :class="item.barClass" :style="{ width: `${item.percent}%` }"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p class="text-xs text-muted-foreground leading-relaxed">{{ adaptiveReasonText }}</p>
+
+          <div v-if="adaptiveWeakConcepts.length" class="space-y-2">
+            <p class="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">薄弱知识点 Top 3</p>
+            <div class="flex flex-wrap gap-1.5">
+              <span
+                v-for="concept in adaptiveWeakConcepts"
+                :key="concept"
+                class="px-2 py-0.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] font-semibold"
+              >
+                {{ concept }}
+              </span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2 text-[11px]">
+            <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
+              <p class="text-muted-foreground">正确率</p>
+              <p class="font-semibold">{{ adaptiveInsight.signals.recentAccuracyPercent }}%</p>
+            </div>
+            <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
+              <p class="text-muted-foreground">挫败感</p>
+              <p class="font-semibold">{{ adaptiveInsight.signals.frustrationPercent }}%</p>
+            </div>
+            <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
+              <p class="text-muted-foreground">累计尝试</p>
+              <p class="font-semibold">{{ adaptiveInsight.signals.totalAttempts }}</p>
+            </div>
+          </div>
+
+          <p v-if="adaptiveError" class="text-[11px] text-amber-700">{{ adaptiveError }}</p>
         </div>
 
         <div class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-3">
@@ -494,16 +575,6 @@
           />
         </div>
 
-        <div class="bg-card border border-border rounded-xl p-4 shadow-sm">
-          <p class="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">学习适应等级</p>
-          <div class="mt-2 flex items-center justify-between gap-3">
-            <p class="text-sm font-semibold">{{ currentLevelMeta.text }}</p>
-            <span class="text-[10px] font-semibold px-2 py-1 rounded-full border" :class="currentLevelMeta.badgeClass">
-              {{ currentLevelMeta.code }}
-            </span>
-          </div>
-          <p class="mt-2 text-xs text-muted-foreground">{{ currentLevelMeta.description }}</p>
-        </div>
       </aside>
     </div>
     <SourcePreviewModal
@@ -524,7 +595,7 @@
 import { ref, onMounted, onActivated, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessageSquare, Send, Trash2, Database, FileText, Sparkles, User, Bot, SlidersHorizontal } from 'lucide-vue-next'
-import { apiDelete, apiGet, apiPatch, apiPost, apiSsePost } from '../api'
+import { apiDelete, apiGet, apiPatch, apiPost, apiSsePost, getDifficultyPlan, getProfile } from '../api'
 import { useToast } from '../composables/useToast'
 import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import { useSettingsStore } from '../stores/settings'
@@ -537,6 +608,11 @@ import { parseExplainMarkdownSections } from '../utils/qaExplain'
 import { renderMarkdown } from '../utils/markdown'
 import { parseRouteContext } from '../utils/routeContext'
 import { UX_TEXT } from '../constants/uxText'
+import {
+  buildAdaptiveInsight,
+  getAbilityLevelMeta as resolveAbilityLevelMeta,
+  normalizeAbilityLevel,
+} from '../utils/adaptiveTransparency'
 
 const { showToast } = useToast()
 const settingsStore = useSettingsStore()
@@ -565,6 +641,11 @@ const qaInput = ref('')
 const qaMessages = ref([])
 const qaAbilityLevel = ref('intermediate')
 const qaMode = ref('normal')
+const qaAutoAdapt = ref(true)
+const adaptiveProfile = ref(null)
+const adaptivePlan = ref(null)
+const adaptiveLoading = ref(false)
+const adaptiveError = ref('')
 const qaSidebarOpen = ref(false)
 const qaFlow = ref(createQaFlowState())
 const syncingFromSession = ref(false)
@@ -603,28 +684,8 @@ const QA_FLOW_STAGES = [
 const STREAM_NON_FALLBACK_CODES = new Set(['validation_error', 'not_found', 'no_results'])
 const QA_EXPLAIN_DISPLAY_THRESHOLD = 3
 const QA_SUBMIT_DEDUPE_WINDOW_MS = 1200
-
-const LEVEL_LABELS = {
-  beginner: {
-    text: '基础模式',
-    code: 'BEGINNER',
-    badgeClass: 'text-green-700 bg-green-100 border-green-200',
-    description: '回答会更通俗、分步骤，并尽量减少术语。',
-  },
-  intermediate: {
-    text: '进阶模式',
-    code: 'INTERMEDIATE',
-    badgeClass: 'text-blue-700 bg-blue-100 border-blue-200',
-    description: '回答兼顾清晰度与专业度，适合有一定基础的学习者。',
-  },
-  advanced: {
-    text: '专家模式',
-    code: 'ADVANCED',
-    badgeClass: 'text-purple-700 bg-purple-100 border-purple-200',
-    description: '回答会更深入，包含更多术语、原理和扩展思路。',
-  },
-}
-
+const QA_AUTO_ADAPT_STORAGE_KEY = 'gradtutor_qa_auto_adapt'
+	
 const selectedKb = computed(() => {
   return kbs.value.find(k => k.id === selectedKbId.value) || null
 })
@@ -702,7 +763,45 @@ const qaEmptyPrimaryAction = computed(() => {
   return { label: '填入示例问题', variant: 'secondary' }
 })
 
-const currentLevelMeta = computed(() => getLevelMeta(qaAbilityLevel.value))
+const adaptiveInsight = computed(() =>
+  buildAdaptiveInsight({
+    profile: adaptiveProfile.value || { ability_level: qaAbilityLevel.value },
+    plan: adaptivePlan.value,
+  })
+)
+const currentLevelMeta = computed(() => adaptiveInsight.value.levelMeta || resolveAbilityLevelMeta(qaAbilityLevel.value))
+const adaptiveModeSummary = computed(() => (
+  qaMode.value === 'explain'
+    ? '当前回答模式：分步讲解'
+    : '当前回答模式：标准回答'
+))
+const adaptivePlanBars = computed(() => ([
+  {
+    key: 'easy',
+    label: '简单',
+    percent: adaptiveInsight.value.planPercent.easy,
+    barClass: 'bg-green-500',
+  },
+  {
+    key: 'medium',
+    label: '中等',
+    percent: adaptiveInsight.value.planPercent.medium,
+    barClass: 'bg-blue-500',
+  },
+  {
+    key: 'hard',
+    label: '困难',
+    percent: adaptiveInsight.value.planPercent.hard,
+    barClass: 'bg-amber-500',
+  },
+]))
+const adaptivePlanSummary = computed(() => (
+  `简 ${adaptiveInsight.value.planPercent.easy}% · `
+  + `中 ${adaptiveInsight.value.planPercent.medium}% · `
+  + `难 ${adaptiveInsight.value.planPercent.hard}%`
+))
+const adaptiveReasonText = computed(() => adaptiveInsight.value.reasonText || '系统会根据学习画像动态调整回答策略。')
+const adaptiveWeakConcepts = computed(() => adaptiveInsight.value.weakConceptsTop3 || [])
 const entryFocusContext = computed(() => appContext.routeContext.focus)
 const entryDocContextId = computed(() => parseRouteContext(route.query).docId)
 const qaFlowStages = QA_FLOW_STAGES
@@ -753,21 +852,45 @@ const qaFlowPanelBadgeClass = computed(() => {
 })
 const effectiveQaSettings = computed(() => settingsStore.effectiveSettings?.qa || {})
 
-function normalizeAbilityLevel(level) {
-  const normalized = (level || '').toString().trim().toLowerCase()
-  if (normalized === 'beginner' || normalized === 'intermediate' || normalized === 'advanced') {
-    return normalized
-  }
-  return 'intermediate'
-}
-
 function getLevelMeta(level) {
-  return LEVEL_LABELS[normalizeAbilityLevel(level)] || LEVEL_LABELS.intermediate
+  return resolveAbilityLevelMeta(level)
 }
 
 function normalizeQaMode(mode) {
   const normalized = String(mode || '').trim().toLowerCase()
   return normalized === 'explain' ? 'explain' : 'normal'
+}
+
+function readQaAutoAdaptPreference() {
+  try {
+    const raw = String(window.localStorage.getItem(QA_AUTO_ADAPT_STORAGE_KEY) || '').trim().toLowerCase()
+    if (['0', 'false', 'off'].includes(raw)) return false
+    if (['1', 'true', 'on'].includes(raw)) return true
+  } catch {
+    // ignore storage error
+  }
+  return true
+}
+
+function persistQaAutoAdaptPreference(enabled) {
+  try {
+    window.localStorage.setItem(QA_AUTO_ADAPT_STORAGE_KEY, enabled ? '1' : '0')
+  } catch {
+    // ignore storage error
+  }
+}
+
+function setQaAutoAdapt(value) {
+  const enabled = Boolean(value)
+  if (qaAutoAdapt.value === enabled) return
+  qaAutoAdapt.value = enabled
+  persistQaAutoAdaptPreference(enabled)
+  if (enabled) {
+    void refreshAdaptiveTransparency()
+  } else {
+    adaptiveLoading.value = false
+    adaptiveError.value = ''
+  }
 }
 
 function applyQaModeFromSettings() {
@@ -989,6 +1112,7 @@ function buildQaSubmitFingerprint(question) {
     selectedDocId.value || '',
     selectedSessionId.value || '',
     normalizeQaMode(qaMode.value),
+    qaAutoAdapt.value ? 'adaptive-on' : 'adaptive-off',
     normalizedQuestion,
   ].join('::')
 }
@@ -1387,12 +1511,25 @@ async function syncFromRoute(options = {}) {
   }
 }
 
-async function refreshAbilityLevel() {
+async function refreshAdaptiveTransparency() {
+  if (!qaAutoAdapt.value || !resolvedUserId.value) return
+  adaptiveLoading.value = true
+  adaptiveError.value = ''
   try {
-    const profile = await apiGet(`/api/profile?user_id=${encodeURIComponent(resolvedUserId.value)}`)
-    qaAbilityLevel.value = normalizeAbilityLevel(profile?.ability_level)
+    const [profile, plan] = await Promise.all([
+      getProfile(resolvedUserId.value),
+      getDifficultyPlan(resolvedUserId.value),
+    ])
+    adaptiveProfile.value = profile || null
+    adaptivePlan.value = plan || null
+    qaAbilityLevel.value = normalizeAbilityLevel(profile?.ability_level || qaAbilityLevel.value)
   } catch {
-    qaAbilityLevel.value = 'intermediate'
+    adaptiveError.value = '依据暂不可用，已使用默认画像展示。'
+    if (!adaptiveProfile.value) {
+      adaptiveProfile.value = { ability_level: qaAbilityLevel.value }
+    }
+  } finally {
+    adaptiveLoading.value = false
   }
 }
 
@@ -1501,6 +1638,7 @@ async function askQuestion() {
           timings: data.timings || {},
           errorCode: null,
         })
+        void refreshAdaptiveTransparency()
         if (!selectedSessionId.value && activeSessionId) {
           preserveQaFlowOnNextSessionLoad.value = true
           selectedSessionId.value = activeSessionId
@@ -1559,6 +1697,7 @@ async function askQuestion() {
           result: res?.answer ? 'ok' : qaFlow.value.result,
           errorCode: null,
         })
+        void refreshAdaptiveTransparency()
         await refreshSessions({ resetPage: true })
         if (!selectedSessionId.value && (res?.session_id || activeSessionId)) {
           preserveQaFlowOnNextSessionLoad.value = true
@@ -1609,6 +1748,7 @@ function scrollToBottom() {
 }
 
 onMounted(async () => {
+  qaAutoAdapt.value = readQaAutoAdaptPreference()
   busy.value.init = true
   try {
     try {
@@ -1616,7 +1756,7 @@ onMounted(async () => {
     } catch {
       // error toast handled globally
     }
-    await Promise.all([refreshAbilityLevel(), refreshSessions(), loadQaViewSettings(true)])
+    await Promise.all([refreshAdaptiveTransparency(), refreshSessions(), loadQaViewSettings(true)])
     await syncFromRoute({ refreshDocs: false })
     if (selectedKbId.value) {
       await refreshDocsInKb()
@@ -1630,7 +1770,7 @@ onMounted(async () => {
 })
 
 onActivated(async () => {
-  await loadQaViewSettings()
+  await Promise.all([loadQaViewSettings(), refreshAdaptiveTransparency()])
   await syncFromRoute({
     ensureKbs: !appContext.kbs.length,
     refreshDocs: false,

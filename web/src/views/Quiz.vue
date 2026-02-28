@@ -156,6 +156,80 @@
               </select>
             </div>
 
+            <div v-if="autoAdapt" class="space-y-3 rounded-xl border border-border bg-background/50 p-3">
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">自适应依据</p>
+                <span
+                  v-if="adaptiveLoading"
+                  class="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-border text-muted-foreground"
+                >
+                  更新中…
+                </span>
+              </div>
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-sm font-semibold">{{ adaptiveInsight.levelMeta.text }}</p>
+                  <p class="text-[11px] text-muted-foreground">{{ quizAdaptiveModeSummary }}</p>
+                </div>
+                <span
+                  class="text-[10px] font-semibold px-2 py-1 rounded-full border"
+                  :class="adaptiveInsight.levelMeta.badgeClass"
+                >
+                  {{ adaptiveInsight.levelMeta.code }}
+                </span>
+              </div>
+
+              <div class="space-y-2">
+                <div class="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>参考难度分配</span>
+                  <span>{{ adaptivePlanSummary }}</span>
+                </div>
+                <div class="space-y-1.5">
+                  <div v-for="item in adaptivePlanBars" :key="item.key" class="space-y-1">
+                    <div class="flex items-center justify-between text-[11px]">
+                      <span class="text-muted-foreground">{{ item.label }}</span>
+                      <span class="font-semibold">{{ item.percent }}%</span>
+                    </div>
+                    <div class="h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div class="h-full transition-all duration-300" :class="item.barClass" :style="{ width: `${item.percent}%` }"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <p class="text-xs text-muted-foreground leading-relaxed">{{ quizAdaptiveReasonText }}</p>
+
+              <div v-if="adaptiveWeakConcepts.length" class="space-y-2">
+                <p class="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">薄弱知识点 Top 3</p>
+                <div class="flex flex-wrap gap-1.5">
+                  <span
+                    v-for="concept in adaptiveWeakConcepts"
+                    :key="concept"
+                    class="px-2 py-0.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] font-semibold"
+                  >
+                    {{ concept }}
+                  </span>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-3 gap-2 text-[11px]">
+                <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
+                  <p class="text-muted-foreground">正确率</p>
+                  <p class="font-semibold">{{ adaptiveInsight.signals.recentAccuracyPercent }}%</p>
+                </div>
+                <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
+                  <p class="text-muted-foreground">挫败感</p>
+                  <p class="font-semibold">{{ adaptiveInsight.signals.frustrationPercent }}%</p>
+                </div>
+                <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
+                  <p class="text-muted-foreground">累计尝试</p>
+                  <p class="font-semibold">{{ adaptiveInsight.signals.totalAttempts }}</p>
+                </div>
+              </div>
+
+              <p v-if="adaptiveError" class="text-[11px] text-amber-700">{{ adaptiveError }}</p>
+            </div>
+
             <div class="space-y-3 rounded-xl border border-border bg-accent/20 p-3">
               <div class="flex items-center justify-between gap-2">
                 <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">组卷模式</label>
@@ -575,7 +649,7 @@
 import { ref, onMounted, onActivated, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PenTool, Sparkles, CheckCircle2, XCircle, SlidersHorizontal } from 'lucide-vue-next'
-import { apiGet, apiPost } from '../api'
+import { apiGet, apiPost, getDifficultyPlan, getProfile } from '../api'
 import AnimatedNumber from '../components/ui/AnimatedNumber.vue'
 import { useToast } from '../composables/useToast'
 import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
@@ -587,6 +661,7 @@ import KnowledgeScopePicker from '../components/context/KnowledgeScopePicker.vue
 import { masteryLabel, masteryPercent, masteryBadgeClass, masteryBorderClass } from '../utils/mastery'
 import { renderMarkdown, renderMarkdownInline } from '../utils/markdown'
 import { buildRouteContextQuery, normalizeDifficulty, parseRouteContext } from '../utils/routeContext'
+import { buildAdaptiveInsight } from '../utils/adaptiveTransparency'
 
 const { showToast } = useToast()
 const settingsStore = useSettingsStore()
@@ -617,6 +692,10 @@ const quizFocusConcepts = ref([])
 const quizFocusSearch = ref('')
 const quizFocusCandidate = ref('')
 const quizFocusOptions = ref([])
+const adaptiveProfile = ref(null)
+const adaptivePlan = ref(null)
+const adaptiveLoading = ref(false)
+const adaptiveError = ref('')
 const busy = ref({
   quiz: false,
   submit: false,
@@ -724,6 +803,53 @@ const allQuestionsAnswered = computed(() => {
   if (!questions.length) return false
   return questions.every((question, index) => isQuestionAnswered(question, quizAnswers.value[index]))
 })
+const adaptiveInsight = computed(() =>
+  buildAdaptiveInsight({
+    profile: adaptiveProfile.value || {},
+    plan: adaptivePlan.value,
+  })
+)
+const quizDifficultyLabel = computed(() => {
+  if (quizDifficulty.value === 'easy') return '简单'
+  if (quizDifficulty.value === 'hard') return '困难'
+  return '中等'
+})
+const quizAdaptiveModeSummary = computed(() => (
+  autoAdapt.value
+    ? '当前为自适应出题'
+    : `当前为手动难度：${quizDifficultyLabel.value}`
+))
+const adaptivePlanBars = computed(() => ([
+  {
+    key: 'easy',
+    label: '简单',
+    percent: adaptiveInsight.value.planPercent.easy,
+    barClass: 'bg-green-500',
+  },
+  {
+    key: 'medium',
+    label: '中等',
+    percent: adaptiveInsight.value.planPercent.medium,
+    barClass: 'bg-blue-500',
+  },
+  {
+    key: 'hard',
+    label: '困难',
+    percent: adaptiveInsight.value.planPercent.hard,
+    barClass: 'bg-amber-500',
+  },
+]))
+const adaptivePlanSummary = computed(() => (
+  `简 ${adaptiveInsight.value.planPercent.easy}% · `
+  + `中 ${adaptiveInsight.value.planPercent.medium}% · `
+  + `难 ${adaptiveInsight.value.planPercent.hard}%`
+))
+const quizAdaptiveReasonText = computed(() => (
+  autoAdapt.value
+    ? adaptiveInsight.value.reasonText
+    : '当前为手动难度，系统不会自动调整本次题目难度。若开启自适应，将按你当前学习画像分配难度。'
+))
+const adaptiveWeakConcepts = computed(() => adaptiveInsight.value.weakConceptsTop3 || [])
 const OPTION_LABELS = ['A', 'B', 'C', 'D']
 const effectiveQuizSettings = computed(() => settingsStore.effectiveSettings?.quiz || {})
 
@@ -971,6 +1097,24 @@ async function loadQuizViewSettings(force = false) {
     applyQuizDefaultsFromSettings()
   } catch {
     // error toast handled globally
+  }
+}
+
+async function refreshAdaptiveTransparency() {
+  if (!resolvedUserId.value) return
+  adaptiveLoading.value = true
+  adaptiveError.value = ''
+  try {
+    const [profile, plan] = await Promise.all([
+      getProfile(resolvedUserId.value),
+      getDifficultyPlan(resolvedUserId.value),
+    ])
+    adaptiveProfile.value = profile || null
+    adaptivePlan.value = plan || null
+  } catch {
+    adaptiveError.value = '依据暂不可用，已使用默认画像展示。'
+  } finally {
+    adaptiveLoading.value = false
   }
 }
 
@@ -1298,6 +1442,7 @@ async function submitQuiz() {
       user_id: resolvedUserId.value
     })
     quizResult.value = res
+    void refreshAdaptiveTransparency()
     showToast(`测验已批改，得分 ${Math.round(res.score * 100)}%`, 'success')
   } catch {
     // error toast handled globally
@@ -1460,12 +1605,12 @@ onMounted(async () => {
   } catch {
     // error toast handled globally
   }
-  await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions(), loadQuizViewSettings(true)])
+  await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions(), loadQuizViewSettings(true), refreshAdaptiveTransparency()])
   await syncFromRoute({ autoGenerate: true })
 })
 
 onActivated(async () => {
-  await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions(), loadQuizViewSettings()])
+  await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions(), loadQuizViewSettings(), refreshAdaptiveTransparency()])
   await syncFromRoute({
     ensureKbs: !appContext.kbs.length,
     autoGenerate: true,
@@ -1475,7 +1620,7 @@ onActivated(async () => {
 watch(
   () => route.fullPath,
   async () => {
-    await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions(), loadQuizViewSettings()])
+    await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions(), loadQuizViewSettings(), refreshAdaptiveTransparency()])
     await syncFromRoute({ autoGenerate: true })
   }
 )
@@ -1485,7 +1630,7 @@ watch(selectedKbId, async () => {
   quizFocusOptions.value = []
   quizFocusSearch.value = ''
   quizFocusCandidate.value = ''
-  await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions(), loadQuizViewSettings(true)])
+  await Promise.all([refreshDocsInKb(), refreshQuizFocusOptions(), loadQuizViewSettings(true), refreshAdaptiveTransparency()])
 })
 
 watch(docsInKbLoading, (loading) => {

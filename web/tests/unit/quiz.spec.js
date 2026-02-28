@@ -6,7 +6,7 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 
 import App from '@/App.vue'
 import { routes } from '@/router'
-import { apiGet, apiPost, apiSsePost } from '@/api'
+import { apiGet, apiPost, apiSsePost, getDifficultyPlan, getProfile } from '@/api'
 
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal()
@@ -15,6 +15,8 @@ vi.mock('@/api', async (importOriginal) => {
     apiGet: vi.fn(),
     apiPost: vi.fn(),
     apiSsePost: vi.fn(),
+    getProfile: vi.fn(),
+    getDifficultyPlan: vi.fn(),
   }
 })
 
@@ -43,6 +45,18 @@ const groupedKeypointsFixture = [
     source_doc_ids: ['doc-1', 'doc-2'],
   },
 ]
+const profileFixture = {
+  ability_level: 'intermediate',
+  recent_accuracy: 0.58,
+  frustration_score: 0.26,
+  total_attempts: 12,
+  weak_concepts: ['矩阵可逆性', '特征值', '行列式'],
+}
+const difficultyPlanFixture = {
+  easy: 0.3,
+  medium: 0.5,
+  hard: 0.2,
+}
 
 function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0))
@@ -74,7 +88,8 @@ function mockQuizFocusApi({
 } = {}) {
   apiGet.mockImplementation((path) => {
     if (path.startsWith('/api/kb')) return Promise.resolve([kbFixture])
-    if (path.startsWith('/api/profile')) return Promise.resolve({ ability_level: 'intermediate' })
+    if (path.startsWith('/api/profile/difficulty-plan')) return Promise.resolve(difficultyPlanFixture)
+    if (path.startsWith('/api/profile')) return Promise.resolve(profileFixture)
     if (path.startsWith('/api/chat/sessions')) return Promise.resolve([])
     if (path.startsWith('/api/docs')) return Promise.resolve(docs)
     if (path.startsWith('/api/keypoints/kb/')) {
@@ -101,6 +116,8 @@ function mockQuizFocusApi({
     if (path.startsWith('/api/recommendations')) return Promise.resolve({ items: [] })
     return Promise.resolve({})
   })
+  getProfile.mockResolvedValue(profileFixture)
+  getDifficultyPlan.mockResolvedValue(difficultyPlanFixture)
 }
 
 function getQuizSelects(wrapper) {
@@ -110,7 +127,8 @@ function getQuizSelects(wrapper) {
     doc: selects.find((sel) => {
       const text = sel.text()
       return (
-        text.includes('不限定（整库测验）')
+        text.includes('不限定（当前知识库范围）')
+        || text.includes('不限定（整库测验）')
         || text.includes('不限定（整库）')
         || text.includes('请选择文档')
       )
@@ -143,13 +161,24 @@ beforeEach(() => {
   apiGet.mockReset()
   apiPost.mockReset()
   apiSsePost.mockReset()
+  getProfile.mockReset()
+  getDifficultyPlan.mockReset()
   localStorage.clear()
 
   apiGet.mockImplementation((path) => {
     if (path.startsWith('/api/kb')) return Promise.resolve([kbFixture])
-    if (path.startsWith('/api/profile')) return Promise.resolve({ ability_level: 'intermediate' })
+    if (path.startsWith('/api/profile/difficulty-plan')) return Promise.resolve(difficultyPlanFixture)
+    if (path.startsWith('/api/profile')) return Promise.resolve(profileFixture)
     if (path.startsWith('/api/chat/sessions')) return Promise.resolve([])
-    if (path.startsWith('/api/docs')) return Promise.resolve([])
+    if (path.startsWith('/api/docs')) return Promise.resolve(docsFixture)
+    if (path.startsWith('/api/keypoints/kb/')) {
+      return Promise.resolve({
+        keypoints: groupedKeypointsFixture,
+        grouped: true,
+        raw_count: groupedKeypointsFixture.length,
+        group_count: groupedKeypointsFixture.length,
+      })
+    }
     if (path.startsWith('/api/progress')) {
       return Promise.resolve({
         total_docs: 1,
@@ -213,10 +242,46 @@ beforeEach(() => {
   })
 
   apiSsePost.mockResolvedValue(undefined)
+  getProfile.mockResolvedValue(profileFixture)
+  getDifficultyPlan.mockResolvedValue(difficultyPlanFixture)
 
 })
 
 describe('Quiz wrong-answer explain link', () => {
+  it('shows adaptive transparency card only when auto adapt is enabled', async () => {
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await router.push('/quiz')
+    await flushPromises()
+    await nextTick()
+    await nextTick()
+
+    const kbSelect = wrapper.findAll('select').at(0)
+    expect(kbSelect?.exists()).toBe(true)
+    await kbSelect.setValue('kb-1')
+    await flushPromises()
+    await nextTick()
+
+    let html = wrapper.html()
+    expect(html).toContain('自适应依据')
+    expect(html).toContain('当前为自适应出题')
+    expect(html).toContain('矩阵可逆性')
+    expect(html).toContain('矩阵可逆性')
+    expect(html).toContain('30%')
+    expect(html).toContain('50%')
+    expect(html).toContain('20%')
+
+    const modeToggle = wrapper.findAll('button').find((btn) => btn.text().includes('系统自动调难度'))
+    expect(modeToggle).toBeTruthy()
+    await modeToggle.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    html = wrapper.html()
+    expect(html).toContain('手动选择难度')
+    expect(html).not.toContain('自适应依据')
+  })
+
   it('navigates to /qa with explain autosend query payload', async () => {
     const pendingSse = new Promise(() => {})
     apiSsePost.mockImplementation(() => pendingSse)
@@ -270,7 +335,7 @@ describe('Quiz wrong-answer explain link', () => {
       })
     )
     const pushArg = pushSpy.mock.calls.at(-1)?.[0]
-    expect(String(pushArg?.query?.qa_question || '')).toContain('请用讲解模式解析这道选择题')
+    expect(String(pushArg?.query?.qa_question || '')).toContain('请用讲解模式解析这道题')
   }, 15000)
 
   it('shows KB aggregation wording in mastery updates and wrong-question groups', async () => {
@@ -329,6 +394,8 @@ describe('Quiz wrong-answer explain link', () => {
     await flushPromises()
     await nextTick()
 
+    const beforePlanCalls = getDifficultyPlan.mock.calls.length
+
     const generateButton = wrapper.findAll('button').find((btn) => btn.text().includes('生成新测验'))
     expect(generateButton).toBeTruthy()
     await generateButton.trigger('click')
@@ -351,6 +418,8 @@ describe('Quiz wrong-answer explain link', () => {
     expect(html).toContain('知识点掌握度变化')
     expect(html).toContain('以下知识点反馈已按知识库口径去重合并统计')
     expect(html).toContain('概念名称可能与单文档表述不同，但会映射到同一知识点')
+    const afterPlanCalls = getDifficultyPlan.mock.calls.length
+    expect(afterPlanCalls).toBeGreaterThan(beforePlanCalls)
   })
 })
 
