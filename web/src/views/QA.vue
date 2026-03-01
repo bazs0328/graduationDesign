@@ -276,9 +276,19 @@
         :class="qaSidebarOpen ? 'flex' : 'hidden lg:flex'"
       >
         <div class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
-          <div class="flex items-center gap-3">
-            <Database class="w-6 h-6 text-primary" />
-            <h2 class="text-xl font-bold">上下文</h2>
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <Database class="w-6 h-6 text-primary" />
+              <h2 class="text-xl font-bold">上下文</h2>
+            </div>
+            <button
+              type="button"
+              class="lg:hidden p-2 -mr-2 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+              title="收起面板"
+              @click="qaSidebarOpen = false"
+            >
+              <PanelRightClose class="w-5 h-5" />
+            </button>
           </div>
           <template v-if="busy.init">
             <SkeletonBlock type="list" :lines="3" />
@@ -648,7 +658,7 @@
 <script setup>
 import { ref, onMounted, onActivated, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MessageSquare, Send, Trash2, Database, FileText, Sparkles, User, Bot, SlidersHorizontal } from 'lucide-vue-next'
+import { MessageSquare, Send, Trash2, Database, FileText, Sparkles, User, Bot, SlidersHorizontal, PanelRightClose } from 'lucide-vue-next'
 import { apiDelete, apiGet, apiPatch, apiPost, apiSsePost, getDifficultyPlan, getProfile } from '../api'
 import { useToast } from '../composables/useToast'
 import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
