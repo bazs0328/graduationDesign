@@ -13,6 +13,12 @@ export function enableGlobalErrorToast() {
   globalErrorToast = true
 }
 
+function createErrorWithStatus(message, status) {
+  const err = new Error(message)
+  err.status = status
+  return err
+}
+
 function buildAuthHeaders(path, headersLike) {
   const isAuth = path.includes('/api/auth')
   const headers = new Headers(headersLike || undefined)
@@ -31,11 +37,12 @@ async function parseErrorResponse(res) {
 }
 
 function createErrorFromResponseText(text, status) {
+  let message
   try {
     const data = JSON.parse(text)
     if (data && data.detail) {
       if (Array.isArray(data.detail)) {
-        const message = data.detail
+        message = data.detail
           .map((item) => {
             if (!item || typeof item !== 'object') {
               return String(item)
@@ -45,21 +52,25 @@ function createErrorFromResponseText(text, status) {
             return loc ? `${loc}: ${msg}` : msg
           })
           .join('; ')
-        return new Error(message)
+      } else if (typeof data.detail === 'string') {
+        message = data.detail
+      } else {
+        message = JSON.stringify(data.detail)
       }
-      if (typeof data.detail === 'string') {
-        return new Error(data.detail)
-      }
-      return new Error(JSON.stringify(data.detail))
+      return createErrorWithStatus(message, status)
     }
   } catch {
     // fall through to raw text message
   }
-  return new Error(text || `Request failed: ${status}`)
+  return createErrorWithStatus(text || `Request failed: ${status}`, status)
 }
 
-function maybeShowGlobalErrorToast(err) {
-  if (globalErrorToast) {
+function handleApiError(err, path) {
+  if (err?.status === 401) {
+    logout()
+    return
+  }
+  if (globalErrorToast && !path?.includes('/api/auth')) {
     const { showToast } = useToast()
     showToast(err.message || '请求失败', 'error')
   }
@@ -84,7 +95,7 @@ async function request(path, options = {}) {
     return res.json()
   } catch (err) {
     if (abortId) clearTimeout(abortId)
-    maybeShowGlobalErrorToast(err)
+    handleApiError(err, path)
     throw err
   }
 }
@@ -180,7 +191,7 @@ async function apiSseRequest(method, path, handlers = {}, options = {}, body) {
     }
     await consumeSseResponse(res, handlers)
   } catch (err) {
-    maybeShowGlobalErrorToast(err)
+    handleApiError(err, path)
     throw err
   }
 }
@@ -242,7 +253,7 @@ export async function apiUploadWithProgress(path, formData, options = {}) {
     }
 
     const rejectWithToast = (err) => {
-      maybeShowGlobalErrorToast(err)
+      handleApiError(err, path)
       reject(err)
     }
 
