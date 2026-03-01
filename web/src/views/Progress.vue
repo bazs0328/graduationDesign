@@ -220,7 +220,7 @@
           </div>
           <div v-else-if="learningPath.length" class="space-y-6">
             <div class="rounded-lg border border-primary/15 bg-primary/5 px-4 py-3 text-xs text-muted-foreground">
-              学习路径中的知识点已按知识库跨文档去重合并，掌握度为聚合口径。
+              学习路径中的知识点已按知识库跨文档去重合并，掌握度为聚合口径。阶段与模块的进度按知识点掌握度加权计算（已掌握 1 分、部分掌握 0.5 分）。
             </div>
             <!-- Path summary -->
             <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -515,7 +515,7 @@ import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import KbSelector from '../components/context/KbSelector.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
-import { MASTERY_MASTERED, masteryPercent } from '../utils/mastery'
+import { MASTERY_MASTERED, MASTERY_PARTIAL, masteryPercent } from '../utils/mastery'
 import { renderMarkdown } from '../utils/markdown'
 import { buildRouteContextQuery, normalizeDifficulty } from '../utils/routeContext'
 import {
@@ -1353,16 +1353,38 @@ function formatMinutes(minutes) {
   return `${m}m`
 }
 
+function completionRateFromMasteryLevels(levels) {
+  if (!levels?.length) return 0
+  let total = 0
+  for (const raw of levels) {
+    const normalized = Math.max(0, Math.min(1, Number(raw) || 0))
+    if (normalized >= MASTERY_MASTERED) {
+      total += 1.0
+    } else if (normalized >= MASTERY_PARTIAL) {
+      total += 0.5
+    }
+  }
+  return Math.round((total / levels.length) * 10000) / 10000
+}
+
 function stageProgress(stage) {
   if (!stage?.keypoint_ids?.length) return 0
-  const completed = stage.keypoint_ids.filter((keypointId) => itemById.value[keypointId]?.priority === 'completed').length
-  return Math.round((completed / stage.keypoint_ids.length) * 100)
+  const levels = stage.keypoint_ids.map((keypointId) => {
+    const item = itemById.value[keypointId]
+    return item != null ? (Number(item.mastery_level) || 0) : 0
+  })
+  const rate = completionRateFromMasteryLevels(levels)
+  return Math.round(rate * 100)
 }
 
 function moduleProgress(module) {
   if (!module?.keypoint_ids?.length) return 0
-  const completed = module.keypoint_ids.filter((keypointId) => itemById.value[keypointId]?.priority === 'completed').length
-  return Math.round((completed / module.keypoint_ids.length) * 100)
+  const levels = module.keypoint_ids.map((keypointId) => {
+    const item = itemById.value[keypointId]
+    return item != null ? (Number(item.mastery_level) || 0) : 0
+  })
+  const rate = completionRateFromMasteryLevels(levels)
+  return Math.round(rate * 100)
 }
 
 function modulePrereqLabels(module) {
