@@ -49,12 +49,23 @@ export const routes = [
     name: 'Settings',
     meta: { title: '设置中心' },
     component: () => import('../views/Settings.vue')
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'NotFound',
+    meta: { title: '页面未找到' },
+    component: () => import('../views/NotFound.vue')
   }
 ]
 
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+router.afterEach((to) => {
+  const title = to.meta?.title
+  document.title = title ? `${title} - GradTutor` : 'GradTutor - 智能学习助手'
 })
 
 router.beforeEach((to, from, next) => {

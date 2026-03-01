@@ -72,19 +72,26 @@ function handleApiError(err, path) {
   }
   if (globalErrorToast && !path?.includes('/api/auth')) {
     const { showToast } = useToast()
-    showToast(err.message || '请求失败', 'error')
+    const message = err?.name === 'AbortError'
+      ? '请求超时，请检查网络或稍后重试'
+      : (err?.message || '请求失败')
+    showToast(message, 'error')
   }
 }
+
+const AUTH_TIMEOUT_MS = 15000
+const DEFAULT_TIMEOUT_MS = 120000 // QA/测验/摘要等长耗时接口 2 分钟超时
 
 async function request(path, options = {}) {
   const fullUrl = `${API_BASE}${path}`
   const { headers, isAuth } = buildAuthHeaders(path, options.headers)
   let abortId
   let signal = options.signal
-  if (isAuth && !signal) {
+  if (!signal) {
     const controller = new AbortController()
     signal = controller.signal
-    abortId = setTimeout(() => controller.abort(), 15000)
+    const timeout = isAuth ? AUTH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS
+    abortId = setTimeout(() => controller.abort(), timeout)
   }
   try {
     const res = await fetch(fullUrl, { ...options, headers, signal })
