@@ -140,7 +140,7 @@ test.describe('Quiz Feedback Enhancement', () => {
     }, auth)
 
     await page.goto('/')
-    await expect(page.getByRole('heading', { name: 'GradTutor' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'StudyCompass' })).toBeVisible()
     await page.waitForLoadState('load')
 
     await Promise.all([

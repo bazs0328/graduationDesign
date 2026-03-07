@@ -12,7 +12,7 @@
           用 <span class="text-cyan-300">AI</span> 掌握<br/>你的知识
         </h1>
         <p class="text-base sm:text-lg md:text-xl text-blue-50/90 leading-relaxed max-w-2xl font-medium">
-          GradTutor 将你的文档转化为互动学习体验，支持摘要、问答与测验等学习流程。
+          StudyCompass 将你的文档转化为互动学习体验，支持摘要、问答与测验等学习流程。
         </p>
         <div class="flex flex-wrap gap-3 sm:gap-4 pt-2 sm:pt-4">
           <router-link to="/upload" class="px-6 sm:px-8 py-3.5 sm:py-4 bg-white text-slate-900 rounded-2xl font-black text-base sm:text-lg shadow-xl hover:scale-105 active:scale-95 transition-all">

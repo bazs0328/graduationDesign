@@ -43,7 +43,7 @@ export function buildSettingsResponse(overrides = {}) {
       pdf_parser_mode: 'auto',
       auth_require_login: true,
       secrets_configured: { qwen_api_key: true },
-      version_info: { app_name: 'GradTutor' },
+      version_info: { app_name: 'StudyCompass' },
       provider_setup: buildProviderSetup(),
     },
     user_defaults: {

@@ -18,7 +18,7 @@
         <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold shrink-0 shadow-lg shadow-blue-500/20">G</div>
         <div v-if="showExpandedLabels" class="min-w-0">
           <p class="text-[10px] font-bold uppercase tracking-[0.26em] text-slate-500 dark:text-slate-400">Workspace</p>
-          <h1 class="text-lg font-bold tracking-tight truncate">GradTutor</h1>
+          <h1 class="text-lg font-bold tracking-tight truncate">StudyCompass</h1>
         </div>
       </div>
       <button

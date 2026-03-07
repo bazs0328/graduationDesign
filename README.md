@@ -1,4 +1,4 @@
-# GradTutor (LLM Personal Learning Assistant)
+# StudyCompass (LLM Personal Learning Assistant)
 
 This project implements a personalized learning assistant inspired by the DeepTutor workflow, adapted to FastAPI + Vue and a local RAG pipeline. It supports document upload, summarization, Q&A, quiz generation, and progress tracking.
 

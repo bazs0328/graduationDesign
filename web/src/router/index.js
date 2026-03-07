@@ -102,7 +102,7 @@ async function ensureAuthenticatedSession() {
 
 router.afterEach((to) => {
   const title = to.meta?.title
-  document.title = title ? `${title} - GradTutor` : 'GradTutor - 智能学习助手'
+  document.title = title ? `${title} - StudyCompass` : 'StudyCompass - 智能学习助手'
 })
 
 router.beforeEach(async (to, from, next) => {

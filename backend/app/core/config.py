@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "GradTutor"
+    app_name: str = "StudyCompass"
     data_dir: str = "data"
     auth_secret_key: str = "gradtutor-dev-secret"
     auth_token_ttl_hours: int = 72

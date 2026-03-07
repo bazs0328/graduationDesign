@@ -35,7 +35,7 @@ function buildSettingsResponse() {
       pdf_parser_mode: 'auto',
       auth_require_login: true,
       secrets_configured: { qwen_api_key: true },
-      version_info: { app_name: 'GradTutor' },
+      version_info: { app_name: 'StudyCompass' },
     },
     user_defaults: {
       qa: { mode: 'normal', retrieval_preset: 'balanced', top_k: null, fetch_k: null },

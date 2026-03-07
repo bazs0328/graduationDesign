@@ -82,7 +82,7 @@ async function waitForDocReady(page, filename) {
   await expect(item.getByText('就绪')).toBeVisible({ timeout: 60000 })
 }
 
-test.describe('GradTutor E2E', () => {
+test.describe('StudyCompass E2E', () => {
   test.beforeEach(async ({ request }) => {
     const healthy = await ensureBackendHealthy(request)
     test.skip(!healthy, 'Backend is not reachable at E2E_API_BASE')
@@ -98,7 +98,7 @@ test.describe('GradTutor E2E', () => {
       localStorage.setItem('gradtutor_access_token', user.access_token || '')
     }, auth)
     await page.goto('/')
-    await expect(page.getByRole('heading', { name: 'GradTutor' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'StudyCompass' })).toBeVisible()
     const nav = page.getByRole('navigation')
     await expect(nav.getByRole('link', { name: '首页' })).toBeVisible()
     await expect(nav.getByRole('link', { name: '上传' })).toBeVisible()
@@ -124,7 +124,7 @@ test.describe('GradTutor E2E', () => {
     }, auth)
 
     await page.goto('/')
-    await expect(page.getByRole('heading', { name: 'GradTutor' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'StudyCompass' })).toBeVisible()
     await page.waitForLoadState('load')
 
     await Promise.all([

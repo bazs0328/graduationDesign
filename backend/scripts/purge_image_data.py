@@ -300,7 +300,7 @@ def _print_summary(*, execute: bool, stats: PurgeStats) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Purge legacy image data from GradTutor storage.")
+    parser = argparse.ArgumentParser(description="Purge legacy image data from StudyCompass storage.")
     parser.add_argument("--dry-run", action="store_true", help="Scan and report only (default mode).")
     parser.add_argument("--execute", action="store_true", help="Apply destructive cleanup operations.")
     args = parser.parse_args()

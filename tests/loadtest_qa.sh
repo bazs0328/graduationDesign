@@ -9,7 +9,7 @@ PARAGRAPHS="${PARAGRAPHS:-400}"
 QUERY_COUNT="${QUERY_COUNT:-20}"
 TOP_K="${TOP_K:-6}"
 FETCH_K="${FETCH_K:-20}"
-TMP_DIR="${TMP_DIR:-/tmp/gradtutor_loadtest}"
+TMP_DIR="${TMP_DIR:-/tmp/studycompass_loadtest}"
 
 log() {
   echo "[loadtest] $*"

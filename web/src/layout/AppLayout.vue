@@ -16,7 +16,7 @@
                 <PanelLeft class="w-5 h-5" />
               </button>
               <div class="min-w-0">
-                <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-muted-foreground">GradTutor Workspace</p>
+                <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-muted-foreground">StudyCompass Workspace</p>
                 <h2 class="text-base md:text-lg font-semibold truncate">{{ currentRouteName }}</h2>
               </div>
             </div>

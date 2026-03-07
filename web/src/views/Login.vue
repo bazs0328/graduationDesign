@@ -13,7 +13,7 @@
     <div class="w-full max-w-md space-y-8">
       <div class="text-center">
         <div class="inline-flex w-12 h-12 bg-primary rounded-xl items-center justify-center text-primary-foreground font-bold text-xl mb-4">G</div>
-        <h1 class="text-2xl font-bold tracking-tight">GradTutor</h1>
+        <h1 class="text-2xl font-bold tracking-tight">StudyCompass</h1>
         <p class="text-muted-foreground mt-1">登录或注册以继续</p>
       </div>
 
