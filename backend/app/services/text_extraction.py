@@ -51,6 +51,9 @@ FALLBACK_ENCODINGS: Tuple[str, ...] = (
     "latin-1",
 )
 
+_OCR_LOW_CONF_VISIBLE_CHAR_THRESHOLD = 24
+_OCR_LOW_CONF_QUALITY_THRESHOLD = 0.45
+
 logger = logging.getLogger(__name__)
 
 _OCR_ENGINES: dict[str, OcrEngine] = {}
@@ -211,6 +214,14 @@ def _parse_csv(value: str | None) -> list[str]:
     if not value:
         return []
     return [part.strip() for part in value.split(",") if part and part.strip()]
+
+
+def _normalize_trigger_reasons(trigger_reasons: list[str] | None) -> set[str]:
+    return {
+        (item or "").strip().lower()
+        for item in (trigger_reasons or [])
+        if item and str(item).strip()
+    }
 
 
 def _get_ocr_render_dpi() -> int:
@@ -475,14 +486,27 @@ def _should_continue_after_low_confidence(
     *,
     threshold: float,
     has_next_engine: bool,
-) -> bool:
-    if not has_next_engine:
-        return False
+    trigger_reasons: list[str] | None = None,
+) -> tuple[bool, str]:
     if not result.text:
-        return True
+        return has_next_engine, "empty_text"
+    if not has_next_engine:
+        return False, "keep_fast_result"
     if result.avg_confidence is None:
-        return False
-    return result.avg_confidence < threshold
+        return False, "keep_fast_result"
+    if result.avg_confidence >= threshold:
+        return False, "keep_fast_result"
+
+    reasons = _normalize_trigger_reasons(trigger_reasons)
+    if "garbled_text" in reasons:
+        return True, "garbled_text"
+
+    visible_chars = len(_visible_chars(result.text))
+    if visible_chars < _OCR_LOW_CONF_VISIBLE_CHAR_THRESHOLD:
+        return True, "low_confidence_low_quality"
+    if _score_page_text_quality(result.text) < _OCR_LOW_CONF_QUALITY_THRESHOLD:
+        return True, "low_confidence_low_quality"
+    return False, "keep_fast_result"
 
 
 def _is_better_ocr_result(candidate: OcrPageResult, current: OcrPageResult) -> bool:
@@ -493,7 +517,12 @@ def _is_better_ocr_result(candidate: OcrPageResult, current: OcrPageResult) -> b
     return len(candidate.text) > len(current.text)
 
 
-def _run_ocr_with_fallbacks(image: Any, page_num: int) -> OcrPageResult:
+def _run_ocr_with_fallbacks(
+    image: Any,
+    page_num: int,
+    *,
+    trigger_reasons: list[str] | None = None,
+) -> OcrPageResult:
     engine_chain = _get_ocr_engine_chain_names()
     confidence_threshold = _get_ocr_low_confidence_threshold()
     best_result: Optional[OcrPageResult] = None
@@ -510,9 +539,10 @@ def _run_ocr_with_fallbacks(image: Any, page_num: int) -> OcrPageResult:
             elapsed_ms = (time.perf_counter() - started) * 1000
             last_runtime_error = exc
             logger.warning(
-                "OCR page=%s engine=%s status=runtime_error fallback=%s elapsed_ms=%.1f error=%s",
+                "OCR page=%s engine=%s status=runtime_error reason=runtime_error action=%s fallback=%s elapsed_ms=%.1f error=%s",
                 page_num,
                 engine_name,
+                "fallback" if has_next_engine else "stop",
                 is_fallback,
                 elapsed_ms,
                 str(exc),
@@ -543,17 +573,34 @@ def _run_ocr_with_fallbacks(image: Any, page_num: int) -> OcrPageResult:
             len(result.text),
         )
 
-        if _should_continue_after_low_confidence(
+        quality_score = _score_page_text_quality(result.text) if result.text else 0.0
+        visible_chars = len(_visible_chars(result.text))
+        should_fallback, fallback_reason = _should_continue_after_low_confidence(
             result,
             threshold=confidence_threshold,
             has_next_engine=has_next_engine,
-        ):
+            trigger_reasons=trigger_reasons,
+        )
+        action = "fallback" if should_fallback else ("return" if result.text else "finish")
+        logger.info(
+            "OCR page=%s engine=%s decision=%s reason=%s conf=%s threshold=%.2f quality=%.3f visible_chars=%s",
+            page_num,
+            result.engine,
+            action,
+            fallback_reason,
+            f"{result.avg_confidence:.3f}" if result.avg_confidence is not None else "n/a",
+            confidence_threshold,
+            quality_score,
+            visible_chars,
+        )
+        if should_fallback:
             logger.info(
-                "OCR page=%s engine=%s status=low_confidence conf=%s threshold=%.2f action=fallback",
+                "OCR page=%s engine=%s status=low_confidence conf=%s threshold=%.2f action=fallback reason=%s",
                 page_num,
                 result.engine,
                 f"{result.avg_confidence:.3f}" if result.avg_confidence is not None else "n/a",
                 confidence_threshold,
+                fallback_reason,
             )
             continue
 
@@ -668,14 +715,19 @@ def _render_pdf_page_for_ocr(file_path: str, page_num: int) -> Any:
     return processed_image
 
 
-def _ocr_page(file_path: str, page_num: int) -> OcrPageResult:
+def _ocr_page(
+    file_path: str,
+    page_num: int,
+    *,
+    trigger_reasons: list[str] | None = None,
+) -> OcrPageResult:
     """Run OCR for one PDF page and return normalized text and metadata."""
     image = _render_pdf_page_for_ocr(file_path, page_num)
     if image is None:
         return OcrPageResult(text="", engine="none", avg_confidence=None, raw_line_count=0)
 
     try:
-        return _run_ocr_with_fallbacks(image, page_num)
+        return _run_ocr_with_fallbacks(image, page_num, trigger_reasons=trigger_reasons)
     finally:
         try:
             image.close()
@@ -724,7 +776,7 @@ def _pick_page_text_after_ocr(
     if not original_text:
         return ocr_text, "ocr_empty_text_layer"
 
-    reasons = {(item or "").strip().lower() for item in (trigger_reasons or []) if item}
+    reasons = _normalize_trigger_reasons(trigger_reasons)
     if "garbled_text" in reasons and _get_pdf_garbled_ocr_force():
         original_visible = len(_visible_chars(original_text))
         ocr_visible = len(_visible_chars(ocr_text))
@@ -785,7 +837,11 @@ def _apply_pdf_ocr_repair(
 
     for page_num in ocr_pages:
         try:
-            ocr_result = _ocr_page(file_path, page_num)
+            ocr_result = _ocr_page(
+                file_path,
+                page_num,
+                trigger_reasons=page_reasons.get(page_num, []),
+            )
         except RuntimeError:
             if scanned_pdf:
                 raise

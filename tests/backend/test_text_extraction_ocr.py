@@ -37,6 +37,16 @@ class _FakeEngine:
         return self.result
 
 
+@dataclass
+class _RaisingEngine:
+    error: Exception
+    calls: int = 0
+
+    def ocr_page(self, image: Any) -> te.OcrPageResult:  # noqa: ARG002
+        self.calls += 1
+        raise self.error
+
+
 @pytest.fixture(autouse=True)
 def _reset_ocr_state(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(te, "_OCR_ENGINES", {})
@@ -68,7 +78,40 @@ def test_is_scanned_pdf_respects_configured_check_pages(monkeypatch: pytest.Monk
     assert te._is_scanned_pdf(pages, min_text_length=10) is False
 
 
-def test_run_ocr_with_fallbacks_uses_next_engine_on_low_confidence(monkeypatch: pytest.MonkeyPatch):
+def test_run_ocr_with_fallbacks_keeps_fast_engine_on_low_confidence_high_quality_text(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    rapid_engine = _FakeEngine(
+        te.OcrPageResult(
+            text="这是一段结构完整且质量较高的 OCR 文本内容，用于验证不会触发慢速回退。",
+            engine="rapidocr",
+            avg_confidence=0.35,
+            raw_line_count=2,
+        )
+    )
+    tess_engine = _FakeEngine(
+        te.OcrPageResult(text="不应命中的回退结果", engine="tesseract", avg_confidence=0.92, raw_line_count=1)
+    )
+
+    monkeypatch.setattr(te, "_get_ocr_engine_chain_names", lambda: ["rapidocr", "tesseract"])
+    monkeypatch.setattr(te, "_get_ocr_low_confidence_threshold", lambda: 0.72)
+    monkeypatch.setattr(
+        te,
+        "_get_ocr_engine",
+        lambda name: rapid_engine if name == "rapidocr" else tess_engine,
+    )
+
+    result = te._run_ocr_with_fallbacks(image=object(), page_num=1)
+
+    assert result.text == rapid_engine.result.text
+    assert result.engine == "rapidocr"
+    assert rapid_engine.calls == 1
+    assert tess_engine.calls == 0
+
+
+def test_run_ocr_with_fallbacks_uses_next_engine_on_low_confidence_low_quality(
+    monkeypatch: pytest.MonkeyPatch,
+):
     rapid_engine = _FakeEngine(
         te.OcrPageResult(text="低置信度结果", engine="rapidocr", avg_confidence=0.35, raw_line_count=1)
     )
@@ -77,7 +120,7 @@ def test_run_ocr_with_fallbacks_uses_next_engine_on_low_confidence(monkeypatch: 
     )
 
     monkeypatch.setattr(te, "_get_ocr_engine_chain_names", lambda: ["rapidocr", "tesseract"])
-    monkeypatch.setattr(te, "_get_ocr_low_confidence_threshold", lambda: 0.78)
+    monkeypatch.setattr(te, "_get_ocr_low_confidence_threshold", lambda: 0.72)
     monkeypatch.setattr(
         te,
         "_get_ocr_engine",
@@ -87,6 +130,63 @@ def test_run_ocr_with_fallbacks_uses_next_engine_on_low_confidence(monkeypatch: 
     result = te._run_ocr_with_fallbacks(image=object(), page_num=1)
 
     assert result.text == "高置信度结果"
+    assert result.engine == "tesseract"
+    assert rapid_engine.calls == 1
+    assert tess_engine.calls == 1
+
+
+def test_run_ocr_with_fallbacks_uses_next_engine_when_page_trigger_is_garbled(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    rapid_engine = _FakeEngine(
+        te.OcrPageResult(
+            text="这是一段结构完整且质量较高的 OCR 文本内容，但当前页被判定为乱码页。",
+            engine="rapidocr",
+            avg_confidence=0.40,
+            raw_line_count=2,
+        )
+    )
+    tess_engine = _FakeEngine(
+        te.OcrPageResult(text="乱码页回退后的结果", engine="tesseract", avg_confidence=0.92, raw_line_count=1)
+    )
+
+    monkeypatch.setattr(te, "_get_ocr_engine_chain_names", lambda: ["rapidocr", "tesseract"])
+    monkeypatch.setattr(te, "_get_ocr_low_confidence_threshold", lambda: 0.72)
+    monkeypatch.setattr(
+        te,
+        "_get_ocr_engine",
+        lambda name: rapid_engine if name == "rapidocr" else tess_engine,
+    )
+
+    result = te._run_ocr_with_fallbacks(
+        image=object(),
+        page_num=1,
+        trigger_reasons=["garbled_text"],
+    )
+
+    assert result.text == "乱码页回退后的结果"
+    assert result.engine == "tesseract"
+    assert rapid_engine.calls == 1
+    assert tess_engine.calls == 1
+
+
+def test_run_ocr_with_fallbacks_continues_after_runtime_error(monkeypatch: pytest.MonkeyPatch):
+    rapid_engine = _RaisingEngine(RuntimeError("rapidocr failed"))
+    tess_engine = _FakeEngine(
+        te.OcrPageResult(text="回退识别结果", engine="tesseract", avg_confidence=0.91, raw_line_count=1)
+    )
+
+    monkeypatch.setattr(te, "_get_ocr_engine_chain_names", lambda: ["rapidocr", "tesseract"])
+    monkeypatch.setattr(te, "_get_ocr_low_confidence_threshold", lambda: 0.72)
+    monkeypatch.setattr(
+        te,
+        "_get_ocr_engine",
+        lambda name: rapid_engine if name == "rapidocr" else tess_engine,
+    )
+
+    result = te._run_ocr_with_fallbacks(image=object(), page_num=1)
+
+    assert result.text == "回退识别结果"
     assert result.engine == "tesseract"
     assert rapid_engine.calls == 1
     assert tess_engine.calls == 1
@@ -105,7 +205,12 @@ def test_extract_pdf_does_not_invoke_ocr_when_text_layer_is_sufficient(monkeypat
 
     called_pages: list[int] = []
 
-    def _unexpected_ocr(file_path: str, page_num: int) -> te.OcrPageResult:  # noqa: ARG001
+    def _unexpected_ocr(
+        file_path: str,
+        page_num: int,
+        *,
+        trigger_reasons: list[str] | None = None,
+    ) -> te.OcrPageResult:  # noqa: ARG001
         called_pages.append(page_num)
         return te.OcrPageResult(text="should-not-happen", engine="rapidocr")
 
@@ -130,7 +235,11 @@ def test_extract_pdf_scanned_pdf_replaces_low_quality_text_with_ocr(monkeypatch:
         1: te.OcrPageResult(text="第一页 OCR 内容", engine="rapidocr", avg_confidence=0.88, raw_line_count=1),
         2: te.OcrPageResult(text="第二页 OCR 内容", engine="rapidocr", avg_confidence=0.87, raw_line_count=1),
     }
-    monkeypatch.setattr(te, "_ocr_page", lambda file_path, page_num: ocr_map[page_num])
+    monkeypatch.setattr(
+        te,
+        "_ocr_page",
+        lambda file_path, page_num, *, trigger_reasons=None: ocr_map[page_num],
+    )
 
     result = te._extract_pdf("scanned.pdf")
 
@@ -144,7 +253,12 @@ def test_extract_pdf_scanned_pdf_with_ocr_disabled_does_not_call_ocr(monkeypatch
     monkeypatch.setattr(te.settings, "ocr_min_text_length", 10)
     monkeypatch.setattr(te.settings, "ocr_check_pages", 3)
 
-    def _unexpected_ocr(file_path: str, page_num: int):  # noqa: ANN001, ARG001
+    def _unexpected_ocr(
+        file_path: str,
+        page_num: int,
+        *,
+        trigger_reasons: list[str] | None = None,
+    ):  # noqa: ANN001, ARG001
         raise AssertionError("OCR should not be called when disabled")
 
     monkeypatch.setattr(te, "_ocr_page", _unexpected_ocr)
