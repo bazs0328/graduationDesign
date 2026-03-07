@@ -538,6 +538,34 @@ describe('Quiz focus concept scoping', () => {
     expect(getOptionTexts(focus)).toContain('该文档暂无可选聚合知识点')
   })
 
+  it('does not merge distinct grouped options that only differ by lowercase form', async () => {
+    mockQuizFocusApi({
+      groupedKeypoints: [
+        {
+          id: 'gkp-case-1',
+          text: 'Concept Alpha',
+          member_count: 1,
+          source_doc_ids: ['doc-1'],
+        },
+        {
+          id: 'gkp-case-2',
+          text: 'concept alpha',
+          member_count: 1,
+          source_doc_ids: ['doc-2'],
+        },
+      ],
+    })
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await openQuizAndSelectKb(wrapper, router)
+    await openQuizAdvancedPanel(wrapper)
+
+    const { focus } = getQuizSelects(wrapper)
+    const optionTexts = getOptionTexts(focus)
+    expect(optionTexts).toContain('Concept Alpha')
+    expect(optionTexts).toContain('concept alpha')
+  })
+
   it('does not raw-fallback route focus when a document is selected and focus is out of scope', async () => {
     mockQuizFocusApi()
     const generatePayloads = []

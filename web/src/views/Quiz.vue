@@ -1252,13 +1252,11 @@ function removeQuizFocusConcept(index) {
 }
 
 function normalizeQuizFocusOptions(items = []) {
-  const seenIndex = new Map()
   const out = []
   for (const item of items) {
     const id = String(item?.id || '').trim()
     const text = String(item?.text || '').trim()
     if (!text) continue
-    const key = text.toLowerCase()
     const sourceDocIds = [
       ...new Set(
         (Array.isArray(item?.source_doc_ids) ? item.source_doc_ids : [])
@@ -1266,21 +1264,6 @@ function normalizeQuizFocusOptions(items = []) {
           .filter(Boolean)
       )
     ]
-    if (seenIndex.has(key)) {
-      const existingIndex = seenIndex.get(key)
-      const existing = out[existingIndex]
-      const mergedSourceDocIds = [
-        ...new Set([...(existing.sourceDocIds || []), ...sourceDocIds])
-      ]
-      existing.sourceDocIds = mergedSourceDocIds
-      existing.sourceDocCount = mergedSourceDocIds.length
-      existing.memberCount = Math.max(
-        Number(existing.memberCount || 1),
-        Number(item?.member_count || 1),
-      )
-      continue
-    }
-    seenIndex.set(key, out.length)
     out.push({
       id: id || text,
       text,

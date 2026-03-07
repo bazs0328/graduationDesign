@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from app.models import Document, Keypoint, KeypointDependency, KnowledgeBase, User
+from app.services.keypoint_dedup import find_kb_representative_by_text
 from app.services.learning_path import DEPENDENCY_RELATION
 from app.utils.chroma_filters import build_chroma_eq_filter
 
@@ -211,6 +212,188 @@ def test_get_keypoints_by_kb_grouped_semantic_dedup(client, db_session):
     assert item["id"] == "kp-grouped-sem-1"
     assert item["attempt_count"] == 3
     assert item["mastery_level"] == 0.5
+
+
+def test_get_keypoints_by_kb_grouped_soft_exact_dedup_removes_structural_de(client, db_session):
+    user_id = "kp_grouped_soft_exact_user"
+    kb_id = "kp_grouped_soft_exact_kb"
+    doc1 = "kp_grouped_soft_exact_doc_1"
+    doc2 = "kp_grouped_soft_exact_doc_2"
+    _seed_kb_with_docs(
+        db_session,
+        user_id=user_id,
+        kb_id=kb_id,
+        docs=[(doc1, "soft-1.txt"), (doc2, "soft-2.txt")],
+    )
+    base = datetime.utcnow()
+    db_session.add_all(
+        [
+            Keypoint(
+                id="kp-grouped-soft-1",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc1,
+                text="矩阵的定义",
+                explanation=None,
+                mastery_level=0.1,
+                attempt_count=1,
+                correct_count=0,
+                created_at=base,
+            ),
+            Keypoint(
+                id="kp-grouped-soft-2",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc2,
+                text="矩阵定义",
+                explanation="软 exact 合并",
+                mastery_level=0.6,
+                attempt_count=2,
+                correct_count=2,
+                created_at=base + timedelta(seconds=1),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    with patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("boom")):
+        resp = client.get(
+            f"/api/keypoints/kb/{kb_id}",
+            params={"user_id": user_id, "grouped": "true"},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["grouped"] is True
+    assert payload["raw_count"] == 2
+    assert payload["group_count"] == 1
+    item = payload["keypoints"][0]
+    assert item["member_count"] == 2
+    assert item["id"] == "kp-grouped-soft-1"
+    assert item["attempt_count"] == 3
+    assert item["mastery_level"] == 0.6
+
+
+def test_get_keypoints_by_kb_grouped_semantic_dedup_does_not_merge_contains_only_match(
+    client, db_session
+):
+    user_id = "kp_grouped_contains_guard_user"
+    kb_id = "kp_grouped_contains_guard_kb"
+    doc1 = "kp_grouped_contains_guard_doc_1"
+    doc2 = "kp_grouped_contains_guard_doc_2"
+    _seed_kb_with_docs(
+        db_session,
+        user_id=user_id,
+        kb_id=kb_id,
+        docs=[(doc1, "guard-1.txt"), (doc2, "guard-2.txt")],
+    )
+    base = datetime.utcnow()
+    db_session.add_all(
+        [
+            Keypoint(
+                id="kp-grouped-contains-1",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc1,
+                text="牛顿第二定律",
+                explanation="e1",
+                mastery_level=0.2,
+                attempt_count=1,
+                correct_count=0,
+                created_at=base,
+            ),
+            Keypoint(
+                id="kp-grouped-contains-2",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc2,
+                text="牛顿第二定律实验装置误差来源分析",
+                explanation="e2",
+                mastery_level=0.5,
+                attempt_count=2,
+                correct_count=1,
+                created_at=base + timedelta(seconds=1),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    vectorstore = Mock()
+
+    def _search(query, k, filter):  # noqa: A002
+        assert k == 6
+        assert filter == build_chroma_eq_filter(kb_id=kb_id, type="keypoint")
+        if query == "牛顿第二定律":
+            return [
+                (
+                    SimpleNamespace(
+                        metadata={"keypoint_id": "kp-grouped-contains-2", "doc_id": doc2}
+                    ),
+                    0.1,
+                )
+            ]
+        return []
+
+    vectorstore.similarity_search_with_score.side_effect = _search
+
+    with patch("app.services.keypoint_dedup.get_vectorstore", return_value=vectorstore):
+        resp = client.get(
+            f"/api/keypoints/kb/{kb_id}",
+            params={"user_id": user_id, "grouped": "true"},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["grouped"] is True
+    assert payload["raw_count"] == 2
+    assert payload["group_count"] == 2
+    assert {item["text"] for item in payload["keypoints"]} == {
+        "牛顿第二定律",
+        "牛顿第二定律实验装置误差来源分析",
+    }
+
+
+def test_find_kb_representative_by_text_uses_soft_exact_without_contains_fallback(db_session):
+    user_id = "kp_rep_lookup_user"
+    kb_id = "kp_rep_lookup_kb"
+    doc1 = "kp_rep_lookup_doc_1"
+    doc2 = "kp_rep_lookup_doc_2"
+    _seed_kb_with_docs(
+        db_session,
+        user_id=user_id,
+        kb_id=kb_id,
+        docs=[(doc1, "lookup-1.txt"), (doc2, "lookup-2.txt")],
+    )
+    base = datetime.utcnow()
+    db_session.add_all(
+        [
+            Keypoint(
+                id="kp-rep-lookup-1",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc1,
+                text="矩阵的定义",
+                created_at=base,
+            ),
+            Keypoint(
+                id="kp-rep-lookup-2",
+                user_id=user_id,
+                kb_id=kb_id,
+                doc_id=doc2,
+                text="牛顿第二定律实验误差分析",
+                created_at=base + timedelta(seconds=1),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    with patch("app.services.keypoint_dedup.get_vectorstore", side_effect=RuntimeError("boom")):
+        matched = find_kb_representative_by_text(db_session, user_id, kb_id, "矩阵定义")
+        partial = find_kb_representative_by_text(db_session, user_id, kb_id, "实验误差分析")
+
+    assert matched is not None
+    assert str(matched.id) == "kp-rep-lookup-1"
+    assert partial is None
 
 
 def test_get_keypoints_by_kb_grouped_only_unlocked_filters_blocked_items(client, db_session):

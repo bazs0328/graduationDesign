@@ -88,6 +88,90 @@ function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
+function mockQaFocusApi({
+  docs = [docFixture],
+  groupedKeypoints = [],
+} = {}) {
+  apiGet.mockImplementation((path) => {
+    if (path.startsWith('/api/kb')) return Promise.resolve([kbFixture])
+    if (path.startsWith('/api/docs')) return Promise.resolve(docs)
+    if (path.startsWith('/api/keypoints/kb/')) {
+      return Promise.resolve({
+        keypoints: groupedKeypoints,
+        grouped: true,
+        raw_count: groupedKeypoints.length,
+        group_count: groupedKeypoints.length,
+      })
+    }
+    if (path.startsWith('/api/chat/sessions/page')) {
+      return Promise.resolve({
+        items: [
+          {
+            id: 'session-qa-1',
+            title: 'What is a matrix?',
+            kb_id: 'kb-1',
+            doc_id: null,
+            created_at: new Date().toISOString(),
+          }
+        ],
+        total: 1,
+        offset: 0,
+        limit: 20,
+        has_more: false,
+      })
+    }
+    if (path.startsWith('/api/chat/sessions/session-qa-1/messages')) {
+      return Promise.resolve([
+        { role: 'user', content: 'What is a matrix?' },
+        { role: 'assistant', content: qaResponse.answer, sources: qaResponse.sources }
+      ])
+    }
+    if (path.startsWith('/api/chat/sessions/')) return Promise.resolve([])
+    if (path.startsWith('/api/chat/sessions')) {
+      return Promise.resolve([
+        { id: 'session-qa-1', title: 'What is a matrix?', kb_id: 'kb-1', doc_id: null }
+      ])
+    }
+    if (path.startsWith('/api/progress')) {
+      return Promise.resolve({
+        total_docs: 1,
+        total_quizzes: 0,
+        total_attempts: 0,
+        total_questions: 0,
+        total_summaries: 0,
+        total_keypoints: 0,
+        avg_score: 0,
+        last_activity: null
+      })
+    }
+    if (path.startsWith('/api/activity')) return Promise.resolve({ items: [], total: 0, offset: 0, limit: 30, has_more: false })
+    if (path.startsWith('/api/recommendations')) return Promise.resolve({ items: [] })
+    return Promise.resolve({})
+  })
+}
+
+function getQaSelects(wrapper) {
+  const selects = wrapper.findAll('select')
+  return {
+    kb: selects.find((sel) => sel.text().includes('Default')) || selects.at(0),
+    doc: selects.find((sel) => {
+      const text = sel.text()
+      return (
+        text.includes('不限定（当前资料库范围）')
+        || text.includes('不限定（整库问答）')
+        || text.includes('不限定（整库）')
+        || text.includes('请选择文档')
+      )
+    }),
+    focus: selects.find((sel) => sel.text().includes('知识点')),
+  }
+}
+
+function getOptionTexts(selectWrapper) {
+  if (!selectWrapper?.exists?.()) return []
+  return selectWrapper.findAll('option').map((opt) => opt.text())
+}
+
 async function mountAppWithRouter() {
   localStorage.setItem('gradtutor_user_id', 'test')
   localStorage.setItem('gradtutor_user', 'test')
@@ -483,5 +567,42 @@ describe('Q&A', () => {
 
     expect(apiSsePost).not.toHaveBeenCalled()
     expect(router.currentRoute.value.query.focus).toBe('矩阵定义')
+  })
+
+  it('does not merge distinct grouped focus options that only differ by lowercase form', async () => {
+    mockQaFocusApi({
+      groupedKeypoints: [
+        {
+          id: 'gkp-case-1',
+          text: 'Concept Alpha',
+          member_count: 1,
+          source_doc_ids: ['doc-1'],
+        },
+        {
+          id: 'gkp-case-2',
+          text: 'concept alpha',
+          member_count: 1,
+          source_doc_ids: ['doc-1'],
+        },
+      ],
+    })
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await router.push('/qa')
+    await flushPromises()
+    await nextTick()
+    await nextTick()
+
+    const { kb } = getQaSelects(wrapper)
+    expect(kb?.exists()).toBe(true)
+    await kb.setValue('kb-1')
+    await flushPromises()
+    await nextTick()
+
+    const updatedSelects = getQaSelects(wrapper)
+    expect(updatedSelects.focus?.exists()).toBe(true)
+    const optionTexts = getOptionTexts(updatedSelects.focus)
+    expect(optionTexts).toContain('Concept Alpha')
+    expect(optionTexts).toContain('concept alpha')
   })
 })

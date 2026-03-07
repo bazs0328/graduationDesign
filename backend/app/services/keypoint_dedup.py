@@ -29,6 +29,17 @@ _TAIL_PUNCT = "。；;，,：:、 "
 _COMPARE_REMOVE_RE = re.compile(
     r"[\s\-_—·•、，,。；;：:()（）\[\]{}<>《》\"'“”‘’]+"
 )
+_SOFT_EXACT_NEIGHBOR_CLASS = (
+    r"0-9a-z"
+    r"\u3400-\u4dbf"
+    r"\u4e00-\u9fff"
+    r"\uf900-\ufaff"
+    r"\u3040-\u30ff"
+    r"\uac00-\ud7af"
+)
+_SOFT_EXACT_DE_RE = re.compile(
+    rf"(?<=[{_SOFT_EXACT_NEIGHBOR_CLASS}])的(?=[{_SOFT_EXACT_NEIGHBOR_CLASS}])"
+)
 
 
 def normalize_keypoint_text(text: str) -> str:
@@ -51,6 +62,13 @@ def normalize_keypoint_text(text: str) -> str:
 def _comparison_key(text: str) -> str:
     normalized = normalize_keypoint_text(text)
     return _COMPARE_REMOVE_RE.sub("", normalized)
+
+
+def _soft_exact_key(text: str) -> str:
+    compare_key = _comparison_key(text)
+    if not compare_key:
+        return ""
+    return _SOFT_EXACT_DE_RE.sub("", compare_key)
 
 
 def _bigram_set(text: str) -> set[str]:
@@ -110,6 +128,7 @@ class KeypointClusterMember:
     doc_name: Optional[str]
     normalized_text: str
     comparison_key: str
+    soft_exact_key: str
 
     @property
     def id(self) -> str:
@@ -209,6 +228,7 @@ def _build_members(
                 doc_name=doc_name_map.get(kp.doc_id),
                 normalized_text=normalize_keypoint_text(kp.text or ""),
                 comparison_key=_comparison_key(kp.text or ""),
+                soft_exact_key=_soft_exact_key(kp.text or ""),
             )
         )
     return members
@@ -218,8 +238,8 @@ def _build_exact_clusters(members: list[KeypointClusterMember]) -> list[Keypoint
     grouped: dict[str, list[KeypointClusterMember]] = defaultdict(list)
     singles: list[KeypointClusterMember] = []
     for member in members:
-        if member.comparison_key:
-            grouped[member.comparison_key].append(member)
+        if member.soft_exact_key:
+            grouped[member.soft_exact_key].append(member)
         else:
             singles.append(member)
 
@@ -243,8 +263,6 @@ def _passes_semantic_text_gate(a: KeypointCluster, b: KeypointCluster) -> bool:
         return False
     if len(a_key) < _SEMANTIC_MIN_COMPARE_LEN or len(b_key) < _SEMANTIC_MIN_COMPARE_LEN:
         return False
-    if a_key in b_key or b_key in a_key:
-        return True
     return _bigram_jaccard(a_key, b_key) >= _SEMANTIC_BIGRAM_JACCARD_MIN
 
 
@@ -401,12 +419,12 @@ def find_kb_representative_by_text(
     if not query_text:
         return None
     normalized_query = normalize_keypoint_text(query_text)
-    compare_query = _comparison_key(query_text)
+    soft_exact_query = _soft_exact_key(query_text)
     clusters = cluster_kb_keypoints(db, user_id, kb_id)
     if not clusters:
         return None
 
-    # Prefer exact representative text, then exact member text.
+    # Prefer exact text, then normalized text, then soft exact key.
     for cluster in clusters:
         rep_text = str(cluster.representative_keypoint.text or "").strip()
         if rep_text == query_text:
@@ -416,20 +434,24 @@ def find_kb_representative_by_text(
             if str(member.keypoint.text or "").strip() == query_text:
                 return cluster.representative_keypoint
 
-    # Fallback to normalized/contains matching across all members.
-    if not normalized_query and not compare_query:
+    if normalized_query:
+        for cluster in clusters:
+            if cluster.representative.normalized_text == normalized_query:
+                return cluster.representative_keypoint
+        for cluster in clusters:
+            for member in cluster.members:
+                if member.normalized_text == normalized_query:
+                    return cluster.representative_keypoint
+
+    if not soft_exact_query:
         return None
     for cluster in clusters:
+        if cluster.representative.soft_exact_key == soft_exact_query:
+            return cluster.representative_keypoint
+    for cluster in clusters:
         for member in cluster.members:
-            normalized_member = member.normalized_text
-            compare_member = member.comparison_key
-            if normalized_member and normalized_member == normalized_query:
+            if member.soft_exact_key == soft_exact_query:
                 return cluster.representative_keypoint
-            if compare_query and compare_member:
-                if compare_member == compare_query:
-                    return cluster.representative_keypoint
-                if compare_query in compare_member or compare_member in compare_query:
-                    return cluster.representative_keypoint
     return None
 
 
