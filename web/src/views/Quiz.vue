@@ -7,7 +7,7 @@
       <p class="text-[10px] font-bold uppercase tracking-widest text-primary">学习路径上下文</p>
       <p class="text-sm text-muted-foreground">
         <span v-if="entryKbContextId">
-          当前知识库：<span class="font-semibold text-foreground">{{ entryKbContextName }}</span>
+          当前资料库：<span class="font-semibold text-foreground">{{ entryKbContextName }}</span>
         </span>
         <span v-if="entryDocContextId">
           <span v-if="entryKbContextId"> · </span>
@@ -19,6 +19,12 @@
         </span>
       </p>
     </section>
+    <ContextSummaryBar
+      :kb-name="selectedKbName"
+      :doc-name="selectedDoc?.filename || ''"
+      :focus="quizFocusConcepts[0] || entryFocusContext || ''"
+      subtitle="系统会优先基于这里显示的资料范围生成题目"
+    />
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-8">
       <!-- Left: Quiz Generation -->
       <aside class="space-y-4 md:space-y-6">
@@ -37,97 +43,15 @@
               :kb-loading="appContext.kbsLoading"
               :docs-loading="busy.docs"
               mode="kb-and-optional-doc"
-              kb-label="目标知识库"
+              kb-label="目标资料库"
               doc-label="限定文档（可选）"
               @update:kb-id="selectedKbId = $event"
               @update:doc-id="selectedDocId = $event"
             >
-              <div class="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                <span>题量/难度默认值来自设置中心，可在此页临时调整。</span>
-                <div class="flex items-center gap-2">
-                  <button
-                    type="button"
-                    class="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 font-semibold hover:bg-accent disabled:opacity-50"
-                    :disabled="settingsStore.savingUser"
-                    @click="saveCurrentQuizDefaults"
-                  >
-                    {{ settingsStore.savingUser ? '保存中…' : '保存为默认' }}
-                  </button>
-                  <button
-                    type="button"
-                    class="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 font-semibold hover:bg-accent"
-                    @click="router.push('/settings')"
-                  >
-                    <SlidersHorizontal class="w-3 h-3" />
-                    设置
-                  </button>
-                </div>
-              </div>
+              <p class="text-[11px] text-muted-foreground">
+                默认会按整个资料库出题；如果你只想基于某份文档练习，可继续限定文档。
+              </p>
             </KnowledgeScopePicker>
-
-            <div v-if="selectedKbId" class="space-y-2">
-              <div class="flex items-center justify-between gap-2">
-                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">重点聚合知识点（可选）</label>
-                <button
-                  v-if="quizFocusConcepts.length"
-                  type="button"
-                  class="text-[10px] text-muted-foreground hover:text-foreground"
-                  @click="clearQuizFocusConcepts"
-                >
-                  清空
-                </button>
-              </div>
-              <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
-                <input
-                  v-model="quizFocusSearch"
-                  type="text"
-                  placeholder="搜索聚合知识点（如：牛顿定律）"
-                  class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
-                  @keydown.enter.prevent="addSelectedQuizFocusCandidate"
-                />
-                <button
-                  type="button"
-                  class="px-3 py-2 rounded-lg border border-input bg-background text-sm hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
-                  :disabled="busy.focusKeypoints || !quizFocusCandidate"
-                  @click="addSelectedQuizFocusCandidate"
-                >
-                  添加
-                </button>
-              </div>
-              <select
-                v-model="quizFocusCandidate"
-                class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
-                :disabled="busy.focusKeypoints || !filteredQuizFocusOptions.length"
-              >
-                <option value="">{{ quizFocusSelectPlaceholder }}</option>
-                <option v-for="item in filteredQuizFocusOptions" :key="item.id" :value="item.text">
-                  {{ item.text }}
-                </option>
-              </select>
-              <p class="text-[10px] text-muted-foreground">
-                选项来自“当前范围内已解锁”的聚合知识点；若已选择文档，仅显示该文档相关聚合知识点。基础模式与蓝图模式都受此范围约束。
-              </p>
-              <p class="text-[10px] text-muted-foreground">
-                当前可出题范围：{{ scopeConceptCount }} 个聚合知识点
-              </p>
-              <div v-if="quizFocusConcepts.length" class="flex flex-wrap gap-2">
-                <span
-                  v-for="(concept, idx) in quizFocusConcepts"
-                  :key="`${concept}-${idx}`"
-                  class="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-primary/20 bg-primary/10 text-primary text-[11px] font-semibold"
-                >
-                  <span>{{ concept }}</span>
-                  <button
-                    type="button"
-                    class="text-primary/80 hover:text-primary"
-                    :aria-label="`移除重点知识点 ${concept}`"
-                    @click="removeQuizFocusConcept(idx)"
-                  >
-                    ×
-                  </button>
-                </span>
-              </div>
-            </div>
 
             <div class="grid grid-cols-2 gap-4">
               <div class="space-y-2">
@@ -156,166 +80,10 @@
               </select>
             </div>
 
-            <div v-if="autoAdapt" class="space-y-3 rounded-xl border border-border bg-background/50 p-3">
-              <div class="flex items-center justify-between gap-2">
-                <p class="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">自适应依据</p>
-                <span
-                  v-if="adaptiveLoading"
-                  class="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-border text-muted-foreground"
-                >
-                  更新中…
-                </span>
-              </div>
-              <div class="flex items-center justify-between gap-3">
-                <div>
-                  <p class="text-sm font-semibold">{{ adaptiveInsight.levelMeta.text }}</p>
-                  <p class="text-[11px] text-muted-foreground">{{ quizAdaptiveModeSummary }}</p>
-                </div>
-                <span
-                  class="text-[10px] font-semibold px-2 py-1 rounded-full border"
-                  :class="adaptiveInsight.levelMeta.badgeClass"
-                >
-                  {{ adaptiveInsight.levelMeta.code }}
-                </span>
-              </div>
-
-              <div class="space-y-2">
-                <div class="flex items-center justify-between text-[11px] text-muted-foreground">
-                  <span>参考难度分配</span>
-                  <span>{{ adaptivePlanSummary }}</span>
-                </div>
-                <div class="space-y-1.5">
-                  <div v-for="item in adaptivePlanBars" :key="item.key" class="space-y-1">
-                    <div class="flex items-center justify-between text-[11px]">
-                      <span class="text-muted-foreground">{{ item.label }}</span>
-                      <span class="font-semibold">{{ item.percent }}%</span>
-                    </div>
-                    <div class="h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div class="h-full transition-all duration-300" :class="item.barClass" :style="{ width: `${item.percent}%` }"></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <p class="text-xs text-muted-foreground leading-relaxed">{{ quizAdaptiveReasonText }}</p>
-
-              <div v-if="adaptiveWeakConcepts.length" class="space-y-2">
-                <p class="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">薄弱知识点 Top 3</p>
-                <div class="flex flex-wrap gap-1.5">
-                  <span
-                    v-for="concept in adaptiveWeakConcepts"
-                    :key="concept"
-                    class="px-2 py-0.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] font-semibold"
-                  >
-                    {{ concept }}
-                  </span>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-3 gap-2 text-[11px]">
-                <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
-                  <p class="text-muted-foreground">正确率</p>
-                  <p class="font-semibold">{{ adaptiveInsight.signals.recentAccuracyPercent }}%</p>
-                </div>
-                <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
-                  <p class="text-muted-foreground">挫败感</p>
-                  <p class="font-semibold">{{ adaptiveInsight.signals.frustrationPercent }}%</p>
-                </div>
-                <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
-                  <p class="text-muted-foreground">累计尝试</p>
-                  <p class="font-semibold">{{ adaptiveInsight.signals.totalAttempts }}</p>
-                </div>
-              </div>
-
-              <p v-if="adaptiveError" class="text-[11px] text-amber-700">{{ adaptiveError }}</p>
-            </div>
-
-            <div class="space-y-3 rounded-xl border border-border bg-accent/20 p-3">
-              <div class="flex items-center justify-between gap-2">
-                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">组卷模式</label>
-                <button
-                  type="button"
-                  class="px-2 py-1 rounded-md border border-input text-xs font-semibold transition-colors"
-                  :class="usePaperBlueprint ? 'bg-primary/10 text-primary border-primary/30' : 'bg-background text-muted-foreground'"
-                  @click="usePaperBlueprint = !usePaperBlueprint"
-                >
-                  {{ usePaperBlueprint ? '蓝图组卷' : '基础模式' }}
-                </button>
-              </div>
-              <div v-if="usePaperBlueprint" class="space-y-3">
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div class="space-y-1">
-                    <label class="text-[11px] text-muted-foreground">试卷标题</label>
-                    <input
-                      v-model="paperTitle"
-                      type="text"
-                      maxlength="64"
-                      class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
-                    />
-                  </div>
-                  <div class="space-y-1">
-                    <label class="text-[11px] text-muted-foreground">时长（分钟）</label>
-                    <input
-                      v-model.number="paperDurationMinutes"
-                      type="number"
-                      min="5"
-                      max="240"
-                      class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
-                    />
-                  </div>
-                </div>
-                <div class="space-y-2">
-                  <p class="text-[11px] text-muted-foreground">题型蓝图（数量/分值/难度）</p>
-                  <div class="space-y-2">
-                    <div
-                      v-for="section in paperSections"
-                      :key="section.type"
-                      class="grid grid-cols-12 gap-2 items-center"
-                    >
-                      <p class="col-span-12 sm:col-span-3 text-xs font-semibold">
-                        {{ questionTypeLabel(section.type) }}
-                      </p>
-                      <input
-                        v-model.number="section.count"
-                        type="number"
-                        min="0"
-                        max="20"
-                        class="col-span-4 sm:col-span-2 bg-background border border-input rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-primary text-sm"
-                        :aria-label="`${questionTypeLabel(section.type)} 数量`"
-                      />
-                      <input
-                        v-model.number="section.score_per_question"
-                        type="number"
-                        min="0.5"
-                        max="20"
-                        step="0.5"
-                        class="col-span-4 sm:col-span-2 bg-background border border-input rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-primary text-sm"
-                        :aria-label="`${questionTypeLabel(section.type)} 分值`"
-                      />
-                      <select
-                        v-model="section.difficulty"
-                        class="col-span-4 sm:col-span-5 bg-background border border-input rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-primary text-sm"
-                        :aria-label="`${questionTypeLabel(section.type)} 难度`"
-                      >
-                        <option value="">跟随全局</option>
-                        <option value="adaptive">自适应</option>
-                        <option value="easy">简单</option>
-                        <option value="medium">中等</option>
-                        <option value="hard">困难</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-                <p class="text-[11px] text-muted-foreground">
-                  当前蓝图总题数：{{ paperSectionTotalCount }}（默认建议不超过 20）
-                </p>
-              </div>
-            </div>
-
             <Button
               class="w-full"
               size="lg"
-              :disabled="!selectedKbId || !canGenerateQuiz"
+              :disabled="!selectedKbId || !canGenerateQuiz || quizActionBlocked"
               :loading="busy.quiz"
               @click="generateQuiz"
             >
@@ -324,6 +92,255 @@
               </template>
               {{ busy.quiz ? '正在生成题目…' : '生成新测验' }}
             </Button>
+            <p v-if="quizActionBlocked" class="text-xs text-amber-700">
+              先到设置中心完成模型接入配置，测验生成功能才可用。
+            </p>
+
+            <AdvancedPanel
+              title="高级选项"
+              eyebrow="临时调节"
+              description="聚焦知识点、默认值保存、自适应依据和考试模式都收在这里。"
+              :default-open="quizAdvancedDefaultOpen"
+              content-class="max-h-[56vh] overflow-y-auto pr-1"
+            >
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  class="rounded-xl border border-border bg-background px-3 py-3 text-sm font-semibold hover:bg-accent transition-colors disabled:opacity-50"
+                  :disabled="settingsStore.savingUser"
+                  @click="saveCurrentQuizDefaults"
+                >
+                  {{ settingsStore.savingUser ? '保存中…' : '保存当前配置为默认' }}
+                </button>
+                <button
+                  type="button"
+                  class="rounded-xl border border-border bg-background px-3 py-3 text-sm font-semibold hover:bg-accent transition-colors"
+                  @click="router.push('/settings')"
+                >
+                  去设置中心
+                </button>
+              </div>
+
+              <div v-if="selectedKbId" class="space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">重点知识点（可选）</label>
+                  <button
+                    v-if="quizFocusConcepts.length"
+                    type="button"
+                    class="text-[10px] text-muted-foreground hover:text-foreground"
+                    @click="clearQuizFocusConcepts"
+                  >
+                    清空
+                  </button>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+                  <input
+                    v-model="quizFocusSearch"
+                    type="text"
+                    placeholder="搜索重点知识点（如：牛顿定律）"
+                    class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
+                    @keydown.enter.prevent="addSelectedQuizFocusCandidate"
+                  />
+                  <button
+                    type="button"
+                    class="px-3 py-2 rounded-lg border border-input bg-background text-sm hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                    :disabled="busy.focusKeypoints || !quizFocusCandidate"
+                    @click="addSelectedQuizFocusCandidate"
+                  >
+                    添加
+                  </button>
+                </div>
+                <select
+                  v-model="quizFocusCandidate"
+                  class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
+                  :disabled="busy.focusKeypoints || !filteredQuizFocusOptions.length"
+                >
+                  <option value="">{{ quizFocusSelectPlaceholder }}</option>
+                  <option v-for="item in filteredQuizFocusOptions" :key="item.id" :value="item.text">
+                    {{ item.text }}
+                  </option>
+                </select>
+                <p class="text-[10px] text-muted-foreground">
+                  仅显示当前资料范围内可用于出题的重点知识点；若限定文档，只展示该文档相关内容。
+                </p>
+                <p class="text-[10px] text-muted-foreground">
+                  当前可出题范围：{{ scopeConceptCount }} 个重点知识点
+                </p>
+                <div v-if="quizFocusConcepts.length" class="flex flex-wrap gap-2">
+                  <span
+                    v-for="(concept, idx) in quizFocusConcepts"
+                    :key="`${concept}-${idx}`"
+                    class="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-primary/20 bg-primary/10 text-primary text-[11px] font-semibold"
+                  >
+                    <span>{{ concept }}</span>
+                    <button
+                      type="button"
+                      class="text-primary/80 hover:text-primary"
+                      :aria-label="`移除重点知识点 ${concept}`"
+                      @click="removeQuizFocusConcept(idx)"
+                    >
+                      ×
+                    </button>
+                  </span>
+                </div>
+              </div>
+
+              <div v-if="autoAdapt" class="space-y-3 rounded-xl border border-border bg-background/50 p-3">
+                <div class="flex items-center justify-between gap-2">
+                  <p class="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">自适应依据</p>
+                  <span
+                    v-if="adaptiveLoading"
+                    class="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-border text-muted-foreground"
+                  >
+                    更新中…
+                  </span>
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-semibold">{{ adaptiveInsight.levelMeta.text }}</p>
+                    <p class="text-[11px] text-muted-foreground">{{ quizAdaptiveModeSummary }}</p>
+                  </div>
+                  <span
+                    class="text-[10px] font-semibold px-2 py-1 rounded-full border"
+                    :class="adaptiveInsight.levelMeta.badgeClass"
+                  >
+                    {{ adaptiveInsight.levelMeta.code }}
+                  </span>
+                </div>
+
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span>参考难度分配</span>
+                    <span>{{ adaptivePlanSummary }}</span>
+                  </div>
+                  <div class="space-y-1.5">
+                    <div v-for="item in adaptivePlanBars" :key="item.key" class="space-y-1">
+                      <div class="flex items-center justify-between text-[11px]">
+                        <span class="text-muted-foreground">{{ item.label }}</span>
+                        <span class="font-semibold">{{ item.percent }}%</span>
+                      </div>
+                      <div class="h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div class="h-full transition-all duration-300" :class="item.barClass" :style="{ width: `${item.percent}%` }"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <p class="text-xs text-muted-foreground leading-relaxed">{{ quizAdaptiveReasonText }}</p>
+
+                <div v-if="adaptiveWeakConcepts.length" class="space-y-2">
+                  <p class="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">薄弱知识点 Top 3</p>
+                  <div class="flex flex-wrap gap-1.5">
+                    <span
+                      v-for="concept in adaptiveWeakConcepts"
+                      :key="concept"
+                      class="px-2 py-0.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] font-semibold"
+                    >
+                      {{ concept }}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-2 text-[11px]">
+                  <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
+                    <p class="text-muted-foreground">正确率</p>
+                    <p class="font-semibold">{{ adaptiveInsight.signals.recentAccuracyPercent }}%</p>
+                  </div>
+                  <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
+                    <p class="text-muted-foreground">挫败感</p>
+                    <p class="font-semibold">{{ adaptiveInsight.signals.frustrationPercent }}%</p>
+                  </div>
+                  <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
+                    <p class="text-muted-foreground">累计尝试</p>
+                    <p class="font-semibold">{{ adaptiveInsight.signals.totalAttempts }}</p>
+                  </div>
+                </div>
+
+                <p v-if="adaptiveError" class="text-[11px] text-amber-700">{{ adaptiveError }}</p>
+              </div>
+
+              <div class="space-y-3 rounded-xl border border-border bg-accent/20 p-3">
+                <div class="flex items-center justify-between gap-2">
+                  <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">考试模式（高级）</label>
+                  <button
+                    type="button"
+                    class="px-2 py-1 rounded-md border border-input text-xs font-semibold transition-colors"
+                    :class="usePaperBlueprint ? 'bg-primary/10 text-primary border-primary/30' : 'bg-background text-muted-foreground'"
+                    @click="usePaperBlueprint = !usePaperBlueprint"
+                  >
+                    {{ usePaperBlueprint ? '已开启' : '默认基础模式' }}
+                  </button>
+                </div>
+                <div v-if="usePaperBlueprint" class="space-y-3">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div class="space-y-1">
+                      <label class="text-[11px] text-muted-foreground">试卷标题</label>
+                      <input
+                        v-model="paperTitle"
+                        type="text"
+                        maxlength="64"
+                        class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
+                      />
+                    </div>
+                    <div class="space-y-1">
+                      <label class="text-[11px] text-muted-foreground">时长（分钟）</label>
+                      <input
+                        v-model.number="paperDurationMinutes"
+                        type="number"
+                        min="5"
+                        max="240"
+                        class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div class="space-y-2">
+                    <p class="text-[11px] text-muted-foreground">题型配置（数量/分值/难度）</p>
+                    <div class="space-y-2">
+                      <div
+                        v-for="section in paperSections"
+                        :key="section.type"
+                        class="grid grid-cols-12 gap-2 items-center"
+                      >
+                        <p class="col-span-12 sm:col-span-3 text-xs font-semibold">
+                          {{ questionTypeLabel(section.type) }}
+                        </p>
+                        <input
+                          v-model.number="section.count"
+                          type="number"
+                          min="0"
+                          max="20"
+                          class="col-span-4 sm:col-span-2 bg-background border border-input rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-primary text-sm"
+                          :aria-label="`${questionTypeLabel(section.type)} 数量`"
+                        />
+                        <input
+                          v-model.number="section.score_per_question"
+                          type="number"
+                          min="0.5"
+                          max="20"
+                          step="0.5"
+                          class="col-span-4 sm:col-span-2 bg-background border border-input rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-primary text-sm"
+                          :aria-label="`${questionTypeLabel(section.type)} 分值`"
+                        />
+                        <select
+                          v-model="section.difficulty"
+                          class="col-span-4 sm:col-span-5 bg-background border border-input rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-primary text-sm"
+                          :aria-label="`${questionTypeLabel(section.type)} 难度`"
+                        >
+                          <option value="">跟随全局</option>
+                          <option value="adaptive">自适应</option>
+                          <option value="easy">简单</option>
+                          <option value="medium">中等</option>
+                          <option value="hard">困难</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                  <p class="text-[11px] text-muted-foreground">
+                    当前高级模式总题数：{{ paperSectionTotalCount }}（建议不超过 20）
+                  </p>
+                </div>
+              </div>
+            </AdvancedPanel>
           </div>
         </section>
 
@@ -412,7 +429,7 @@
 
       <!-- Right: Quiz Content -->
       <section class="lg:col-span-2 space-y-4 md:space-y-6 relative">
-        <LoadingOverlay :show="busy.quiz" message="正在根据知识库生成题目…" />
+        <LoadingOverlay :show="busy.quiz" message="正在根据资料库生成题目…" />
         <div v-if="quiz" class="space-y-6">
           <div v-for="(q, idx) in quiz.questions" :id="`question-${idx + 1}`" :key="idx" class="bg-card border border-border rounded-xl p-4 sm:p-6 shadow-sm space-y-4 transition-all" :class="{ 'border-primary/50 ring-1 ring-primary/20': quizResult }">
             <div class="flex items-start gap-4">
@@ -569,7 +586,7 @@
           <div v-if="hasMasteryUpdates" class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
             <h3 class="text-lg font-bold">知识点掌握度变化</h3>
             <p v-if="isKbQuizResultContext" class="text-xs text-muted-foreground">
-              以下知识点反馈已按知识库口径去重合并统计。
+              以下知识点反馈已按资料库口径去重合并统计。
             </p>
             <div class="grid grid-cols-1 gap-3">
               <div v-for="mu in masteryUpdates" :key="mu.keypoint_id"
@@ -648,7 +665,7 @@
 <script setup>
 import { ref, onMounted, onActivated, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { PenTool, Sparkles, CheckCircle2, XCircle, SlidersHorizontal } from 'lucide-vue-next'
+import { PenTool, Sparkles, CheckCircle2, XCircle } from 'lucide-vue-next'
 import { apiGet, apiPost, getDifficultyPlan, getProfile } from '../api'
 import AnimatedNumber from '../components/ui/AnimatedNumber.vue'
 import { useToast } from '../composables/useToast'
@@ -658,6 +675,8 @@ import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingOverlay from '../components/ui/LoadingOverlay.vue'
 import KnowledgeScopePicker from '../components/context/KnowledgeScopePicker.vue'
+import ContextSummaryBar from '../components/context/ContextSummaryBar.vue'
+import AdvancedPanel from '../components/ui/AdvancedPanel.vue'
 import { masteryLabel, masteryPercent, masteryBadgeClass, masteryBorderClass } from '../utils/mastery'
 import { renderMarkdown, renderMarkdownInline } from '../utils/markdown'
 import { buildRouteContextQuery, normalizeDifficulty, parseRouteContext } from '../utils/routeContext'
@@ -684,7 +703,7 @@ const quizResult = ref(null)
 const quizCount = ref(5)
 const quizDifficulty = ref('medium')
 const autoAdapt = ref(true)
-const usePaperBlueprint = ref(true)
+const usePaperBlueprint = ref(false)
 const paperTitle = ref('自动组卷')
 const paperDurationMinutes = ref(20)
 const paperSections = ref([])
@@ -732,6 +751,13 @@ const entryKbContextName = computed(() => {
   if (kb?.name) return kb.name
   return `${entryKbContextId.value.slice(0, 8)}...`
 })
+const selectedKbName = computed(() => {
+  const kb = kbs.value.find((item) => item.id === selectedKbId.value)
+  return kb?.name || ''
+})
+const selectedDoc = computed(() => {
+  return docsInKb.value.find((item) => item.id === selectedDocId.value) || null
+})
 const entryDocContextName = computed(() => {
   if (!entryDocContextId.value) return ''
   const doc = docsInKb.value.find((item) => item.id === entryDocContextId.value)
@@ -741,23 +767,34 @@ const entryDocContextName = computed(() => {
 const hasAnyKb = computed(() => kbs.value.length > 0)
 const quizEmptyTitle = computed(() => {
   if (!hasAnyKb.value) return '先上传文档再开始测验'
-  if (!selectedKbId.value) return '先选择知识库'
+  if (!selectedKbId.value) return '先选择资料库'
   return '准备好检验掌握程度了吗？'
 })
 const quizEmptyDescription = computed(() => {
-  if (!hasAnyKb.value) return '当前还没有知识库，上传并解析文档后才能生成测验。'
-  if (!selectedKbId.value) return '在左侧选择目标知识库，并按需设置题量与难度。'
-  return '已选知识库后可直接生成专属测验，系统会根据配置生成题目。'
+  if (!hasAnyKb.value) return '当前还没有资料库，上传并解析文档后才能生成测验。'
+  if (!selectedKbId.value) return '先选择资料范围，再决定题量和难度。'
+  return '已选资料范围后可直接生成测验，不必先研究高级配置。'
 })
 const quizEmptyHint = computed(() => {
   if (!hasAnyKb.value) return '上传完成后返回本页即可一键生成题目。'
-  if (!selectedKbId.value) return '开启自适应模式后，系统会自动调整题目难度。'
-  return '生成后可提交批改，并查看错题归类与能力变化。'
+  if (!selectedKbId.value) return '默认会按当前资料库范围出题，如有需要再限定到具体文档。'
+  return '生成后可直接提交批改，再查看错题归类与能力变化。'
 })
 const quizEmptyPrimaryAction = computed(() => {
   if (!hasAnyKb.value) return { label: '去上传文档' }
   if (!selectedKbId.value) return null
-  return { label: '生成新测验', loading: busy.value.quiz }
+  return {
+    label: '生成新测验',
+    loading: busy.value.quiz,
+    disabled: quizActionBlocked.value,
+  }
+})
+const quizAdvancedDefaultOpen = computed(() => Boolean(settingsStore.effectiveSettings?.ui?.show_advanced_controls))
+const providerSetup = computed(() => settingsStore.providerSetup)
+const quizActionBlocked = computed(() => {
+  const setup = providerSetup.value
+  if (!setup) return false
+  return !setup.llm_ready || !setup.embedding_ready
 })
 const scopedQuizFocusOptions = computed(() => {
   const options = Array.isArray(quizFocusOptions.value) ? quizFocusOptions.value : []
@@ -1352,6 +1389,10 @@ async function refreshDocsInKb() {
 }
 
 async function generateQuiz(options = {}) {
+  if (quizActionBlocked.value) {
+    showToast('先完成模型接入配置，再生成测验', 'error')
+    return
+  }
   if (!selectedKbId.value) return
   const scopeConcepts = collectScopeConceptsForGenerate()
   if (!scopeConcepts.length) {

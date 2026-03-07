@@ -62,7 +62,7 @@
         class="hidden lg:flex w-full items-center justify-center p-2 rounded-md hover:bg-accent transition-colors"
         @click="collapsed = !collapsed"
       >
-        <component :is="collapsed ? 'ChevronRight' : 'ChevronLeft'" class="w-5 h-5" />
+        <component :is="collapsed ? ChevronRight : ChevronLeft" class="w-5 h-5" />
       </button>
     </div>
   </aside>

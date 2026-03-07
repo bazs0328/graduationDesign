@@ -6,7 +6,22 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 
 import App from '@/App.vue'
 import { routes } from '@/router'
-import { apiDelete, apiGet, apiPatch, apiPost, apiUploadWithProgress } from '@/api'
+import {
+  apiDelete,
+  apiGet,
+  apiPatch,
+  apiPost,
+  apiUploadWithProgress,
+  getSettings,
+  authMe,
+  getSystemProviderSettings,
+  getSystemSettings,
+} from '@/api'
+import {
+  buildProviderConfigResponse,
+  buildSettingsResponse,
+  buildSystemSettingsResponse,
+} from './fixtures/settingsFixtures'
 
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal()
@@ -17,6 +32,10 @@ vi.mock('@/api', async (importOriginal) => {
     apiPatch: vi.fn(),
     apiDelete: vi.fn(),
     apiUploadWithProgress: vi.fn(),
+    getSettings: vi.fn(),
+    authMe: vi.fn(),
+    getSystemSettings: vi.fn(),
+    getSystemProviderSettings: vi.fn(),
   }
 })
 
@@ -56,6 +75,10 @@ beforeEach(() => {
   apiPatch.mockReset()
   apiDelete.mockReset()
   apiUploadWithProgress.mockReset()
+  getSettings.mockReset()
+  authMe.mockReset()
+  getSystemSettings.mockReset()
+  getSystemProviderSettings.mockReset()
   localStorage.clear()
 
   apiGet.mockImplementation((path) => {
@@ -125,6 +148,10 @@ beforeEach(() => {
   apiPatch.mockResolvedValue({})
   apiDelete.mockResolvedValue({})
   apiUploadWithProgress.mockResolvedValue({})
+  getSettings.mockResolvedValue(buildSettingsResponse())
+  authMe.mockResolvedValue({ user_id: 'test', username: 'test', name: 'test', access_token: 'test-token' })
+  getSystemSettings.mockResolvedValue(buildSystemSettingsResponse())
+  getSystemProviderSettings.mockResolvedValue(buildProviderConfigResponse())
 })
 
 describe('Upload pagination', () => {
@@ -158,4 +185,3 @@ describe('Upload pagination', () => {
     expect(wrapper.text()).toContain('第 2 / 2 页')
   })
 })
-

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-import { apiSsePost } from '@/api'
+import { apiSsePost, authMe } from '@/api'
 
 function makeReaderFromChunks(chunks) {
   const encoder = new TextEncoder()
@@ -65,5 +65,23 @@ describe('apiSsePost', () => {
     expect(onChunk).toHaveBeenNthCalledWith(2, { delta: ' World' })
     expect(onSources).toHaveBeenCalledWith(expect.objectContaining({ retrieved_count: 1 }))
     expect(onDone).toHaveBeenCalledWith(expect.objectContaining({ result: 'ok' }))
+  })
+
+  it('sends bearer token when calling authMe', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ user_id: 'u-1', username: 'tester', name: 'tester', access_token: 'fresh-token' }),
+    })
+
+    await authMe()
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:8000/api/auth/me',
+      expect.objectContaining({
+        headers: expect.any(Headers),
+      }),
+    )
+    const [, options] = global.fetch.mock.calls[0]
+    expect(options.headers.get('Authorization')).toBe('Bearer test-token')
   })
 })

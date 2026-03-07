@@ -10,20 +10,6 @@ from app.core.config import Settings, settings
 
 # Keep secrets and storage paths in env only; expose non-secret system tuning knobs.
 EDITABLE_SYSTEM_KEYS: tuple[str, ...] = (
-    "llm_provider",
-    "embedding_provider",
-    "openai_model",
-    "openai_embedding_model",
-    "gemini_model",
-    "gemini_embedding_model",
-    "deepseek_base_url",
-    "deepseek_model",
-    "deepseek_embedding_model",
-    "qwen_base_url",
-    "qwen_model",
-    "qwen_embedding_model",
-    "dashscope_embedding_model",
-    "dashscope_base_url",
     "auth_require_login",
     "auth_allow_legacy_user_id",
     "chunk_size",

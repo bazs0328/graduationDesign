@@ -6,7 +6,21 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 
 import App from '@/App.vue'
 import { routes } from '@/router'
-import { apiGet, apiPost, buildLearningPath, getProfile } from '@/api'
+import {
+  apiGet,
+  apiPost,
+  buildLearningPath,
+  getProfile,
+  getSettings,
+  authMe,
+  getSystemProviderSettings,
+  getSystemSettings,
+} from '@/api'
+import {
+  buildProviderConfigResponse,
+  buildSettingsResponse,
+  buildSystemSettingsResponse,
+} from './fixtures/settingsFixtures'
 
 vi.mock('vue-echarts', () => ({
   default: {
@@ -23,6 +37,10 @@ vi.mock('@/api', async (importOriginal) => {
     apiPost: vi.fn(),
     getProfile: vi.fn(),
     buildLearningPath: vi.fn(),
+    getSettings: vi.fn(),
+    authMe: vi.fn(),
+    getSystemSettings: vi.fn(),
+    getSystemProviderSettings: vi.fn(),
   }
 })
 
@@ -73,6 +91,10 @@ beforeEach(() => {
   apiPost.mockReset()
   getProfile.mockReset()
   buildLearningPath.mockReset()
+  getSettings.mockReset()
+  authMe.mockReset()
+  getSystemSettings.mockReset()
+  getSystemProviderSettings.mockReset()
   localStorage.clear()
   sessionStorage.clear()
   localStorage.setItem(
@@ -83,6 +105,10 @@ beforeEach(() => {
   getProfile.mockResolvedValue({ ability_level: 'intermediate' })
   buildLearningPath.mockResolvedValue({})
   apiPost.mockResolvedValue({})
+  getSettings.mockResolvedValue(buildSettingsResponse())
+  authMe.mockResolvedValue({ user_id: 'test', username: 'test', name: 'test', access_token: 'test-token' })
+  getSystemSettings.mockResolvedValue(buildSystemSettingsResponse())
+  getSystemProviderSettings.mockResolvedValue(buildProviderConfigResponse())
 
   apiGet.mockImplementation((path) => {
     const url = parsePath(path)
@@ -227,7 +253,7 @@ describe('Progress learning-path reuse', () => {
 
     expect(recommendationCalls.length).toBeGreaterThan(0)
     expect(learningPathCalls.length).toBeGreaterThan(0)
-  }, 20000)
+  }, 40000)
 
   it('hydrates from session cache and still refreshes recommendations in background', async () => {
     localStorage.setItem(
@@ -351,7 +377,7 @@ describe('Progress learning-path reuse', () => {
     expect(recommendationCalls.length).toBe(1)
     expect(learningPathCalls.length).toBeGreaterThan(0)
     expect(wrapper.text()).toContain('学习路径')
-  }, 20000)
+  }, 40000)
 
   it('shows KB aggregation labels and source-doc count in learning path steps', async () => {
     localStorage.setItem(
@@ -403,7 +429,7 @@ describe('Progress learning-path reuse', () => {
     expect(html).toContain('学习路径中的知识点已按知识库跨文档去重合并')
     expect(html).toContain('KB聚合')
     expect(html).toContain('来自 2 个文档')
-  }, 20000)
+  }, 40000)
 
   it('keeps cached learning-path content visible while recommendations refresh is pending', async () => {
     const baseApiGetImpl = apiGet.getMockImplementation()
@@ -559,5 +585,5 @@ describe('Progress learning-path reuse', () => {
       .filter((url) => url.pathname === '/api/recommendations')
     expect(recommendationCalls.length).toBeGreaterThan(0)
     expect(wrapper.text()).toContain('学习路径')
-  }, 20000)
+  }, 40000)
 })

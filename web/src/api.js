@@ -20,15 +20,16 @@ function createErrorWithStatus(message, status) {
 }
 
 function buildAuthHeaders(path, headersLike) {
-  const isAuth = path.includes('/api/auth')
+  const isAuthPath = /^\/api\/auth(\/|$)/.test(path)
+  const isAnonymousAuth = /^\/api\/auth\/(login|register)(\/|$)/.test(path)
   const headers = new Headers(headersLike || undefined)
-  if (!isAuth) {
+  if (!isAnonymousAuth) {
     const token = getAccessToken()
     if (token) {
       headers.set('Authorization', `Bearer ${token}`)
     }
   }
-  return { headers, isAuth }
+  return { headers, isAuth: isAuthPath }
 }
 
 async function parseErrorResponse(res) {
@@ -223,6 +224,13 @@ export async function authLogin(username, password) {
   return apiPost('/api/auth/login', { username, password })
 }
 
+export async function authMe(userId = '') {
+  const params = new URLSearchParams()
+  if (userId) params.set('user_id', userId)
+  const suffix = params.toString()
+  return apiGet(`/api/auth/me${suffix ? `?${suffix}` : ''}`)
+}
+
 export function getCurrentUser() {
   return getCurrentUserFromSession()
 }
@@ -391,10 +399,22 @@ export async function getSystemSettings() {
   return apiGet('/api/settings/system')
 }
 
+export async function getSystemProviderSettings() {
+  return apiGet('/api/settings/system/providers')
+}
+
 export async function patchSystemSettings(payload) {
   return apiPatch('/api/settings/system', payload)
 }
 
+export async function patchSystemProviderSettings(payload) {
+  return apiPatch('/api/settings/system/providers', payload)
+}
+
 export async function resetSystemSettings(payload = {}) {
   return apiPost('/api/settings/system/reset', payload)
+}
+
+export async function testSystemProviderSettings(payload) {
+  return apiPost('/api/settings/system/providers/test', payload)
 }

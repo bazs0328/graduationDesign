@@ -99,6 +99,7 @@ class SettingsSystemStatus(BaseModel):
     pdf_parser_mode: str
     auth_require_login: bool
     secrets_configured: Dict[str, bool] = {}
+    provider_setup: Optional["ProviderSetupStatus"] = None
     version_info: Dict[str, Any] = {}
 
 
@@ -166,6 +167,124 @@ class SystemSettingsResetRequest(BaseModel):
     keys: Optional[List[str]] = None
 
     model_config = ConfigDict(extra="forbid")
+
+
+class ProviderSetupStatus(BaseModel):
+    llm_ready: bool = False
+    embedding_ready: bool = False
+    missing: List[str] = []
+    current_llm_provider: str = "unconfigured"
+    current_embedding_provider: str = "unconfigured"
+
+
+class RegionPresetOption(BaseModel):
+    id: Literal["china", "international", "custom"]
+    label: str
+    base_url: Optional[str] = None
+
+
+class DeepSeekProviderState(BaseModel):
+    api_key_configured: bool = False
+    api_key_masked: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    embedding_model: Optional[str] = None
+
+
+class QwenProviderState(BaseModel):
+    api_key_configured: bool = False
+    api_key_masked: Optional[str] = None
+    region: Optional[Literal["china", "international", "custom"]] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    embedding_model: Optional[str] = None
+
+
+class DashScopeProviderState(BaseModel):
+    region: Optional[Literal["china", "international", "custom"]] = None
+    base_url: Optional[str] = None
+    embedding_model: Optional[str] = None
+    using_shared_api_key: bool = True
+
+
+class ProviderConfigState(BaseModel):
+    llm_provider: str = "auto"
+    embedding_provider: str = "auto"
+    deepseek: DeepSeekProviderState = Field(default_factory=DeepSeekProviderState)
+    qwen: QwenProviderState = Field(default_factory=QwenProviderState)
+    dashscope: DashScopeProviderState = Field(default_factory=DashScopeProviderState)
+
+
+class ProviderConfigResponse(BaseModel):
+    editable: bool = True
+    read_only_reason: Optional[str] = None
+    supported_llm_providers: List[str] = []
+    supported_embedding_providers: List[str] = []
+    region_presets: Dict[str, List[RegionPresetOption]] = {}
+    effective: ProviderConfigState = Field(default_factory=ProviderConfigState)
+    setup: ProviderSetupStatus = Field(default_factory=ProviderSetupStatus)
+
+
+class DeepSeekProviderPatch(BaseModel):
+    api_key: Optional[str] = None
+    clear_api_key: Optional[bool] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    embedding_model: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class QwenProviderPatch(BaseModel):
+    api_key: Optional[str] = None
+    clear_api_key: Optional[bool] = None
+    region: Optional[Literal["china", "international", "custom"]] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    embedding_model: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DashScopeProviderPatch(BaseModel):
+    region: Optional[Literal["china", "international", "custom"]] = None
+    base_url: Optional[str] = None
+    embedding_model: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProviderConfigValues(BaseModel):
+    llm_provider: Optional[Literal["auto", "deepseek", "qwen"]] = None
+    embedding_provider: Optional[Literal["auto", "deepseek", "qwen", "dashscope"]] = None
+    deepseek: Optional[DeepSeekProviderPatch] = None
+    qwen: Optional[QwenProviderPatch] = None
+    dashscope: Optional[DashScopeProviderPatch] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProviderConfigPatchRequest(BaseModel):
+    values: ProviderConfigValues
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProviderConfigTestRequest(BaseModel):
+    values: ProviderConfigValues = Field(default_factory=ProviderConfigValues)
+    target: Literal["auto", "llm", "embedding"] = "auto"
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProviderConfigTestResponse(BaseModel):
+    ok: bool = False
+    provider: str = "unconfigured"
+    target: Literal["llm", "embedding"] = "llm"
+    message: str = ""
+
+
+SettingsSystemStatus.model_rebuild()
 
 
 class DocumentOut(BaseModel):

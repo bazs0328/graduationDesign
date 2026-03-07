@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full flex flex-col max-w-6xl mx-auto space-y-0">
+  <div class="min-h-full flex flex-col max-w-6xl mx-auto space-y-0">
     <!-- Learning Path Context Banner -->
     <section
       v-if="effectiveQaFocusContext"
@@ -18,12 +18,18 @@
         该目标来自你在本页手动选择的已解锁聚合知识点。
       </p>
       <p v-if="selectedKbId" class="text-xs text-muted-foreground mt-1">
-        该学习目标可能关联同一知识库中的多个文档来源。
+        该学习目标可能关联同一资料库中的多个文档来源。
       </p>
     </section>
-    <div class="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-8 overflow-hidden min-h-0">
+    <ContextSummaryBar
+      :kb-name="selectedKb?.name || ''"
+      :doc-name="selectedDoc?.filename || ''"
+      :focus="effectiveQaFocusContext"
+      subtitle="回答和引用会优先基于这里展示的资料范围"
+    />
+    <div class="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-8 min-h-0">
       <!-- Left: Chat Interface -->
-      <section class="flex-1 flex flex-col bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+      <section class="flex-1 min-h-0 flex flex-col bg-card border border-border rounded-xl shadow-sm overflow-hidden">
         <!-- Header -->
         <div class="p-3 sm:p-4 border-b border-border flex items-center justify-between gap-3 bg-card/50">
           <div class="flex items-center gap-3">
@@ -35,45 +41,30 @@
               class="lg:hidden px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-border hover:bg-accent transition-colors"
               @click="qaSidebarOpen = !qaSidebarOpen"
             >
-              {{ qaSidebarOpen ? '收起面板' : '上下文面板' }}
-            </button>
-            <button @click="clearLocalMessages" class="p-2 hover:bg-accent rounded-lg transition-colors text-muted-foreground" title="仅清空本地显示">
-              <Trash2 class="w-5 h-5" />
+              {{ qaSidebarOpen ? '收起资料面板' : '资料面板' }}
             </button>
           </div>
         </div>
         <div class="px-4 py-3 border-b border-border/80 bg-gradient-to-r from-accent/40 via-background to-background">
-          <div class="flex flex-wrap items-center gap-2">
-            <span
-              v-for="stage in qaFlowStages"
-              :key="stage.key"
-              class="px-2 py-1 rounded-full border text-[10px] font-semibold tracking-wide"
-              :class="qaFlowPhaseChipClass(stage.key)"
-            >
-              {{ stage.label }}
-            </span>
+          <div class="flex items-start justify-between gap-4">
+            <div class="space-y-1">
+              <p class="text-[10px] font-bold uppercase tracking-[0.22em] text-primary/80">当前状态</p>
+              <p class="text-sm font-semibold">{{ qaFlowPrimaryText }}</p>
+              <p class="text-xs text-muted-foreground">
+                {{ qaFlowSecondaryText }}
+              </p>
+            </div>
             <span
               v-if="qaFlow.usedFallback"
               class="px-2 py-1 rounded-full border border-amber-300 bg-amber-50 text-amber-700 text-[10px] font-semibold tracking-wide"
             >
-              已回退非流式
+              已自动回退
             </span>
-          </div>
-          <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-            <p class="text-muted-foreground">
-              {{ qaFlow.message || '等待提问…' }}
-            </p>
-            <p v-if="qaFlow.retrievedCount > 0" class="text-muted-foreground">
-              检索到 {{ qaFlow.retrievedCount }} 个片段
-            </p>
-            <p v-if="qaFlow.timings.total_ms" class="text-muted-foreground">
-              总耗时 {{ qaFlow.timings.total_ms }} ms
-            </p>
           </div>
         </div>
 
         <!-- Messages -->
-        <div class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6" ref="scrollContainer">
+        <div class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6" ref="scrollContainer">
           <EmptyState
             v-if="qaMessages.length === 0"
             class="h-full max-w-md mx-auto"
@@ -92,7 +83,7 @@
               :class="msg.role === 'question' ? 'bg-primary text-primary-foreground rounded-tr-none' : 'bg-accent text-accent-foreground rounded-tl-none'"
             >
               <div class="flex items-center gap-2 mb-1 opacity-70 text-[10px] font-bold uppercase tracking-wider">
-                <component :is="msg.role === 'question' ? 'User' : 'Bot'" class="w-3 h-3" />
+                <component :is="msg.role === 'question' ? User : Bot" class="w-3 h-3" />
                 {{ msg.role === 'question' ? '你' : 'AI 辅导' }}
                 <span
                   v-if="msg.role !== 'question' && msg.abilityLevel"
@@ -175,7 +166,7 @@
               <div v-if="msg.sources && msg.sources.length" class="mt-4 pt-3 border-t border-accent-foreground/10 space-y-2">
                 <p class="text-[10px] font-bold uppercase opacity-50">参考来源（{{ msg.sources.length }}）</p>
                 <p v-if="selectedKbId" class="text-[10px] opacity-60">
-                  来源可能来自该知识库下多个文档片段。
+                  来源可能来自该资料库下多个文档片段。
                 </p>
                 <div class="flex flex-wrap gap-2">
                   <button
@@ -194,57 +185,28 @@
         </div>
 
         <!-- Input -->
-        <div class="p-3 sm:p-4 border-t border-border bg-card/50">
-          <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div class="p-3 sm:p-4 border-t border-border bg-card/50 space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
             <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
               <Sparkles class="w-3.5 h-3.5 text-primary" />
               回答模式
             </div>
-            <div class="flex items-center gap-2">
-              <div class="inline-flex rounded-lg border border-border bg-background p-1">
-                <button
-                  class="px-3 py-1.5 rounded-md text-xs font-semibold transition-colors"
-                  :class="qaMode === 'normal' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'"
-                  :disabled="busy.qa"
-                  @click="qaMode = 'normal'"
-                >
-                  标准回答
-                </button>
-                <button
-                  class="px-3 py-1.5 rounded-md text-xs font-semibold transition-colors"
-                  :class="qaMode === 'explain' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'"
-                  :disabled="busy.qa"
-                  @click="qaMode = 'explain'"
-                >
-                  分步讲解
-                </button>
-              </div>
+            <div class="inline-flex rounded-lg border border-border bg-background p-1">
               <button
-                type="button"
-                class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-semibold transition-colors"
-                :class="qaAutoAdapt ? 'border-primary/30 bg-primary/10 text-primary' : 'border-border bg-background text-muted-foreground hover:bg-accent'"
+                class="px-3 py-1.5 rounded-md text-xs font-semibold transition-colors"
+                :class="qaMode === 'normal' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'"
                 :disabled="busy.qa"
-                @click="setQaAutoAdapt(!qaAutoAdapt)"
+                @click="qaMode = 'normal'"
               >
-                <span>{{ qaAutoAdapt ? '自适应开' : '自适应关' }}</span>
-                <span class="hidden sm:inline">{{ qaAutoAdapt ? '按画像动态调整' : '固定回答策略' }}</span>
+                标准回答
               </button>
               <button
-                type="button"
-                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-2 text-xs font-semibold hover:bg-accent transition-colors disabled:opacity-50"
-                :disabled="busy.qa || settingsStore.savingUser"
-                @click="saveCurrentQaModeAsDefault"
-              >
-                {{ settingsStore.savingUser ? '保存中…' : '保存为默认' }}
-              </button>
-              <button
-                type="button"
-                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-2 text-xs font-semibold hover:bg-accent transition-colors"
+                class="px-3 py-1.5 rounded-md text-xs font-semibold transition-colors"
+                :class="qaMode === 'explain' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'"
                 :disabled="busy.qa"
-                @click="router.push('/settings')"
+                @click="qaMode = 'explain'"
               >
-                <SlidersHorizontal class="w-3.5 h-3.5" />
-                设置
+                分步讲解
               </button>
             </div>
           </div>
@@ -254,32 +216,148 @@
               @keydown.enter.prevent="askQuestion"
               :placeholder="effectiveQaFocusContext ? `关于「${effectiveQaFocusContext}」，你想了解什么？` : '在此输入你的问题…'"
               class="flex-1 bg-background border border-input rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary resize-none h-[88px] sm:h-[52px]"
-              :disabled="!selectedKbId || busy.qa"
+              :disabled="!selectedKbId || busy.qa || qaActionBlocked"
             ></textarea>
             <button
               @click="askQuestion"
               class="bg-primary text-primary-foreground p-3 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center sm:w-auto w-full"
-              :disabled="!selectedKbId || !qaInput.trim() || busy.qa"
+              :disabled="!selectedKbId || !qaInput.trim() || busy.qa || qaActionBlocked"
             >
               <Send class="w-6 h-6" />
             </button>
           </div>
-          <p v-if="!selectedKbId" class="text-[10px] text-destructive mt-2 text-center font-bold uppercase tracking-widest">
-            请先选择知识库
+          <p v-if="!selectedKbId" class="text-[10px] text-destructive mt-1 text-center font-bold uppercase tracking-widest">
+            请先在右侧选择资料范围
           </p>
+          <p v-else-if="qaActionBlocked" class="text-[10px] text-amber-700 mt-1 text-center font-bold uppercase tracking-widest">
+            先完成模型接入配置再开始提问
+          </p>
+          <AdvancedPanel
+            title="高级选项"
+            eyebrow="临时调节"
+            description="把不需要每次都调整的选项收在这里，默认提问时无需展开。"
+            :default-open="qaAdvancedDefaultOpen"
+            content-class="max-h-[42vh] overflow-y-auto pr-1"
+          >
+            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+              <button
+                type="button"
+                class="inline-flex items-center justify-between gap-2 rounded-xl border px-3 py-3 text-sm font-semibold transition-colors"
+                :class="qaAutoAdapt ? 'border-primary/30 bg-primary/10 text-primary' : 'border-border bg-background text-muted-foreground hover:bg-accent'"
+                :disabled="busy.qa"
+                @click="setQaAutoAdapt(!qaAutoAdapt)"
+              >
+                <span>{{ qaAutoAdapt ? '自适应开启' : '自适应关闭' }}</span>
+                <span class="text-xs">{{ qaAutoAdapt ? '按画像动态调整' : '固定回答策略' }}</span>
+              </button>
+              <button
+                type="button"
+                class="rounded-xl border border-border bg-background px-3 py-3 text-sm font-semibold hover:bg-accent transition-colors disabled:opacity-50"
+                :disabled="busy.qa || settingsStore.savingUser"
+                @click="saveCurrentQaModeAsDefault"
+              >
+                {{ settingsStore.savingUser ? '保存中…' : '保存为默认' }}
+              </button>
+              <button
+                type="button"
+                class="rounded-xl border border-border bg-background px-3 py-3 text-sm font-semibold hover:bg-accent transition-colors"
+                :disabled="busy.qa"
+                @click="router.push('/settings')"
+              >
+                去设置中心
+              </button>
+              <button
+                type="button"
+                class="rounded-xl border border-border bg-background px-3 py-3 text-sm font-semibold hover:bg-accent transition-colors"
+                @click="clearLocalMessages"
+              >
+                清空当前显示
+              </button>
+            </div>
+
+            <div v-if="qaAutoAdapt" class="rounded-xl border border-border bg-background p-4 space-y-3">
+              <div class="flex items-center justify-between gap-2">
+                <div>
+                  <p class="text-[10px] font-bold uppercase tracking-[0.22em] text-muted-foreground">回答自适应依据</p>
+                  <p class="mt-1 text-sm font-semibold">{{ currentLevelMeta.text }}</p>
+                </div>
+                <span class="text-[10px] font-semibold px-2 py-1 rounded-full border" :class="currentLevelMeta.badgeClass">
+                  {{ currentLevelMeta.code }}
+                </span>
+              </div>
+
+              <p class="text-sm text-muted-foreground">{{ adaptiveModeSummary }}</p>
+
+              <div class="space-y-2">
+                <div class="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>难度分配</span>
+                  <span>{{ adaptivePlanSummary }}</span>
+                </div>
+                <div class="space-y-1.5">
+                  <div v-for="item in adaptivePlanBars" :key="item.key" class="space-y-1">
+                    <div class="flex items-center justify-between text-[11px]">
+                      <span class="text-muted-foreground">{{ item.label }}</span>
+                      <span class="font-semibold">{{ item.percent }}%</span>
+                    </div>
+                    <div class="h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div class="h-full transition-all duration-300" :class="item.barClass" :style="{ width: `${item.percent}%` }"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <p class="text-xs text-muted-foreground leading-relaxed">{{ adaptiveReasonText }}</p>
+
+              <div v-if="adaptiveWeakConcepts.length" class="space-y-2">
+                <p class="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">薄弱知识点 Top 3</p>
+                <div class="flex flex-wrap gap-1.5">
+                  <span
+                    v-for="concept in adaptiveWeakConcepts"
+                    :key="concept"
+                    class="px-2 py-0.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] font-semibold"
+                  >
+                    {{ concept }}
+                  </span>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-3 gap-2 text-[11px]">
+                <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
+                  <p class="text-muted-foreground">正确率</p>
+                  <p class="font-semibold">{{ adaptiveInsight.signals.recentAccuracyPercent }}%</p>
+                </div>
+                <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
+                  <p class="text-muted-foreground">挫败感</p>
+                  <p class="font-semibold">{{ adaptiveInsight.signals.frustrationPercent }}%</p>
+                </div>
+                <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
+                  <p class="text-muted-foreground">累计尝试</p>
+                  <p class="font-semibold">{{ adaptiveInsight.signals.totalAttempts }}</p>
+                </div>
+              </div>
+
+              <p v-if="adaptiveError" class="text-[11px] text-amber-700">{{ adaptiveError }}</p>
+            </div>
+          </AdvancedPanel>
         </div>
       </section>
 
       <!-- Right: Knowledge Base Selection -->
       <aside
-        class="w-full lg:w-72 space-y-4 lg:space-y-6 flex-col min-h-0 overflow-y-auto pr-1"
+        class="w-full lg:w-80 xl:w-[22rem] shrink-0 space-y-4 lg:space-y-6 flex-col min-h-0 overflow-y-auto pr-1 pb-2"
         :class="qaSidebarOpen ? 'flex' : 'hidden lg:flex'"
       >
-        <div class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
+        <AdvancedPanel
+          title="范围"
+          eyebrow="资料范围"
+          description="先确定当前基于哪份资料提问，必要时再进一步聚焦到某个重点。"
+          :default-open="true"
+          content-class="max-h-[52vh] overflow-y-auto pr-1"
+        >
           <div class="flex items-center justify-between gap-3">
             <div class="flex items-center gap-3">
-              <Database class="w-6 h-6 text-primary" />
-              <h2 class="text-xl font-bold">上下文</h2>
+              <Database class="w-5 h-5 text-primary" />
+              <div class="text-sm font-semibold">当前资料范围</div>
             </div>
             <button
               type="button"
@@ -290,6 +368,7 @@
               <PanelRightClose class="w-5 h-5" />
             </button>
           </div>
+
           <template v-if="busy.init">
             <SkeletonBlock type="list" :lines="3" />
           </template>
@@ -302,17 +381,19 @@
             :kb-loading="appContext.kbsLoading"
             :docs-loading="busy.docs"
             mode="kb-and-optional-doc"
+            kb-label="目标资料库"
             doc-label="限定文档（可选）"
             @update:kb-id="selectedKbId = $event"
             @update:doc-id="selectedDocId = $event"
           >
             <p class="text-[11px] text-muted-foreground">
-              常用问答偏好可在设置中心配置；这里保留页面内临时切换。
+              默认按整个资料库回答；如果你只想围绕某份文档提问，可继续限定文档。
             </p>
           </KnowledgeScopePicker>
+
           <div v-if="selectedKbId" class="space-y-2">
             <div class="flex items-center justify-between gap-2">
-              <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">重点聚合知识点（可选）</label>
+              <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">重点知识点（可选）</label>
               <button
                 v-if="qaManualFocus"
                 type="button"
@@ -326,7 +407,7 @@
               <input
                 v-model="qaFocusSearch"
                 type="text"
-                placeholder="搜索聚合知识点（如：牛顿定律）"
+                placeholder="搜索重点知识点（如：牛顿定律）"
                 class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
                 @keydown.enter.prevent="applySelectedQaFocusCandidate"
               />
@@ -350,170 +431,42 @@
               </option>
             </select>
             <p class="text-[10px] text-muted-foreground">
-              选项来自“当前范围内已解锁”的聚合知识点；若已选择文档，仅显示该文档相关聚合知识点。
+              仅显示当前资料范围内可用的重点知识点。
             </p>
             <p class="text-[10px] text-muted-foreground">
-              当前生效聚焦：{{ effectiveQaFocusContext || '未设置' }}
-            </p>
-            <p v-if="qaManualFocus" class="text-[10px] text-primary">
-              已手动设置，将优先于学习路径带入目标。
+              当前聚焦：{{ effectiveQaFocusContext || '未设置' }}
             </p>
           </div>
-        </div>
 
-        <div v-if="qaAutoAdapt" class="bg-card border border-border rounded-xl p-4 shadow-sm space-y-3">
-          <div class="flex items-center justify-between gap-2">
-            <p class="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">自适应依据</p>
-            <span
-              v-if="adaptiveLoading"
-              class="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-border text-muted-foreground"
-            >
-              更新中…
-            </span>
-          </div>
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-sm font-semibold">{{ currentLevelMeta.text }}</p>
-              <p class="text-[11px] text-muted-foreground">{{ adaptiveModeSummary }}</p>
+          <div v-if="selectedKb" class="grid grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-3 text-[11px]">
+            <div class="min-w-0 rounded-lg border border-border bg-accent/20 px-3 py-2">
+              <p class="text-muted-foreground leading-tight break-words">资料库文档</p>
+              <p class="mt-1 text-sm font-semibold">{{ Array.isArray(docsInKb) ? docsInKb.length : 0 }}</p>
             </div>
-            <span class="text-[10px] font-semibold px-2 py-1 rounded-full border" :class="currentLevelMeta.badgeClass">
-              {{ currentLevelMeta.code }}
-            </span>
-          </div>
-
-          <div class="space-y-2">
-            <div class="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>难度分配</span>
-              <span>{{ adaptivePlanSummary }}</span>
+            <div class="min-w-0 rounded-lg border border-border bg-accent/20 px-3 py-2">
+              <p class="text-muted-foreground leading-tight break-words">相关会话</p>
+              <p class="mt-1 text-sm font-semibold">{{ selectedKbSessions.length }}</p>
             </div>
-            <div class="space-y-1.5">
-              <div v-for="item in adaptivePlanBars" :key="item.key" class="space-y-1">
-                <div class="flex items-center justify-between text-[11px]">
-                  <span class="text-muted-foreground">{{ item.label }}</span>
-                  <span class="font-semibold">{{ item.percent }}%</span>
-                </div>
-                <div class="h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div class="h-full transition-all duration-300" :class="item.barClass" :style="{ width: `${item.percent}%` }"></div>
-                </div>
-              </div>
+            <div class="min-w-0 rounded-lg border border-border bg-accent/20 px-3 py-2">
+              <p class="text-muted-foreground leading-tight break-words">就绪文档</p>
+              <p class="mt-1 text-sm font-semibold text-green-600">{{ docsReadyCount }}</p>
+            </div>
+            <div class="min-w-0 rounded-lg border border-border bg-accent/20 px-3 py-2">
+              <p class="text-muted-foreground leading-tight break-words">处理中 / 失败</p>
+              <p class="mt-1 text-sm font-semibold">
+                <span class="text-blue-600">{{ docsProcessingCount }}</span>/<span class="text-destructive">{{ docsErrorCount }}</span>
+              </p>
             </div>
           </div>
+        </AdvancedPanel>
 
-          <p class="text-xs text-muted-foreground leading-relaxed">{{ adaptiveReasonText }}</p>
-
-          <div v-if="adaptiveWeakConcepts.length" class="space-y-2">
-            <p class="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">薄弱知识点 Top 3</p>
-            <div class="flex flex-wrap gap-1.5">
-              <span
-                v-for="concept in adaptiveWeakConcepts"
-                :key="concept"
-                class="px-2 py-0.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] font-semibold"
-              >
-                {{ concept }}
-              </span>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-3 gap-2 text-[11px]">
-            <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
-              <p class="text-muted-foreground">正确率</p>
-              <p class="font-semibold">{{ adaptiveInsight.signals.recentAccuracyPercent }}%</p>
-            </div>
-            <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
-              <p class="text-muted-foreground">挫败感</p>
-              <p class="font-semibold">{{ adaptiveInsight.signals.frustrationPercent }}%</p>
-            </div>
-            <div class="rounded-lg border border-border bg-accent/30 px-2 py-1.5 text-center">
-              <p class="text-muted-foreground">累计尝试</p>
-              <p class="font-semibold">{{ adaptiveInsight.signals.totalAttempts }}</p>
-            </div>
-          </div>
-
-          <p v-if="adaptiveError" class="text-[11px] text-amber-700">{{ adaptiveError }}</p>
-        </div>
-
-        <div class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-3">
-          <div class="flex items-center justify-between gap-2">
-            <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground">会话管理</h3>
-            <button
-              class="text-[10px] font-semibold px-2 py-1 rounded border border-border hover:bg-accent"
-              :disabled="busy.sessionAction || !selectedKbId"
-              @click="createSession"
-            >
-              新建会话
-            </button>
-          </div>
-          <div class="space-y-2">
-            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">历史会话</label>
-            <select
-              v-model="selectedSessionId"
-              class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
-            >
-              <option value="">未选择（将自动新建）</option>
-              <option v-for="session in sessionSelectOptions" :key="session.id" :value="session.id">
-                {{ sessionLabel(session) }}
-              </option>
-            </select>
-            <div
-              v-if="sessionsTotal > 0"
-              class="flex items-center justify-between gap-2 text-[10px] text-muted-foreground"
-            >
-              <span>第 {{ sessionsPageNumber }} / {{ sessionsTotalPages }} 页（共 {{ sessionsTotal }} 条）</span>
-              <div class="flex items-center gap-1">
-                <button
-                  class="px-2 py-1 rounded border border-border hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
-                  :disabled="busy.sessions || sessionsOffset <= 0"
-                  @click="goToPrevSessionsPage"
-                >
-                  上一页
-                </button>
-                <button
-                  class="px-2 py-1 rounded border border-border hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
-                  :disabled="busy.sessions || !sessionsHasMore"
-                  @click="goToNextSessionsPage"
-                >
-                  下一页
-                </button>
-              </div>
-            </div>
-          </div>
-          <div v-if="selectedSessionId" class="space-y-2">
-            <input
-              v-model="sessionTitleInput"
-              type="text"
-              placeholder="会话名称"
-              class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
-            />
-            <div class="grid grid-cols-3 gap-2">
-              <button
-                class="text-xs py-2 rounded border border-border hover:bg-accent"
-                :disabled="busy.sessionAction"
-                @click="renameCurrentSession"
-              >
-                重命名
-              </button>
-              <button
-                class="text-xs py-2 rounded border border-border hover:bg-accent"
-                :disabled="busy.sessionAction"
-                @click="clearCurrentSessionMessages"
-              >
-                清空消息
-              </button>
-              <button
-                class="text-xs py-2 rounded border border-destructive/40 text-destructive hover:bg-destructive/10"
-                :disabled="busy.sessionAction"
-                @click="deleteCurrentSession"
-              >
-                删除会话
-              </button>
-            </div>
-          </div>
-          <p class="text-[10px] text-muted-foreground">
-            顶部垃圾桶仅清空本地显示，不会清空服务端会话消息。
-          </p>
-        </div>
-
-        <div class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
+        <AdvancedPanel
+          title="来源"
+          eyebrow="回答来源"
+          description="提问后可以在这里查看回答引用的片段，以及检索和生成的耗时。"
+          :default-open="false"
+          content-class="max-h-[44vh] overflow-y-auto pr-1"
+        >
           <div class="flex items-center justify-between gap-2">
             <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground">本次回答来源</h3>
             <span
@@ -523,9 +476,6 @@
               {{ qaFlowPanelBadgeText }}
             </span>
           </div>
-          <p v-if="selectedKbId" class="text-xs text-muted-foreground -mt-1">
-            本次回答来源可能来自该知识库下多个文档片段。
-          </p>
           <div class="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
             <span v-if="qaFlow.retrievedCount > 0" class="px-2 py-1 rounded border border-border bg-accent/20">
               {{ UX_TEXT.retrievedContentLabel }} {{ qaFlow.retrievedCount }}
@@ -535,6 +485,9 @@
             </span>
             <span v-if="qaFlow.timings.generate_ms" class="px-2 py-1 rounded border border-border bg-accent/20">
               生成 {{ qaFlow.timings.generate_ms }} ms
+            </span>
+            <span v-if="qaFlow.timings.total_ms" class="px-2 py-1 rounded border border-border bg-accent/20">
+              总耗时 {{ qaFlow.timings.total_ms }} ms
             </span>
           </div>
 
@@ -568,77 +521,96 @@
             :hint="busy.qa ? UX_TEXT.waitingSources : '点击来源项可查看原文片段。'"
             size="sm"
           />
-        </div>
+        </AdvancedPanel>
 
-        <div class="flex-1 bg-card border border-border rounded-xl p-6 shadow-sm flex flex-col min-h-0">
-          <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-4">简要统计</h3>
-          <div v-if="busy.init" class="mt-2">
-            <SkeletonBlock type="card" :lines="5" />
+        <AdvancedPanel
+          title="会话"
+          eyebrow="会话管理"
+          description="如果你想保留连续追问或清理历史记录，可在这里处理。"
+          :default-open="false"
+          content-class="max-h-[52vh] overflow-y-auto pr-1"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground">历史会话</h3>
+            <button
+              class="text-[10px] font-semibold px-2 py-1 rounded border border-border hover:bg-accent"
+              :disabled="busy.sessionAction || !selectedKbId"
+              @click="createSession"
+            >
+              新建会话
+            </button>
           </div>
-          <div v-else-if="selectedKb" class="space-y-4 overflow-y-auto pr-2">
-            <div class="p-3 bg-accent/30 rounded-lg border border-border">
-              <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">当前知识库</p>
-              <p class="text-sm font-semibold truncate">{{ selectedKb.name || selectedKb.id }}</p>
-            </div>
-            <div class="grid grid-cols-2 gap-3">
-              <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
-                <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">总文档</p>
-                <p class="text-lg font-bold">{{ Array.isArray(docsInKb) ? docsInKb.length : 0 }}</p>
+          <div class="space-y-2">
+            <select
+              v-model="selectedSessionId"
+              class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
+            >
+              <option value="">未选择（将自动新建）</option>
+              <option v-for="session in sessionSelectOptions" :key="session.id" :value="session.id">
+                {{ sessionLabel(session) }}
+              </option>
+            </select>
+            <div
+              v-if="sessionsTotal > 0"
+              class="flex items-center justify-between gap-2 text-[10px] text-muted-foreground"
+            >
+              <span>第 {{ sessionsPageNumber }} / {{ sessionsTotalPages }} 页（共 {{ sessionsTotal }} 条）</span>
+              <div class="flex items-center gap-1">
+                <button
+                  class="px-2 py-1 rounded border border-border hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="busy.sessions || sessionsOffset <= 0"
+                  @click="goToPrevSessionsPage"
+                >
+                  上一页
+                </button>
+                <button
+                  class="px-2 py-1 rounded border border-border hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="busy.sessions || !sessionsHasMore"
+                  @click="goToNextSessionsPage"
+                >
+                  下一页
+                </button>
               </div>
-              <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
-                <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">相关会话</p>
-                <p class="text-lg font-bold">{{ selectedKbSessions.length }}</p>
-              </div>
-              <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
-                <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">就绪</p>
-                <p class="text-lg font-bold text-green-600">{{ docsReadyCount }}</p>
-              </div>
-              <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
-                <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">处理中/失败</p>
-                <p class="text-lg font-bold">
-                  <span class="text-blue-600">{{ docsProcessingCount }}</span>/<span class="text-destructive">{{ docsErrorCount }}</span>
-                </p>
-              </div>
-            </div>
-            <div class="p-3 bg-accent/20 rounded-lg border border-border">
-              <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">当前会话消息数</p>
-              <p class="text-sm font-semibold">{{ qaMessages.length }} 条</p>
-            </div>
-            
-            <!-- Doc Stats -->
-            <div v-if="selectedDoc" class="space-y-4">
-              <div class="p-3 bg-accent/30 rounded-lg border border-border">
-                <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">当前文档</p>
-                <p class="text-sm font-semibold truncate">{{ selectedDoc.filename }}</p>
-              </div>
-              <div class="grid grid-cols-2 gap-3">
-                <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
-                  <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">页数</p>
-                  <p class="text-lg font-bold">{{ selectedDoc.num_pages }}</p>
-                </div>
-                <div class="p-3 bg-accent/30 rounded-lg border border-border text-center">
-                  <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">块数</p>
-                  <p class="text-lg font-bold">{{ selectedDoc.num_chunks }}</p>
-                </div>
-              </div>
-            </div>
-            <div v-else class="p-3 bg-accent/30 rounded-lg border border-border">
-              <p class="text-[10px] uppercase font-bold text-muted-foreground mb-1">用途说明</p>
-              <p class="text-sm text-muted-foreground leading-relaxed">
-                这里用于快速确认问答上下文：当前知识库状态、文档处理进度与会话规模。
-              </p>
             </div>
           </div>
-          <EmptyState
-            v-else
-            :icon="FileText"
-            title="选择知识库后查看统计"
-            description="右侧会展示当前问答上下文、文档状态和会话规模。"
-            hint="先选择知识库，再开始提问或切换会话。"
-            size="sm"
-          />
-        </div>
 
+          <div v-if="selectedSessionId" class="space-y-2">
+            <input
+              v-model="sessionTitleInput"
+              type="text"
+              placeholder="会话名称"
+              class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm"
+            />
+            <div class="grid grid-cols-3 gap-2">
+              <button
+                class="text-xs py-2 rounded border border-border hover:bg-accent"
+                :disabled="busy.sessionAction"
+                @click="renameCurrentSession"
+              >
+                重命名
+              </button>
+              <button
+                class="text-xs py-2 rounded border border-border hover:bg-accent"
+                :disabled="busy.sessionAction"
+                @click="clearCurrentSessionMessages"
+              >
+                清空消息
+              </button>
+              <button
+                class="text-xs py-2 rounded border border-destructive/40 text-destructive hover:bg-destructive/10"
+                :disabled="busy.sessionAction"
+                @click="deleteCurrentSession"
+              >
+                删除会话
+              </button>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-border bg-accent/20 px-3 py-3 text-xs text-muted-foreground space-y-1">
+            <p>当前显示消息：{{ qaMessages.length }} 条</p>
+            <p>“清空当前显示”只影响本页显示，不会删除服务端历史记录。</p>
+          </div>
+        </AdvancedPanel>
       </aside>
     </div>
     <SourcePreviewModal
@@ -658,16 +630,17 @@
 <script setup>
 import { ref, onMounted, onActivated, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MessageSquare, Send, Trash2, Database, FileText, Sparkles, User, Bot, SlidersHorizontal, PanelRightClose } from 'lucide-vue-next'
+import { MessageSquare, Send, Database, FileText, Sparkles, User, Bot, PanelRightClose } from 'lucide-vue-next'
 import { apiDelete, apiGet, apiPatch, apiPost, apiSsePost, getDifficultyPlan, getProfile } from '../api'
 import { useToast } from '../composables/useToast'
 import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import { useSettingsStore } from '../stores/settings'
 import EmptyState from '../components/ui/EmptyState.vue'
-import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import SourcePreviewModal from '../components/ui/SourcePreviewModal.vue'
 import KnowledgeScopePicker from '../components/context/KnowledgeScopePicker.vue'
+import ContextSummaryBar from '../components/context/ContextSummaryBar.vue'
+import AdvancedPanel from '../components/ui/AdvancedPanel.vue'
 import { parseExplainMarkdownSections } from '../utils/qaExplain'
 import { renderMarkdown } from '../utils/markdown'
 import { parseRouteContext } from '../utils/routeContext'
@@ -742,14 +715,6 @@ const scrollContainer = ref(null)
 const lastQaSubmitFingerprint = ref('')
 const lastQaSubmitAt = ref(0)
 
-const QA_FLOW_STAGES = [
-  { key: 'retrieving', label: UX_TEXT.retrievalInProgress },
-  { key: 'generating', label: '生成中' },
-  { key: 'saving', label: '保存中' },
-  { key: 'done', label: '完成' },
-  { key: 'failed', label: '失败' },
-]
-
 const STREAM_NON_FALLBACK_CODES = new Set(['validation_error', 'not_found', 'no_results'])
 const QA_EXPLAIN_DISPLAY_THRESHOLD = 3
 const QA_SUBMIT_DEDUPE_WINDOW_MS = 1200
@@ -811,16 +776,16 @@ const docsErrorCount = computed(() =>
 const hasAnyKb = computed(() => kbs.value.length > 0)
 const qaEmptyTitle = computed(() => {
   if (!hasAnyKb.value) return '先上传文档再开始问答'
-  if (!selectedKbId.value) return '先选择一个知识库'
+  if (!selectedKbId.value) return '先选择一个资料库'
   return '开始你的第一次提问'
 })
 const qaEmptyDescription = computed(() => {
-  if (!hasAnyKb.value) return '当前还没有知识库，上传文档后即可开始基于资料的学习问答。'
-  if (!selectedKbId.value) return '在右侧上下文面板选择知识库后，输入框会自动解锁。'
-  return '可以提问概念解释、公式推导、对比分析，AI 会结合知识库内容回答。'
+  if (!hasAnyKb.value) return '当前还没有资料库，上传文档后即可开始基于资料的学习问答。'
+  if (!selectedKbId.value) return '在右侧资料面板选择资料库后，输入框会自动解锁。'
+  return '可以提问概念解释、公式推导、对比分析，AI 会结合当前资料库内容回答。'
 })
 const qaEmptyHint = computed(() => {
-  if (!hasAnyKb.value) return '上传并解析完成后，可按知识库或文档范围提问。'
+  if (!hasAnyKb.value) return '上传并解析完成后，可按资料库或文档范围提问。'
   if (!selectedKbId.value) return '如需限定范围，可继续选择某个文档进行问答。'
   return effectiveQaFocusContext.value
     ? `已聚焦知识点「${effectiveQaFocusContext.value}」，可直接围绕该知识点提问。`
@@ -830,6 +795,33 @@ const qaEmptyPrimaryAction = computed(() => {
   if (!hasAnyKb.value) return { label: '去上传文档' }
   if (!selectedKbId.value) return null
   return { label: '填入示例问题', variant: 'secondary' }
+})
+const qaAdvancedDefaultOpen = computed(() => Boolean(settingsStore.effectiveSettings?.ui?.show_advanced_controls))
+const providerSetup = computed(() => settingsStore.providerSetup)
+const qaActionBlocked = computed(() => {
+  const setup = providerSetup.value
+  if (!setup) return false
+  return !setup.llm_ready || !setup.embedding_ready
+})
+const qaFlowPrimaryText = computed(() => {
+  const phase = qaFlow.value.phase
+  if (phase === 'retrieving') return '正在查找资料'
+  if (phase === 'generating' || phase === 'saving') return '正在生成回答'
+  if (phase === 'done') return '已完成'
+  if (phase === 'failed') return '失败'
+  return '等待提问'
+})
+const qaFlowSecondaryText = computed(() => {
+  if (qaFlow.value.phase === 'done' && qaFlow.value.result === 'no_results') {
+    return '这次没有找到足够相关的内容，可以换个问法或缩小资料范围。'
+  }
+  if (qaFlow.value.phase === 'failed') {
+    return qaFlow.value.message || '本次提问未成功完成。'
+  }
+  if (effectiveQaFocusContext.value) {
+    return `当前已围绕「${effectiveQaFocusContext.value}」聚焦提问。`
+  }
+  return '输入问题后，系统会自动基于当前资料范围组织回答。'
 })
 
 const adaptiveInsight = computed(() =>
@@ -906,7 +898,6 @@ const qaFocusSelectPlaceholder = computed(() => {
   return selectedDocId.value ? '该文档暂无可选聚合知识点' : '暂无可选聚合知识点'
 })
 const entryDocContextId = computed(() => parseRouteContext(route.query).docId)
-const qaFlowStages = QA_FLOW_STAGES
 const latestAssistantMessage = computed(() => {
   for (let i = qaMessages.value.length - 1; i >= 0; i -= 1) {
     const msg = qaMessages.value[i]
@@ -1059,17 +1050,6 @@ function updateQaFlow(patch = {}) {
   }
 }
 
-function qaFlowPhaseChipClass(stageKey) {
-  const phase = qaFlow.value.phase
-  const isCurrent = phase === stageKey
-  const isDone = phase === 'done' && (stageKey === 'retrieving' || stageKey === 'generating' || stageKey === 'saving' || stageKey === 'done')
-
-  if (phase === 'failed' && stageKey === 'failed') return 'border-red-300 bg-red-50 text-red-700'
-  if (qaFlow.value.result === 'no_results' && stageKey === 'done') return 'border-amber-300 bg-amber-50 text-amber-700'
-  if (isCurrent || isDone) return 'border-primary/30 bg-primary/10 text-primary'
-  return 'border-border text-muted-foreground'
-}
-
 function qaMessageStatusText(msg) {
   if (!msg || msg.role === 'question') return ''
   if (msg.status === 'pending') return '排队中'
@@ -1129,7 +1109,8 @@ function applyExplainStateToAssistantMessage(msg) {
   return msg
 }
 
-function makeAssistantPlaceholder() {
+function makeAssistantPlaceholder(requestedMode = qaMode.value) {
+  const normalizedRequestedMode = normalizeQaMode(requestedMode)
   return applyExplainStateToAssistantMessage({
     role: 'answer',
     content: '',
@@ -1138,9 +1119,9 @@ function makeAssistantPlaceholder() {
     streaming: true,
     status: 'pending',
     errorCode: null,
-    requestedMode: qaMode.value,
-    resolvedMode: qaMode.value,
-    displayMode: qaMode.value === 'explain' ? 'explain' : 'normal',
+    requestedMode: normalizedRequestedMode,
+    resolvedMode: normalizedRequestedMode,
+    displayMode: normalizedRequestedMode === 'explain' ? 'explain' : 'normal',
     explainSections: [],
     explainMissing: [],
     explainIncomplete: false,
@@ -1174,11 +1155,12 @@ function isStreamErrorRetryable(err) {
   return true
 }
 
-function buildQaPayload(question, activeSessionId) {
+function buildQaPayload(question, activeSessionId, requestedMode = qaMode.value) {
+  const normalizedRequestedMode = normalizeQaMode(requestedMode)
   const payload = {
     question,
     user_id: resolvedUserId.value,
-    mode: normalizeQaMode(qaMode.value),
+    mode: normalizedRequestedMode,
   }
   const topK = Number(effectiveQaSettings.value?.top_k)
   if (Number.isFinite(topK) && topK > 0) {
@@ -1243,7 +1225,7 @@ function fillSampleQuestion() {
     qaInput.value = `请用通俗的方式讲解「${effectiveQaFocusContext.value}」，并给出一个简单例子。`
     return
   }
-  qaInput.value = '请先概括这个知识库中最重要的3个概念，并说明它们之间的关系。'
+  qaInput.value = '请先概括这个资料库中最重要的 3 个概念，并说明它们之间的关系。'
 }
 
 function handleQaEmptyPrimary() {
@@ -1484,7 +1466,7 @@ async function loadSessionMessages(sessionId) {
 
 function sessionLabel(session) {
   const title = session.title || '未命名会话'
-  const kbText = session.kb_id ? `KB:${session.kb_id}` : '无KB'
+  const kbText = session.kb_id ? `资料库：${session.kb_id}` : '未绑定资料库'
   return `${title} (${kbText})`
 }
 
@@ -1492,7 +1474,7 @@ async function createSession(options = {}) {
   const { silent = false, activate = true } = options
   if (!selectedKbId.value) {
     if (!silent) {
-      showToast('请先选择知识库', 'error')
+      showToast('请先选择资料库', 'error')
     }
     return null
   }
@@ -1686,14 +1668,14 @@ async function maybeAutoAskFromRoute() {
   if (!selectedKbId.value && !selectedSessionId.value) {
     if (autoQaMissingContextToastKey.value !== routeKey) {
       autoQaMissingContextToastKey.value = routeKey
-      showToast('请先选择知识库后再发送', 'error')
+      showToast('请先选择资料库后再发送', 'error')
     }
     return
   }
 
   lastAutoQaRouteKey.value = routeKey
   try {
-    await askQuestion()
+    await askQuestion({ modeOverride: parsed.qaMode })
   } finally {
     await clearTransientQaRouteParams({
       clearFocus: parsed.qaFrom === 'quiz_wrong',
@@ -1745,7 +1727,12 @@ async function refreshAdaptiveTransparency() {
   }
 }
 
-async function askQuestion() {
+async function askQuestion(options = {}) {
+  const requestedMode = normalizeQaMode(options?.modeOverride || qaMode.value)
+  if (qaActionBlocked.value) {
+    showToast('先完成模型接入配置后再开始提问', 'error')
+    return
+  }
   if (!selectedKbId.value || !qaInput.value.trim() || busy.value.qa) return
   
   const question = qaInput.value.trim()
@@ -1753,7 +1740,7 @@ async function askQuestion() {
   if (isDuplicateQaSubmit(submitFingerprint)) return
   qaInput.value = ''
   qaMessages.value.push({ role: 'question', content: question })
-  const placeholderIndex = qaMessages.value.push(makeAssistantPlaceholder()) - 1
+  const placeholderIndex = qaMessages.value.push(makeAssistantPlaceholder(requestedMode)) - 1
   
   resetQaFlow()
   updateQaFlow({
@@ -1768,7 +1755,7 @@ async function askQuestion() {
     if (!activeSessionId) {
       activeSessionId = await createSession({ silent: true, activate: false })
     }
-    const payload = buildQaPayload(question, activeSessionId)
+    const payload = buildQaPayload(question, activeSessionId, requestedMode)
 
     let streamDone = false
     await apiSsePost('/api/qa/stream', payload, {

@@ -8,6 +8,12 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.knowledge_bases import ensure_kb
 from app.core.llm import embedding_provider_status, llm_provider_status
+from app.core.provider_config import (
+    get_provider_config_payload,
+    patch_provider_config,
+    provider_setup_status,
+    test_provider_connection,
+)
 from app.core.runtime_overrides import (
     get_system_settings_payload,
     patch_system_overrides,
@@ -22,6 +28,10 @@ from app.db import get_db
 from app.models import KnowledgeBase, User
 from app.schemas import (
     KbSettingsPayload,
+    ProviderConfigPatchRequest,
+    ProviderConfigResponse,
+    ProviderConfigTestRequest,
+    ProviderConfigTestResponse,
     SettingsMeta,
     SettingsPatchRequest,
     SettingsResetRequest,
@@ -167,6 +177,7 @@ def _system_status() -> SettingsSystemStatus:
         pdf_parser_mode=settings.pdf_parser_mode,
         auth_require_login=bool(settings.auth_require_login),
         secrets_configured=secrets_configured,
+        provider_setup=provider_setup_status(),
         version_info={"app_name": settings.app_name},
     )
 
@@ -292,6 +303,11 @@ def get_system_settings():
     return SystemSettingsResponse.model_validate(get_system_settings_payload())
 
 
+@router.get("/system/providers", response_model=ProviderConfigResponse)
+def get_system_provider_settings():
+    return ProviderConfigResponse.model_validate(get_provider_config_payload())
+
+
 @router.patch("/system", response_model=SystemSettingsResponse)
 def patch_system_settings(payload: SystemSettingsPatchRequest):
     try:
@@ -308,3 +324,26 @@ def reset_system_settings(payload: SystemSettingsResetRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return SystemSettingsResponse.model_validate(get_system_settings_payload())
+
+
+@router.patch("/system/providers", response_model=ProviderConfigResponse)
+def patch_system_provider_settings(payload: ProviderConfigPatchRequest):
+    try:
+        patch_provider_config(payload.values.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ProviderConfigResponse.model_validate(get_provider_config_payload())
+
+
+@router.post("/system/providers/test", response_model=ProviderConfigTestResponse)
+def test_system_provider_settings(payload: ProviderConfigTestRequest):
+    try:
+        result = test_provider_connection(
+            payload.values.model_dump(exclude_unset=True),
+            target=payload.target,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return ProviderConfigTestResponse.model_validate(result)

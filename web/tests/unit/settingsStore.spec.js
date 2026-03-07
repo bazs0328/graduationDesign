@@ -3,88 +3,50 @@ import { createPinia, setActivePinia } from 'pinia'
 
 vi.mock('../../src/api', () => ({
   getSettings: vi.fn(),
+  getSystemProviderSettings: vi.fn(),
   getSystemSettings: vi.fn(),
   patchKbSettings: vi.fn(),
+  patchSystemProviderSettings: vi.fn(),
   patchSystemSettings: vi.fn(),
   patchUserSettings: vi.fn(),
   resetSettings: vi.fn(),
   resetSystemSettings: vi.fn(),
+  testSystemProviderSettings: vi.fn(),
 }))
 
 import {
   getSettings,
+  getSystemProviderSettings,
   getSystemSettings,
   patchKbSettings,
+  patchSystemProviderSettings,
   patchSystemSettings,
   patchUserSettings,
   resetSettings,
   resetSystemSettings,
+  testSystemProviderSettings,
 } from '../../src/api'
 import { useSettingsStore } from '../../src/stores/settings'
-
-function buildSettingsResponse(overrides = {}) {
-  return {
-    system_status: {
-      llm_provider: 'qwen',
-      embedding_provider: 'dashscope',
-      llm_provider_configured: 'qwen',
-      embedding_provider_configured: 'dashscope',
-      llm_provider_source: 'manual',
-      embedding_provider_source: 'manual',
-      qa_defaults_from_env: { qa_top_k: 4, qa_fetch_k: 12, rag_mode: 'hybrid' },
-      ocr_enabled: true,
-      pdf_parser_mode: 'auto',
-      auth_require_login: true,
-      secrets_configured: { qwen_api_key: true },
-      version_info: { app_name: 'GradTutor' },
-    },
-    user_defaults: {
-      qa: { mode: 'normal', retrieval_preset: 'balanced', top_k: null, fetch_k: null },
-      quiz: { count_default: 5, auto_adapt_default: true, difficulty_default: 'medium' },
-      ui: { show_advanced_controls: false, density: 'comfortable' },
-      upload: { post_upload_suggestions: true },
-    },
-    kb_overrides: null,
-    effective: {
-      qa: { mode: 'normal', retrieval_preset: 'balanced', top_k: 4, fetch_k: 12 },
-      quiz: { count_default: 5, auto_adapt_default: true, difficulty_default: 'medium' },
-      ui: { show_advanced_controls: false, density: 'comfortable' },
-      upload: { post_upload_suggestions: true },
-    },
-    meta: {
-      qa_modes: ['normal', 'explain'],
-      retrieval_presets: ['fast', 'balanced', 'deep'],
-      quiz_difficulty_options: ['easy', 'medium', 'hard'],
-      preset_map: {
-        fast: { top_k: 3, fetch_k: 8 },
-        balanced: { top_k: 4, fetch_k: 12 },
-        deep: { top_k: 6, fetch_k: 20 },
-      },
-      ranges: { qa: { top_k_min: 1, top_k_max: 20, fetch_k_min: 1, fetch_k_max: 50 } },
-      defaults: {},
-    },
-    ...overrides,
-  }
-}
-
-function buildSystemSettingsResponse(overrides = {}) {
-  return {
-    editable_keys: ['qa_top_k', 'qa_fetch_k', 'rag_mode', 'ocr_enabled'],
-    overrides: { qa_top_k: 4, qa_fetch_k: 12, rag_mode: 'hybrid' },
-    effective: { qa_top_k: 4, qa_fetch_k: 12, rag_mode: 'hybrid', ocr_enabled: true },
-    ...overrides,
-  }
-}
+import {
+  buildProviderConfigResponse,
+  buildSettingsResponse,
+  buildSystemSettingsResponse,
+} from './fixtures/settingsFixtures'
 
 describe('settings store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    getSystemProviderSettings.mockResolvedValue(buildProviderConfigResponse())
   })
 
   it('loads settings and tracks dirty state for user defaults save', async () => {
     getSettings.mockResolvedValueOnce(buildSettingsResponse())
-    getSystemSettings.mockResolvedValueOnce(buildSystemSettingsResponse())
+    getSystemSettings.mockResolvedValueOnce(buildSystemSettingsResponse({
+      editable_keys: ['qa_top_k', 'qa_fetch_k', 'rag_mode', 'ocr_enabled'],
+      overrides: { qa_top_k: 4, qa_fetch_k: 12, rag_mode: 'hybrid' },
+      effective: { qa_top_k: 4, qa_fetch_k: 12, rag_mode: 'hybrid', ocr_enabled: true },
+    }))
     patchUserSettings.mockResolvedValueOnce(
       buildSettingsResponse({
         user_defaults: {
@@ -127,7 +89,11 @@ describe('settings store', () => {
   })
 
   it('saves kb overrides with qa/quiz payload only and can reset kb scope', async () => {
-    getSystemSettings.mockResolvedValueOnce(buildSystemSettingsResponse())
+    getSystemSettings.mockResolvedValueOnce(buildSystemSettingsResponse({
+      editable_keys: ['qa_top_k', 'qa_fetch_k', 'rag_mode', 'ocr_enabled'],
+      overrides: { qa_top_k: 4, qa_fetch_k: 12, rag_mode: 'hybrid' },
+      effective: { qa_top_k: 4, qa_fetch_k: 12, rag_mode: 'hybrid', ocr_enabled: true },
+    }))
     getSettings.mockResolvedValueOnce(
       buildSettingsResponse({
         kb_overrides: {
@@ -172,7 +138,11 @@ describe('settings store', () => {
 
   it('saves and resets system advanced overrides', async () => {
     getSettings.mockResolvedValueOnce(buildSettingsResponse())
-    getSystemSettings.mockResolvedValueOnce(buildSystemSettingsResponse())
+    getSystemSettings.mockResolvedValueOnce(buildSystemSettingsResponse({
+      editable_keys: ['qa_top_k', 'qa_fetch_k', 'rag_mode', 'ocr_enabled'],
+      overrides: { qa_top_k: 4, qa_fetch_k: 12, rag_mode: 'hybrid' },
+      effective: { qa_top_k: 4, qa_fetch_k: 12, rag_mode: 'hybrid', ocr_enabled: true },
+    }))
     patchSystemSettings.mockResolvedValueOnce(
       buildSystemSettingsResponse({
         overrides: { qa_top_k: 6, rag_mode: 'dense' },
@@ -204,5 +174,86 @@ describe('settings store', () => {
     await store.resetSystemAdvanced()
     expect(resetSystemSettings).toHaveBeenCalledWith({})
     expect(store.systemAdvanced.overrides).toEqual({})
+  })
+
+  it('loads, saves, and tests provider config without exposing plaintext keys', async () => {
+    getSettings.mockResolvedValueOnce(buildSettingsResponse())
+    getSystemSettings.mockResolvedValueOnce(buildSystemSettingsResponse())
+    patchSystemProviderSettings.mockResolvedValueOnce(
+      buildProviderConfigResponse({
+        effective: {
+          qwen: {
+            api_key_configured: true,
+            api_key_masked: '••••9999',
+            region: 'intl',
+            base_url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+            model: 'qwen-plus',
+          },
+        },
+      }),
+    )
+    getSettings.mockResolvedValueOnce(
+      buildSettingsResponse({
+        system_status: {
+          provider_setup: {
+            llm_ready: true,
+            embedding_ready: true,
+            missing: [],
+            current_llm_provider: 'qwen',
+            current_embedding_provider: 'dashscope',
+          },
+        },
+      }),
+    )
+    testSystemProviderSettings.mockResolvedValueOnce({
+      ok: true,
+      provider: 'qwen',
+      target: 'llm',
+      message: '连接成功',
+    })
+
+    const store = useSettingsStore()
+    await store.load({ userId: 'user-a', kbId: 'kb-1' })
+
+    store.setProviderDraft({
+      llm_provider: 'qwen',
+      qwen: {
+        api_key_input: 'sk-test-9999',
+        region: 'intl',
+        base_url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+        model: 'qwen-plus',
+      },
+    })
+    expect(store.providerDirty).toBe(true)
+
+    await store.testProviderConfig({ target: 'llm' })
+    expect(testSystemProviderSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: 'llm',
+        values: expect.objectContaining({
+          llm_provider: 'qwen',
+          qwen: expect.objectContaining({
+            api_key: 'sk-test-9999',
+            region: 'intl',
+          }),
+        }),
+      }),
+    )
+
+    await store.saveProviderConfig()
+    expect(patchSystemProviderSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        values: expect.objectContaining({
+          llm_provider: 'qwen',
+          qwen: expect.objectContaining({
+            api_key: 'sk-test-9999',
+            region: 'intl',
+          }),
+        }),
+      }),
+    )
+    expect(store.providerConfig.effective.qwen.api_key_masked).toBe('••••9999')
+    expect(store.providerDraft.qwen.api_key_input).toBe('')
+    expect(store.providerDirty).toBe(false)
   })
 })

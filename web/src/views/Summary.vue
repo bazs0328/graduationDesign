@@ -33,13 +33,13 @@
             :kb-loading="appContext.kbsLoading"
             :docs-loading="busy.docs"
             mode="kb-and-required-doc"
-            kb-label="目标知识库"
+            kb-label="目标资料库"
             doc-label="目标文档"
             @update:kb-id="selectedKbId = $event"
             @update:doc-id="selectedDocId = $event"
           >
             <p class="text-[11px] text-muted-foreground">
-              摘要与要点生成作用于单文档；你可以先选知识库，再选具体文档。
+              摘要与要点生成作用于单文档；你可以先选资料库，再选具体文档。
             </p>
           </KnowledgeScopePicker>
           <div class="flex flex-col gap-2 pt-2">
@@ -53,7 +53,7 @@
             </label>
             <Button
               class="w-full"
-              :disabled="!selectedDocId"
+              :disabled="!selectedDocId || llmActionsDisabled"
               :loading="busy.summary"
               @click="generateSummary(forceRefresh)"
             >
@@ -62,12 +62,15 @@
             <Button
               class="w-full"
               variant="secondary"
-              :disabled="!selectedDocId"
+              :disabled="!selectedDocId || llmActionsDisabled"
               :loading="busy.keypoints"
               @click="generateKeypoints(forceRefresh)"
             >
               {{ busy.keypoints ? '提取中…' : '提取要点' }}
             </Button>
+            <p v-if="llmActionsDisabled" class="text-xs text-amber-700">
+              先到设置中心完成模型接入配置，摘要和要点功能才可用。
+            </p>
           </div>
         </div>
 
@@ -77,7 +80,7 @@
             <span class="font-mono">{{ selectedDocId.slice(0, 8) }}...</span>
           </div>
           <div class="flex justify-between">
-            <span class="text-muted-foreground">知识库：</span>
+            <span class="text-muted-foreground">资料库：</span>
             <span>{{ selectedKbName }}</span>
           </div>
         </div>
@@ -145,7 +148,7 @@
             >
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div class="space-y-1">
-                  <p class="text-xs font-bold uppercase tracking-widest text-primary">知识库聚合视图</p>
+                  <p class="text-xs font-bold uppercase tracking-widest text-primary">资料库聚合视图</p>
                   <p class="text-xs text-muted-foreground">
                     跨文档去重后的知识点视图，便于统整复习与对照不同文档表述。
                   </p>
@@ -156,7 +159,7 @@
                     :disabled="kbGroupedBusy"
                     @click="toggleKbGroupedPanel"
                   >
-                    {{ kbGroupedPanelOpen ? '收起聚合知识点' : '查看知识库聚合知识点' }}
+                    {{ kbGroupedPanelOpen ? '收起重点知识点' : '查看资料库重点知识点' }}
                   </button>
                   <button
                     v-if="kbGroupedPanelOpen"
@@ -171,13 +174,13 @@
 
               <div v-if="kbGroupedPanelOpen" class="space-y-3">
                 <div v-if="kbGroupedBusy" class="py-6">
-                  <LoadingSpinner size="sm" message="正在加载 KB 聚合知识点…" vertical />
+                  <LoadingSpinner size="sm" message="正在加载资料库聚合知识点…" vertical />
                 </div>
                 <p v-else-if="kbGroupedError" class="text-sm text-destructive">{{ kbGroupedError }}</p>
                 <div v-else-if="kbGroupedKeypoints.length" class="space-y-2">
                   <div class="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
                     <span class="px-2 py-1 rounded-full border border-primary/15 bg-primary/5 text-primary font-semibold">
-                      知识库聚合
+                      资料库聚合
                     </span>
                     <span v-if="kbGroupedGroupCount !== null">聚合后 {{ kbGroupedGroupCount }} 项</span>
                     <span v-if="kbGroupedRawCount !== null">原始 {{ kbGroupedRawCount }} 项</span>
@@ -198,7 +201,7 @@
                             {{ point.explanation }}
                           </p>
                           <div class="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-                            <span class="px-2 py-0.5 rounded-full border border-primary/20 bg-primary/10 text-primary font-semibold">KB聚合</span>
+                            <span class="px-2 py-0.5 rounded-full border border-primary/20 bg-primary/10 text-primary font-semibold">资料库聚合</span>
                             <span>来自 {{ ((point.source_doc_ids && point.source_doc_ids.length) || point.member_count || 1) }} 个文档</span>
                             <span v-if="Number(point.member_count || 1) > 1">合并 {{ point.member_count }} 个条目</span>
                           </div>
@@ -230,7 +233,7 @@
                   </div>
                 </div>
                 <div v-else class="rounded-lg border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
-                  当前知识库暂无可展示的聚合知识点。
+                  当前资料库暂无可展示的聚合知识点。
                 </div>
               </div>
             </div>
@@ -243,7 +246,7 @@
                 class="mt-2 text-xs font-semibold text-primary hover:underline"
                 @click="goToKbProgressFromKeypointsCard"
               >
-                查看 KB 学习路径
+                查看资料库学习路径
               </button>
             </div>
             <div
@@ -336,6 +339,7 @@ import { FileText, Sparkles, Layers } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../api'
 import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import { useToast } from '../composables/useToast'
+import { useSettingsStore } from '../stores/settings'
 import KnowledgeScopePicker from '../components/context/KnowledgeScopePicker.vue'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -346,6 +350,7 @@ import { renderMarkdown } from '../utils/markdown'
 import { buildRouteContextQuery, parseRouteContext } from '../utils/routeContext'
 
 const { showToast } = useToast()
+const settingsStore = useSettingsStore()
 const { appContext, resolvedUserId, kbs, selectedKbId, selectedDocId, kbDocs } = useAppKnowledgeScope({
   withDocs: true,
 })
@@ -406,6 +411,12 @@ const entryDocContextName = computed(() => {
   return `${entryDocContextId.value.slice(0, 8)}...`
 })
 const hasSelectedDoc = computed(() => Boolean(selectedDocId.value))
+const providerSetup = computed(() => settingsStore.providerSetup)
+const llmActionsDisabled = computed(() => {
+  const setup = providerSetup.value
+  if (!setup) return false
+  return !setup.llm_ready || !setup.embedding_ready
+})
 const summaryEmptyDescription = computed(() => {
   if (!hasDocs.value) {
     return '还没有可分析的文档，请先上传并完成解析。'
@@ -427,7 +438,11 @@ const summaryEmptyHint = computed(() => {
 const summaryEmptyPrimaryAction = computed(() => {
   if (!hasDocs.value) return { label: '去上传文档' }
   if (!hasSelectedDoc.value) return null
-  return { label: '生成摘要', loading: busy.value.summary }
+  return {
+    label: '生成摘要',
+    loading: busy.value.summary,
+    disabled: llmActionsDisabled.value,
+  }
 })
 const summaryEmptySecondaryAction = computed(() => {
   if (!hasDocs.value) return null
@@ -455,7 +470,12 @@ const keypointsEmptyHint = computed(() => {
 const keypointsEmptyPrimaryAction = computed(() => {
   if (!hasDocs.value) return { label: '去上传文档' }
   if (!hasSelectedDoc.value) return null
-  return { label: '提取要点', variant: 'secondary', loading: busy.value.keypoints }
+  return {
+    label: '提取要点',
+    variant: 'secondary',
+    loading: busy.value.keypoints,
+    disabled: llmActionsDisabled.value,
+  }
 })
 const keypointsEmptySecondaryAction = computed(() => {
   if (!hasDocs.value) return null
@@ -479,6 +499,10 @@ function handleSummaryEmptyPrimary() {
     return
   }
   if (!hasSelectedDoc.value) return
+  if (llmActionsDisabled.value) {
+    showToast('先完成模型接入配置，再生成摘要', 'error')
+    return
+  }
   generateSummary(forceRefresh.value)
 }
 
@@ -488,6 +512,10 @@ function handleKeypointsEmptyPrimary() {
     return
   }
   if (!hasSelectedDoc.value) return
+  if (llmActionsDisabled.value) {
+    showToast('先完成模型接入配置，再提取要点', 'error')
+    return
+  }
   generateKeypoints(forceRefresh.value)
 }
 
@@ -587,7 +615,7 @@ async function loadKbGroupedKeypoints(options = {}) {
     kbGroupedLoadedKbId.value = requestKbId
   } catch (err) {
     if (selectedDocKbId.value !== requestKbId) return
-    kbGroupedError.value = err?.message || '加载 KB 聚合知识点失败，请稍后重试'
+    kbGroupedError.value = err?.message || '加载资料库聚合知识点失败，请稍后重试'
   } finally {
     if (selectedDocKbId.value === requestKbId) {
       kbGroupedBusy.value = false
@@ -630,6 +658,10 @@ async function resolveDocKbIdByDocId(docId) {
 }
 
 async function generateSummary(force = false) {
+  if (llmActionsDisabled.value) {
+    showToast('先完成模型接入配置，再生成摘要', 'error')
+    return
+  }
   if (!selectedDocId.value) return
   busy.value.summary = true
   summary.value = ''
@@ -651,6 +683,10 @@ async function generateSummary(force = false) {
 }
 
 async function generateKeypoints(force = false) {
+  if (llmActionsDisabled.value) {
+    showToast('先完成模型接入配置，再提取要点', 'error')
+    return
+  }
   if (!selectedDocId.value) return
   busy.value.keypoints = true
   keypoints.value = []

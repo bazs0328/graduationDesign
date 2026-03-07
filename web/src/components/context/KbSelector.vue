@@ -20,7 +20,7 @@
       </span>
     </div>
     <p v-if="showEmptyHint" class="text-[11px] text-muted-foreground">
-      暂无知识库，可先在上传页创建。
+      暂无资料库，可先在上传页创建。
     </p>
   </div>
 </template>
@@ -39,7 +39,7 @@ const props = defineProps({
   },
   label: {
     type: String,
-    default: '选择知识库',
+    default: '选择资料库',
   },
   placeholder: {
     type: String,

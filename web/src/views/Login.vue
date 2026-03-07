@@ -7,7 +7,7 @@
       :title="isDark ? '切换为浅色主题' : '切换为深色主题'"
       aria-label="切换主题"
     >
-      <component :is="isDark ? 'Sun' : 'Moon'" class="w-4 h-4" />
+      <component :is="isDark ? Sun : Moon" class="w-4 h-4" />
       <span>{{ isDark ? '浅色' : '深色' }}</span>
     </button>
     <div class="w-full max-w-md space-y-8">

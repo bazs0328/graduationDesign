@@ -6,7 +6,22 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 
 import App from '@/App.vue'
 import { routes } from '@/router'
-import { apiGet, apiPost, apiSsePost, getDifficultyPlan, getProfile } from '@/api'
+import {
+  apiGet,
+  apiPost,
+  apiSsePost,
+  getDifficultyPlan,
+  getProfile,
+  getSettings,
+  authMe,
+  getSystemProviderSettings,
+  getSystemSettings,
+} from '@/api'
+import {
+  buildProviderConfigResponse,
+  buildSettingsResponse,
+  buildSystemSettingsResponse,
+} from './fixtures/settingsFixtures'
 
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal()
@@ -17,6 +32,10 @@ vi.mock('@/api', async (importOriginal) => {
     apiSsePost: vi.fn(),
     getProfile: vi.fn(),
     getDifficultyPlan: vi.fn(),
+    getSettings: vi.fn(),
+    authMe: vi.fn(),
+    getSystemSettings: vi.fn(),
+    getSystemProviderSettings: vi.fn(),
   }
 })
 
@@ -127,7 +146,7 @@ function getQuizSelects(wrapper) {
     doc: selects.find((sel) => {
       const text = sel.text()
       return (
-        text.includes('不限定（当前知识库范围）')
+        text.includes('不限定（当前资料库范围）')
         || text.includes('不限定（整库测验）')
         || text.includes('不限定（整库）')
         || text.includes('请选择文档')
@@ -140,6 +159,14 @@ function getQuizSelects(wrapper) {
 function getOptionTexts(selectWrapper) {
   if (!selectWrapper?.exists?.()) return []
   return selectWrapper.findAll('option').map((opt) => opt.text())
+}
+
+async function openQuizAdvancedPanel(wrapper) {
+  const toggleBtn = wrapper.findAll('button').find((btn) => btn.text().includes('高级选项'))
+  expect(toggleBtn).toBeTruthy()
+  await toggleBtn.trigger('click')
+  await flushPromises()
+  await nextTick()
 }
 
 async function openQuizAndSelectKb(wrapper, router, kbId = 'kb-1') {
@@ -163,6 +190,10 @@ beforeEach(() => {
   apiSsePost.mockReset()
   getProfile.mockReset()
   getDifficultyPlan.mockReset()
+  getSettings.mockReset()
+  authMe.mockReset()
+  getSystemSettings.mockReset()
+  getSystemProviderSettings.mockReset()
   localStorage.clear()
 
   apiGet.mockImplementation((path) => {
@@ -244,6 +275,10 @@ beforeEach(() => {
   apiSsePost.mockResolvedValue(undefined)
   getProfile.mockResolvedValue(profileFixture)
   getDifficultyPlan.mockResolvedValue(difficultyPlanFixture)
+  getSettings.mockResolvedValue(buildSettingsResponse())
+  authMe.mockResolvedValue({ user_id: 'test', username: 'test', name: 'test', access_token: 'test-token' })
+  getSystemSettings.mockResolvedValue(buildSystemSettingsResponse())
+  getSystemProviderSettings.mockResolvedValue(buildProviderConfigResponse())
 
 })
 
@@ -262,14 +297,17 @@ describe('Quiz wrong-answer explain link', () => {
     await flushPromises()
     await nextTick()
 
-    let html = wrapper.html()
-    expect(html).toContain('自适应依据')
-    expect(html).toContain('当前为自适应出题')
-    expect(html).toContain('矩阵可逆性')
-    expect(html).toContain('矩阵可逆性')
-    expect(html).toContain('30%')
-    expect(html).toContain('50%')
-    expect(html).toContain('20%')
+    let text = wrapper.text()
+    expect(text).not.toContain('当前为自适应出题')
+
+    await openQuizAdvancedPanel(wrapper)
+
+    text = wrapper.text()
+    expect(text).toContain('当前为自适应出题')
+    expect(text).toContain('矩阵可逆性')
+    expect(text).toContain('30%')
+    expect(text).toContain('50%')
+    expect(text).toContain('20%')
 
     const modeToggle = wrapper.findAll('button').find((btn) => btn.text().includes('系统自动调难度'))
     expect(modeToggle).toBeTruthy()
@@ -277,9 +315,9 @@ describe('Quiz wrong-answer explain link', () => {
     await flushPromises()
     await nextTick()
 
-    html = wrapper.html()
-    expect(html).toContain('手动选择难度')
-    expect(html).not.toContain('自适应依据')
+    text = wrapper.text()
+    expect(text).toContain('手动选择难度')
+    expect(text).not.toContain('当前为自适应出题')
   })
 
   it('navigates to /qa with explain autosend query payload', async () => {
@@ -416,7 +454,7 @@ describe('Quiz wrong-answer explain link', () => {
 
     const html = wrapper.html()
     expect(html).toContain('知识点掌握度变化')
-    expect(html).toContain('以下知识点反馈已按知识库口径去重合并统计')
+    expect(html).toContain('以下知识点反馈已按资料库口径去重合并统计')
     expect(html).toContain('概念名称可能与单文档表述不同，但会映射到同一知识点')
     const afterPlanCalls = getDifficultyPlan.mock.calls.length
     expect(afterPlanCalls).toBeGreaterThan(beforePlanCalls)
@@ -429,6 +467,7 @@ describe('Quiz focus concept scoping', () => {
     const { wrapper, router } = await mountAppWithRouter()
 
     await openQuizAndSelectKb(wrapper, router)
+    await openQuizAdvancedPanel(wrapper)
 
     let { doc, focus } = getQuizSelects(wrapper)
     expect(doc?.exists()).toBe(true)
@@ -455,6 +494,7 @@ describe('Quiz focus concept scoping', () => {
     const { wrapper, router } = await mountAppWithRouter()
 
     await openQuizAndSelectKb(wrapper, router)
+    await openQuizAdvancedPanel(wrapper)
 
     let { doc, focus } = getQuizSelects(wrapper)
     await doc.setValue('doc-1')
@@ -486,6 +526,7 @@ describe('Quiz focus concept scoping', () => {
     const { wrapper, router } = await mountAppWithRouter()
 
     await openQuizAndSelectKb(wrapper, router)
+    await openQuizAdvancedPanel(wrapper)
 
     let { doc, focus } = getQuizSelects(wrapper)
     expect(getOptionTexts(focus)).toContain('暂无可选聚合知识点')

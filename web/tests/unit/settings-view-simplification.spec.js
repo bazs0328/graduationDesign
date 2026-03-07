@@ -10,14 +10,16 @@ vi.mock('../../src/api', async (importOriginal) => {
     apiGet: vi.fn(),
     getSettings: vi.fn(),
     getSystemSettings: vi.fn(),
+    getSystemProviderSettings: vi.fn(),
     patchUserSettings: vi.fn(),
     patchKbSettings: vi.fn(),
     resetSettings: vi.fn(),
   }
 })
 
-import { apiGet, getSettings, getSystemSettings } from '../../src/api'
+import { apiGet, getSettings, getSystemProviderSettings, getSystemSettings } from '../../src/api'
 import SettingsView from '../../src/views/Settings.vue'
+import { buildProviderConfigResponse } from './fixtures/settingsFixtures'
 
 function buildSettingsResponse() {
   return {
@@ -131,6 +133,7 @@ describe('settings view simplification', () => {
     })
     getSettings.mockResolvedValue(buildSettingsResponse())
     getSystemSettings.mockResolvedValue(buildSystemSettingsResponse())
+    getSystemProviderSettings.mockResolvedValue(buildProviderConfigResponse())
   })
 
   it('hides technical diagnostics by default and reveals them when expanded', async () => {
@@ -151,8 +154,8 @@ describe('settings view simplification', () => {
     expect(initialText).not.toContain('RAG')
     expect(initialText).not.toContain('top_k')
     expect(initialText).not.toContain('fetch_k')
-    expect(initialText).not.toContain('检索向量模型（高级）')
-    expect(initialText).not.toContain('当前知识库覆盖设置')
+    expect(initialText).not.toContain('模型状态（高级）')
+    expect(initialText).not.toContain('当前资料库覆盖设置')
 
     const toggleBtn = wrapper
       .findAll('button')
@@ -162,8 +165,8 @@ describe('settings view simplification', () => {
     await flush()
 
     const expandedText = wrapper.text()
-    expect(expandedText).toContain('检索向量模型（高级）')
-    expect(expandedText).toContain('当前知识库覆盖设置')
+    expect(expandedText).toContain('模型状态（高级）')
+    expect(expandedText).toContain('当前资料库覆盖设置')
     expect(expandedText).toContain('系统高级参数（可编辑）')
     expect(wrapper.find('textarea').exists()).toBe(false)
     expect(wrapper.findAll('input[type="number"]').length).toBeGreaterThan(0)

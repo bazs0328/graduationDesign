@@ -3,7 +3,10 @@
 import json
 
 from app.core.config import settings
+from app.core import provider_config
 from app.models import KnowledgeBase, User
+from app.routers import settings as settings_router
+import pytest
 
 
 def _register_or_login(client, username: str, password: str = "pass123456"):
@@ -23,6 +26,18 @@ def _register_or_login(client, username: str, password: str = "pass123456"):
 
 def _auth_headers(payload: dict) -> dict[str, str]:
     return {"Authorization": f"Bearer {payload['access_token']}"}
+
+
+@pytest.fixture
+def isolated_provider_data_dir(tmp_path, monkeypatch):
+    original_data_dir = settings.data_dir
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    provider_config.load_provider_config()
+    try:
+        yield tmp_path
+    finally:
+        monkeypatch.setattr(settings, "data_dir", original_data_dir)
+        provider_config.load_provider_config()
 
 
 def test_get_settings_returns_defaults_and_system_status_without_secret_values(client):
@@ -260,3 +275,162 @@ def test_system_settings_patch_rejects_unknown_key(client):
     )
     assert resp.status_code == 400
     assert "Unsupported system setting key" in resp.json()["detail"]
+
+
+def test_provider_settings_patch_masks_keys_and_updates_setup(client, isolated_provider_data_dir):
+    user = _register_or_login(client, "settings_provider_patch_user")
+    headers = _auth_headers(user)
+
+    patched = client.patch(
+        "/api/settings/system/providers",
+        json={
+            "values": {
+                "llm_provider": "qwen",
+                "embedding_provider": "dashscope",
+                "qwen": {
+                    "api_key": "draft-secret-5678",
+                    "region": "international",
+                    "model": "qwen-plus",
+                },
+                "dashscope": {
+                    "region": "international",
+                    "embedding_model": "text-embedding-v4",
+                },
+            }
+        },
+        headers=headers,
+    )
+    assert patched.status_code == 200
+    patched_data = patched.json()
+    assert patched_data["effective"]["qwen"]["api_key_configured"] is True
+    assert patched_data["effective"]["qwen"]["api_key_masked"] == "••••5678"
+    assert "api_key" not in patched_data["effective"]["qwen"]
+    assert patched_data["effective"]["qwen"]["base_url"] == provider_config.QWEN_REGION_PRESETS["international"]["base_url"]
+    assert patched_data["effective"]["dashscope"]["base_url"] == provider_config.DASHSCOPE_REGION_PRESETS["international"]["base_url"]
+    assert patched_data["setup"]["llm_ready"] is True
+    assert patched_data["setup"]["embedding_ready"] is True
+
+    stored_path = isolated_provider_data_dir / "system_provider_config.json"
+    stored_raw = json.loads(stored_path.read_text(encoding="utf-8"))
+    assert stored_raw["qwen"]["api_key"] == "draft-secret-5678"
+    assert stored_raw["qwen"]["base_url"] == provider_config.QWEN_REGION_PRESETS["international"]["base_url"]
+    assert stored_raw["dashscope"]["base_url"] == provider_config.DASHSCOPE_REGION_PRESETS["international"]["base_url"]
+
+    get_resp = client.get("/api/settings/system/providers", headers=headers)
+    assert get_resp.status_code == 200
+    get_data = get_resp.json()
+    assert get_data["effective"]["qwen"]["api_key_masked"] == "••••5678"
+    assert "api_key" not in get_data["effective"]["qwen"]
+
+    settings_resp = client.get("/api/settings", headers=headers)
+    assert settings_resp.status_code == 200
+    setup = settings_resp.json()["system_status"]["provider_setup"]
+    assert setup["llm_ready"] is True
+    assert setup["embedding_ready"] is True
+    assert setup["current_llm_provider"] == "qwen"
+    assert setup["current_embedding_provider"] == "dashscope"
+
+    cleared = client.patch(
+        "/api/settings/system/providers",
+        json={
+            "values": {
+                "qwen": {"clear_api_key": True},
+            }
+        },
+        headers=headers,
+    )
+    assert cleared.status_code == 200
+    cleared_data = cleared.json()
+    assert cleared_data["effective"]["qwen"]["api_key_configured"] is False
+    assert cleared_data["effective"]["qwen"]["api_key_masked"] is None
+
+    settings_after_clear = client.get("/api/settings", headers=headers)
+    assert settings_after_clear.status_code == 200
+    cleared_setup = settings_after_clear.json()["system_status"]["provider_setup"]
+    assert cleared_setup["llm_ready"] is False
+    assert cleared_setup["embedding_ready"] is False
+    assert "qwen.api_key" in cleared_setup["missing"]
+
+
+def test_provider_settings_get_uses_legacy_overrides_fallback(client, isolated_provider_data_dir):
+    legacy_overrides_path = isolated_provider_data_dir / "system_overrides.json"
+    legacy_overrides_path.write_text(
+        json.dumps(
+            {
+                "llm_provider": "qwen",
+                "embedding_provider": "dashscope",
+                "qwen_base_url": "https://legacy.example.com/compatible-mode/v1",
+                "qwen_model": "legacy-qwen",
+                "dashscope_base_url": "https://legacy.example.com/api/v1",
+                "dashscope_embedding_model": "legacy-embed",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    provider_config.load_provider_config()
+
+    user = _register_or_login(client, "settings_provider_legacy_user")
+    headers = _auth_headers(user)
+
+    resp = client.get("/api/settings/system/providers", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["effective"]["llm_provider"] == "qwen"
+    assert data["effective"]["embedding_provider"] == "dashscope"
+    assert data["effective"]["qwen"]["base_url"] == "https://legacy.example.com/compatible-mode/v1"
+    assert data["effective"]["qwen"]["model"] == "legacy-qwen"
+    assert data["effective"]["dashscope"]["base_url"] == "https://legacy.example.com/api/v1"
+    assert data["effective"]["dashscope"]["embedding_model"] == "legacy-embed"
+    assert data["effective"]["qwen"]["api_key_configured"] is True
+
+
+def test_provider_settings_test_endpoint_uses_draft_without_persisting(
+    client,
+    isolated_provider_data_dir,
+    monkeypatch,
+):
+    calls = {}
+
+    def fake_test_provider_connection(values, target="auto"):
+        calls["values"] = values
+        calls["target"] = target
+        return {
+            "ok": True,
+            "provider": "deepseek",
+            "target": "llm",
+            "message": "deepseek 对话模型连接正常",
+        }
+
+    monkeypatch.setattr(settings_router, "test_provider_connection", fake_test_provider_connection)
+
+    user = _register_or_login(client, "settings_provider_test_user")
+    headers = _auth_headers(user)
+    resp = client.post(
+        "/api/settings/system/providers/test",
+        json={
+            "target": "llm",
+            "values": {
+                "llm_provider": "deepseek",
+                "deepseek": {
+                    "api_key": "preview-only-key",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "model": "deepseek-chat",
+                },
+            },
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert calls["target"] == "llm"
+    assert calls["values"]["deepseek"]["api_key"] == "preview-only-key"
+
+    assert not (isolated_provider_data_dir / "system_provider_config.json").exists()
+
+    get_resp = client.get("/api/settings/system/providers", headers=headers)
+    assert get_resp.status_code == 200
+    get_data = get_resp.json()
+    assert get_data["effective"]["deepseek"]["api_key_configured"] is False

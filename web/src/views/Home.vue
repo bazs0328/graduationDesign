@@ -18,15 +18,54 @@
           <router-link to="/upload" class="px-6 sm:px-8 py-3.5 sm:py-4 bg-white text-slate-900 rounded-2xl font-black text-base sm:text-lg shadow-xl hover:scale-105 active:scale-95 transition-all">
             免费开始
           </router-link>
-          <router-link to="/qa" class="px-6 sm:px-8 py-3.5 sm:py-4 bg-white/8 backdrop-blur-md text-white border-2 border-white/20 rounded-2xl font-black text-base sm:text-lg hover:bg-white/12 transition-all">
-            试试 AI 对话
-          </router-link>
+          <a href="#starter-flow" class="px-6 sm:px-8 py-3.5 sm:py-4 bg-white/8 backdrop-blur-md text-white border-2 border-white/20 rounded-2xl font-black text-base sm:text-lg hover:bg-white/12 transition-all">
+            查看使用流程
+          </a>
         </div>
       </div>
       
       <!-- Decorative Elements -->
       <div class="absolute top-0 right-0 -translate-y-1/4 translate-x-1/4 w-96 h-96 bg-cyan-300/12 rounded-full blur-3xl"></div>
       <div class="absolute bottom-0 left-0 translate-y-1/2 -translate-x-1/4 w-64 h-64 bg-blue-300/18 rounded-full blur-3xl"></div>
+    </section>
+
+    <section id="starter-flow" class="relative overflow-hidden rounded-3xl border border-border bg-card p-6 sm:p-8 shadow-sm">
+      <div class="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.08),transparent_48%)]"></div>
+      <div class="relative space-y-6">
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div class="space-y-2">
+            <div class="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+              第一次使用
+            </div>
+            <h2 class="text-2xl sm:text-3xl font-black tracking-tight">三步开始你的学习流程</h2>
+            <p class="text-sm sm:text-base text-muted-foreground max-w-2xl leading-relaxed">
+              不需要先研究设置。先上传资料，再生成摘要，最后进入问答或测验巩固理解。
+            </p>
+          </div>
+          <router-link to="/upload" class="inline-flex items-center gap-2 rounded-2xl border border-border bg-background px-4 py-3 text-sm font-semibold hover:bg-accent transition-colors">
+            先去上传资料
+          </router-link>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <article
+            v-for="step in starterSteps"
+            :key="step.step"
+            class="rounded-2xl border border-border bg-background/70 p-5 space-y-4 shadow-sm"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <span class="inline-flex h-10 w-10 items-center justify-center rounded-2xl font-black text-sm" :class="step.badgeClass">
+                {{ step.step }}
+              </span>
+              <component :is="step.icon" class="w-5 h-5 text-primary" />
+            </div>
+            <div class="space-y-2">
+              <h3 class="text-lg font-bold tracking-tight">{{ step.title }}</h3>
+              <p class="text-sm text-muted-foreground leading-relaxed">{{ step.description }}</p>
+            </div>
+          </article>
+        </div>
+      </div>
     </section>
 
     <!-- Features Grid -->
@@ -52,10 +91,34 @@ import {
   Sparkles
 } from 'lucide-vue-next'
 
+const starterSteps = [
+  {
+    step: '01',
+    title: '上传资料',
+    description: '先创建学习资料库并上传 PDF、讲义或笔记，系统会自动解析内容。',
+    icon: Upload,
+    badgeClass: 'bg-sky-100 text-sky-700',
+  },
+  {
+    step: '02',
+    title: '生成摘要',
+    description: '用摘要和重点知识点快速建立全局理解，不用一开始就逐段阅读。',
+    icon: FileText,
+    badgeClass: 'bg-emerald-100 text-emerald-700',
+  },
+  {
+    step: '03',
+    title: '开始问答或测验',
+    description: '理解后再进入问答或测验，把疑问和薄弱点集中解决。',
+    icon: Sparkles,
+    badgeClass: 'bg-amber-100 text-amber-700',
+  },
+]
+
 const features = [
   {
     name: '文档上传',
-    description: '上传 PDF 或文本文件，轻松构建个人知识库。',
+    description: '上传 PDF 或文本文件，轻松构建个人学习资料库。',
     icon: Upload
   },
   {

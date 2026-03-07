@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import { defineComponent, h, nextTick, onActivated, onDeactivated, onMounted } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 
 import AppLayout from '@/layout/AppLayout.vue'
 
@@ -29,6 +30,8 @@ function createTrackedPage(label, counters) {
 
 beforeEach(() => {
   localStorage.clear()
+  const pinia = createPinia()
+  setActivePinia(pinia)
 })
 
 describe('AppLayout keep-alive routing', () => {
@@ -51,7 +54,7 @@ describe('AppLayout keep-alive routing', () => {
 
     const wrapper = mount(AppLayout, {
       global: {
-        plugins: [router],
+        plugins: [createPinia(), router],
         stubs: {
           AppSidebar: { template: '<aside data-test="sidebar"></aside>' },
         },
@@ -86,4 +89,3 @@ describe('AppLayout keep-alive routing', () => {
     expect(wrapper.text()).toContain('page-a')
   })
 })
-

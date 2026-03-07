@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { hasAccessToken } from '../composables/useAuthSession'
+import { authMe } from '../api'
+import { getAccessToken, hasAccessToken, setAuthSessionFromResponse } from '../composables/useAuthSession'
 
 export const routes = [
   {
@@ -29,13 +30,13 @@ export const routes = [
   {
     path: '/qa',
     name: 'QA',
-    meta: { title: '问答' },
+    meta: { title: '问答', showHeaderContextBar: false },
     component: () => import('../views/QA.vue')
   },
   {
     path: '/quiz',
     name: 'Quiz',
-    meta: { title: '测验' },
+    meta: { title: '测验', showHeaderContextBar: false },
     component: () => import('../views/Quiz.vue')
   },
   {
@@ -63,20 +64,70 @@ const router = createRouter({
   routes
 })
 
+let validatedToken = ''
+let pendingValidation = null
+
+async function ensureAuthenticatedSession() {
+  const token = getAccessToken()
+  if (!token) {
+    validatedToken = ''
+    return false
+  }
+  if (validatedToken === token) return true
+  if (pendingValidation?.token === token) {
+    return pendingValidation.promise
+  }
+
+  const promise = authMe()
+    .then((payload) => {
+      if (payload?.user_id) {
+        setAuthSessionFromResponse(payload)
+      }
+      validatedToken = getAccessToken() || token
+      return true
+    })
+    .catch(() => {
+      validatedToken = ''
+      return false
+    })
+    .finally(() => {
+      if (pendingValidation?.token === token) {
+        pendingValidation = null
+      }
+    })
+
+  pendingValidation = { token, promise }
+  return promise
+}
+
 router.afterEach((to) => {
   const title = to.meta?.title
   document.title = title ? `${title} - GradTutor` : 'GradTutor - 智能学习助手'
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const isLoggedIn = hasAccessToken()
-  if (to.path !== '/login' && !isLoggedIn) {
+  if (!isLoggedIn && to.path !== '/login') {
     next('/login')
-  } else if (to.path === '/login' && isLoggedIn) {
-    next('/')
-  } else {
-    next()
+    return
   }
+  if (!isLoggedIn) {
+    next()
+    return
+  }
+
+  const sessionOk = await ensureAuthenticatedSession()
+  if (!sessionOk) {
+    next('/login')
+    return
+  }
+
+  if (to.path === '/login') {
+    next('/')
+    return
+  }
+
+  next()
 })
 
 export default router

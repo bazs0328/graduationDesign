@@ -10,12 +10,12 @@
           </div>
           <h1 class="text-2xl font-black tracking-tight">学习偏好设置</h1>
           <p class="text-sm text-muted-foreground max-w-3xl leading-relaxed">
-            默认只展示学习常用选项；系统级模型、文档识别能力与密钥状态可在高级诊断中查看。
+            常用学习偏好和模型接入配置都已前置；高级诊断区域只保留系统排查与运行参数。
           </p>
         </div>
         <div class="grid grid-cols-2 gap-2 text-xs">
           <div class="rounded-xl border border-border bg-background/70 px-3 py-2">
-            <div class="text-muted-foreground">当前知识库</div>
+            <div class="text-muted-foreground">当前资料库</div>
             <div class="font-semibold truncate max-w-[180px]">{{ selectedKbName || '未选择' }}</div>
           </div>
           <div class="rounded-xl border border-border bg-background/70 px-3 py-2">
@@ -29,6 +29,321 @@
     </section>
 
     <section class="space-y-4">
+      <div class="rounded-3xl border border-border bg-card p-5 sm:p-6 shadow-sm space-y-5">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="space-y-2">
+            <div class="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+              模型接入配置
+            </div>
+            <h2 class="text-xl font-black tracking-tight">把 DeepSeek / Qwen / DashScope 配到前台来</h2>
+            <p class="text-sm text-muted-foreground max-w-3xl leading-relaxed">
+              API Key 仍由后端本地保存，页面只负责填写、更新和显示掩码。配置完成后，摘要、问答和测验会自动恢复可用。
+            </p>
+          </div>
+          <div class="rounded-2xl border border-border bg-background/70 px-4 py-3 text-sm space-y-1 min-w-[220px]">
+            <div class="text-xs font-bold uppercase tracking-widest text-muted-foreground">当前状态</div>
+            <div class="font-semibold" :class="providerFeaturesReady ? 'text-green-600' : 'text-amber-700'">
+              {{ providerFeaturesReady ? '模型接入已就绪' : '仍需完成基础配置' }}
+            </div>
+            <div class="text-xs text-muted-foreground">
+              对话：{{ providerSetup?.current_llm_provider || 'unconfigured' }} · 向量：{{ providerSetup?.current_embedding_provider || 'unconfigured' }}
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-if="providerConfig.readOnlyReason"
+          class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900 space-y-2"
+        >
+          <p class="font-semibold">当前环境使用的是 OpenAI / Gemini 配置</p>
+          <p class="leading-relaxed">
+            {{ providerConfig.readOnlyReason }}
+          </p>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="px-2 py-1 rounded-full border border-amber-300 bg-white">
+              当前对话 provider：{{ providerSetup?.current_llm_provider || '—' }}
+            </span>
+            <span class="px-2 py-1 rounded-full border border-amber-300 bg-white">
+              当前向量 provider：{{ providerSetup?.current_embedding_provider || '—' }}
+            </span>
+          </div>
+        </div>
+
+        <template v-else>
+          <div v-if="!providerFeaturesReady" class="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-4 space-y-2">
+            <p class="text-sm font-semibold text-amber-900">继续使用前，先把模型接入补齐</p>
+            <p class="text-sm text-amber-900/80 leading-relaxed">
+              当前还缺少部分基础配置。完成后，摘要生成、问答发送和测验生成会自动恢复可用。
+            </p>
+            <p v-if="providerMissingSummary" class="text-xs text-amber-800">
+              缺少项：{{ providerMissingSummary }}
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+              <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">对话模型提供商</label>
+              <select
+                :value="providerDraft.llm_provider"
+                class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                @change="setProviderRoot('llm_provider', $event.target.value)"
+              >
+                <option v-for="option in llmProviderOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
+
+            <div class="space-y-2">
+              <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">向量模型提供商</label>
+              <select
+                :value="providerDraft.embedding_provider"
+                class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                @change="setProviderRoot('embedding_provider', $event.target.value)"
+              >
+                <option v-for="option in embeddingProviderOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <article class="rounded-2xl border border-border bg-background/50 p-4 space-y-4">
+              <div class="space-y-1">
+                <div class="flex items-center justify-between gap-2">
+                  <h3 class="text-base font-bold tracking-tight">DeepSeek</h3>
+                  <span class="text-[10px] font-semibold px-2 py-1 rounded-full border" :class="providerBadgeClass(providerDraft.llm_provider === 'deepseek' || providerDraft.embedding_provider === 'deepseek')">
+                    {{ providerDraft.llm_provider === 'deepseek' || providerDraft.embedding_provider === 'deepseek' ? '已启用' : '可选' }}
+                  </span>
+                </div>
+                <p class="text-xs text-muted-foreground">适合把对话模型和向量模型都放在同一供应商侧维护。</p>
+              </div>
+
+              <div class="space-y-2">
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">API Key</label>
+                <div v-if="providerDraft.deepseek.api_key_configured && !providerDraft.deepseek.editing_api_key && !providerDraft.deepseek.clear_api_key" class="rounded-xl border border-border bg-card px-3 py-3 space-y-3">
+                  <p class="text-sm font-medium">已保存 {{ providerDraft.deepseek.api_key_masked || '••••' }}</p>
+                  <div class="flex flex-wrap gap-2">
+                    <button type="button" class="px-3 py-2 rounded-lg border border-input text-sm font-semibold hover:bg-accent" @click="beginProviderKeyEdit('deepseek')">更换密钥</button>
+                    <button type="button" class="px-3 py-2 rounded-lg border border-amber-300 text-sm font-semibold text-amber-700 hover:bg-amber-50" @click="clearProviderKey('deepseek')">清除密钥</button>
+                  </div>
+                </div>
+                <input
+                  v-else
+                  type="password"
+                  :value="providerDraft.deepseek.api_key_input"
+                  placeholder="输入 DeepSeek API Key"
+                  class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                  @input="updateProviderSection('deepseek', { api_key_input: $event.target.value, clear_api_key: false })"
+                />
+                <p v-if="providerDraft.deepseek.clear_api_key" class="text-xs text-amber-700">
+                  保存后会清除当前 DeepSeek API Key。
+                </p>
+              </div>
+
+              <div class="space-y-2">
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Base URL</label>
+                <input
+                  type="text"
+                  :value="providerDraft.deepseek.base_url"
+                  class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                  @input="updateProviderSection('deepseek', { base_url: $event.target.value })"
+                />
+              </div>
+
+              <div class="space-y-2">
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">对话模型</label>
+                <input
+                  type="text"
+                  :value="providerDraft.deepseek.model"
+                  class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                  @input="updateProviderSection('deepseek', { model: $event.target.value })"
+                />
+              </div>
+
+              <div v-if="providerDraft.embedding_provider === 'deepseek'" class="space-y-2">
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">向量模型</label>
+                <input
+                  type="text"
+                  :value="providerDraft.deepseek.embedding_model"
+                  class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                  placeholder="如：deepseek-embedding"
+                  @input="updateProviderSection('deepseek', { embedding_model: $event.target.value })"
+                />
+              </div>
+            </article>
+
+            <article class="rounded-2xl border border-border bg-background/50 p-4 space-y-4">
+              <div class="space-y-1">
+                <div class="flex items-center justify-between gap-2">
+                  <h3 class="text-base font-bold tracking-tight">Qwen</h3>
+                  <span class="text-[10px] font-semibold px-2 py-1 rounded-full border" :class="providerBadgeClass(providerDraft.llm_provider === 'qwen' || providerDraft.embedding_provider === 'qwen')">
+                    {{ providerDraft.llm_provider === 'qwen' || providerDraft.embedding_provider === 'qwen' ? '已启用' : '可选' }}
+                  </span>
+                </div>
+                <p class="text-xs text-muted-foreground">适合 Qwen 对话能力；DashScope 向量模型也会复用这里的 API Key。</p>
+              </div>
+
+              <div class="space-y-2">
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">API Key</label>
+                <div v-if="providerDraft.qwen.api_key_configured && !providerDraft.qwen.editing_api_key && !providerDraft.qwen.clear_api_key" class="rounded-xl border border-border bg-card px-3 py-3 space-y-3">
+                  <p class="text-sm font-medium">已保存 {{ providerDraft.qwen.api_key_masked || '••••' }}</p>
+                  <div class="flex flex-wrap gap-2">
+                    <button type="button" class="px-3 py-2 rounded-lg border border-input text-sm font-semibold hover:bg-accent" @click="beginProviderKeyEdit('qwen')">更换密钥</button>
+                    <button type="button" class="px-3 py-2 rounded-lg border border-amber-300 text-sm font-semibold text-amber-700 hover:bg-amber-50" @click="clearProviderKey('qwen')">清除密钥</button>
+                  </div>
+                </div>
+                <input
+                  v-else
+                  type="password"
+                  :value="providerDraft.qwen.api_key_input"
+                  placeholder="输入 Qwen / DashScope API Key"
+                  class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                  @input="updateProviderSection('qwen', { api_key_input: $event.target.value, clear_api_key: false })"
+                />
+                <p v-if="providerDraft.qwen.clear_api_key" class="text-xs text-amber-700">
+                  保存后会清除当前 Qwen / DashScope API Key。
+                </p>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div class="space-y-2">
+                  <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">地区预设</label>
+                  <select
+                    :value="providerDraft.qwen.region"
+                    class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                    @change="applyRegionPreset('qwen', $event.target.value)"
+                  >
+                    <option v-for="preset in qwenRegionOptions" :key="preset.id" :value="preset.id">
+                      {{ preset.label }}
+                    </option>
+                  </select>
+                </div>
+                <div class="space-y-2">
+                  <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">对话模型</label>
+                  <input
+                    type="text"
+                    :value="providerDraft.qwen.model"
+                    class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                    @input="updateProviderSection('qwen', { model: $event.target.value })"
+                  />
+                </div>
+              </div>
+
+              <div class="space-y-2">
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Base URL</label>
+                <input
+                  type="text"
+                  :value="providerDraft.qwen.base_url"
+                  :disabled="providerDraft.qwen.region !== 'custom'"
+                  class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary disabled:bg-accent/40 disabled:text-muted-foreground"
+                  @input="updateProviderSection('qwen', { base_url: $event.target.value })"
+                />
+              </div>
+
+              <div v-if="providerDraft.embedding_provider === 'qwen'" class="space-y-2">
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">向量模型</label>
+                <input
+                  type="text"
+                  :value="providerDraft.qwen.embedding_model"
+                  class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                  @input="updateProviderSection('qwen', { embedding_model: $event.target.value })"
+                />
+              </div>
+            </article>
+
+            <article class="rounded-2xl border border-border bg-background/50 p-4 space-y-4">
+              <div class="space-y-1">
+                <div class="flex items-center justify-between gap-2">
+                  <h3 class="text-base font-bold tracking-tight">DashScope</h3>
+                  <span class="text-[10px] font-semibold px-2 py-1 rounded-full border" :class="providerBadgeClass(providerDraft.embedding_provider === 'dashscope')">
+                    {{ providerDraft.embedding_provider === 'dashscope' ? '已启用' : '可选' }}
+                  </span>
+                </div>
+                <p class="text-xs text-muted-foreground">只负责向量能力，复用 Qwen 区块里的 API Key。</p>
+              </div>
+
+              <div class="rounded-xl border border-border bg-card px-3 py-3 text-sm text-muted-foreground">
+                当前不单独填写密钥。DashScope 会复用上方 Qwen 配置里的 API Key。
+              </div>
+
+              <div class="space-y-2">
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">地区预设</label>
+                <select
+                  :value="providerDraft.dashscope.region"
+                  class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                  @change="applyRegionPreset('dashscope', $event.target.value)"
+                >
+                  <option v-for="preset in dashscopeRegionOptions" :key="preset.id" :value="preset.id">
+                    {{ preset.label }}
+                  </option>
+                </select>
+              </div>
+
+              <div class="space-y-2">
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Base URL</label>
+                <input
+                  type="text"
+                  :value="providerDraft.dashscope.base_url"
+                  :disabled="providerDraft.dashscope.region !== 'custom'"
+                  class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary disabled:bg-accent/40 disabled:text-muted-foreground"
+                  @input="updateProviderSection('dashscope', { base_url: $event.target.value })"
+                />
+              </div>
+
+              <div class="space-y-2">
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">向量模型</label>
+                <input
+                  type="text"
+                  :value="providerDraft.dashscope.embedding_model"
+                  class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                  @input="updateProviderSection('dashscope', { embedding_model: $event.target.value })"
+                />
+              </div>
+            </article>
+          </div>
+
+          <div class="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-border bg-background/50 px-4 py-4">
+            <div class="space-y-1">
+              <p class="text-sm font-semibold">保存后立即生效</p>
+              <p class="text-xs text-muted-foreground">
+                配置会持久化到后端本地文件；页面只显示掩码，不会回显 API Key 明文。
+              </p>
+              <p v-if="providerTestResult" class="text-xs" :class="providerTestResult.ok ? 'text-green-700' : 'text-destructive'">
+                {{ providerTestResult.message }}
+              </p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                class="px-3 py-2 rounded-lg border border-input text-sm font-semibold hover:bg-accent disabled:opacity-50"
+                :disabled="settingsStore.providerTesting"
+                @click="runProviderConnectionTest"
+              >
+                {{ settingsStore.providerTesting ? '测试中…' : '测试连接' }}
+              </button>
+              <button
+                type="button"
+                class="px-3 py-2 rounded-lg border border-input text-sm font-semibold hover:bg-accent disabled:opacity-50"
+                :disabled="settingsStore.providerSaving || !settingsStore.providerDirty"
+                @click="settingsStore.discardProviderDraft()"
+              >
+                放弃修改
+              </button>
+              <button
+                type="button"
+                class="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-50"
+                :disabled="settingsStore.providerSaving || !settingsStore.providerDirty"
+                @click="saveProviderSettings"
+              >
+                {{ settingsStore.providerSaving ? '保存中…' : '保存配置' }}
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
+
       <div class="rounded-2xl border border-border bg-card p-4 sm:p-5 shadow-sm">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="space-y-1">
@@ -286,7 +601,7 @@
 
     <SettingsPanel
       title="用户默认设置"
-      description="这组设置会作为你在所有知识库中的默认体验参数。"
+      description="这组设置会作为你在所有学习资料库中的默认体验参数。"
       :dirty="settingsStore.userDirty"
       :saving="settingsStore.savingUser"
       :error="panelError('user')"
@@ -310,15 +625,15 @@
         </div>
 
         <div class="space-y-2">
-          <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">问答检索预设</label>
+          <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">回答深度</label>
           <select
             :value="userDraft.qa.retrieval_preset"
             class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
             @change="updateUserSection('qa', { retrieval_preset: $event.target.value })"
           >
-            <option value="fast">快速（响应更快）</option>
+            <option value="fast">快速（更简洁）</option>
             <option value="balanced">均衡（推荐）</option>
-            <option value="deep">深度（检索更多）</option>
+            <option value="deep">深入（参考更多内容）</option>
           </select>
         </div>
 
@@ -447,8 +762,8 @@
 
     <SettingsPanel
       v-if="selectedKbId && advancedDiagnosticsOpen"
-      title="当前知识库覆盖设置"
-      description="只覆盖当前知识库的问答与测验偏好；留空表示跟随用户默认设置。"
+      title="当前资料库覆盖设置"
+      description="只覆盖当前资料库的问答与测验偏好；留空表示跟随用户默认设置。"
       :dirty="settingsStore.kbDirty"
       :saving="settingsStore.savingKb"
       :error="panelError('kb')"
@@ -469,7 +784,7 @@
             :model-value="selectedKbId"
             :kbs="kbs"
             label=""
-            placeholder="请选择知识库"
+            placeholder="请选择资料库"
             :loading="appContext.kbsLoading"
             @update:model-value="selectedKbId = $event"
           />
@@ -478,7 +793,7 @@
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="space-y-2">
-          <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">问答模式覆盖</label>
+          <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">回答风格覆盖</label>
           <select
             :value="kbDraft.qa.mode || ''"
             class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
@@ -491,7 +806,7 @@
         </div>
 
         <div class="space-y-2">
-          <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">检索预设覆盖</label>
+          <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">回答深度覆盖</label>
           <select
             :value="kbDraft.qa.retrieval_preset || ''"
             class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
@@ -582,11 +897,11 @@
       v-else-if="!selectedKbId"
       class="rounded-2xl border border-dashed border-border bg-card p-6 text-sm text-muted-foreground"
     >
-      当前未选择知识库。先在侧边栏或上传页选择一个知识库后，即可配置该知识库覆盖设置。
+      当前未选择资料库。先在侧边栏或上传页选择一个资料库后，即可配置该资料库覆盖设置。
     </div>
 
     <div v-else class="rounded-2xl border border-dashed border-border bg-card p-6 text-sm text-muted-foreground">
-      知识库单独设置已隐藏。展开“高级设置与诊断”后可按知识库微调。
+      资料库单独设置已隐藏。展开“高级设置与诊断”后可按资料库微调。
     </div>
   </div>
 </template>
@@ -625,6 +940,31 @@ const systemSchemaGroups = computed(() => systemAdvanced.value?.schema?.groups |
 const systemSchemaFields = computed(() => systemAdvanced.value?.schema?.fields || [])
 const userDraft = computed(() => settingsStore.userDraft)
 const kbDraft = computed(() => settingsStore.kbDraft)
+const providerConfig = computed(() => settingsStore.providerConfig)
+const providerDraft = computed(() => settingsStore.providerDraft)
+const providerSetup = computed(() => settingsStore.providerSetup)
+const providerTestResult = computed(() => settingsStore.providerTestResult)
+const providerFeaturesReady = computed(() => settingsStore.llmFeaturesReady)
+const llmProviderOptions = computed(() => (
+  (providerConfig.value?.supportedLlmProviders || ['auto', 'deepseek', 'qwen']).map((value) => ({
+    value,
+    label: providerOptionLabel(value),
+  }))
+))
+const embeddingProviderOptions = computed(() => (
+  (providerConfig.value?.supportedEmbeddingProviders || ['auto', 'deepseek', 'qwen', 'dashscope']).map((value) => ({
+    value,
+    label: providerOptionLabel(value),
+  }))
+))
+const qwenRegionOptions = computed(() => providerConfig.value?.regionPresets?.qwen || [])
+const dashscopeRegionOptions = computed(() => providerConfig.value?.regionPresets?.dashscope || [])
+const providerMissingSummary = computed(() => (
+  (providerSetup.value?.missing || [])
+    .map((item) => providerMissingLabel(item))
+    .filter(Boolean)
+    .join('、')
+))
 
 function emptyToNull(value) {
   const normalized = String(value ?? '').trim()
@@ -680,6 +1020,97 @@ function providerSourceLabel(value) {
   if (value === 'auto') return '自动'
   if (value === 'manual') return '手动'
   return '—'
+}
+
+function providerOptionLabel(value) {
+  if (value === 'auto') return '自动选择'
+  if (value === 'deepseek') return 'DeepSeek'
+  if (value === 'qwen') return 'Qwen'
+  if (value === 'dashscope') return 'DashScope'
+  return String(value || '—')
+}
+
+function providerMissingLabel(value) {
+  const labels = {
+    'deepseek.api_key': 'DeepSeek API Key',
+    'deepseek.base_url': 'DeepSeek Base URL',
+    'deepseek.model': 'DeepSeek 对话模型',
+    'deepseek.embedding_model': 'DeepSeek 向量模型',
+    'qwen.api_key': 'Qwen API Key',
+    'qwen.base_url': 'Qwen Base URL',
+    'qwen.model': 'Qwen 对话模型',
+    'qwen.embedding_model': 'Qwen 向量模型',
+    'dashscope.base_url': 'DashScope Base URL',
+    'dashscope.embedding_model': 'DashScope 向量模型',
+    'openai.api_key': 'OpenAI API Key',
+    'gemini.api_key': 'Gemini API Key',
+  }
+  return labels[value] || value
+}
+
+function providerBadgeClass(active) {
+  return active
+    ? 'border-primary/30 bg-primary/10 text-primary'
+    : 'border-border bg-background text-muted-foreground'
+}
+
+function setProviderRoot(key, value) {
+  settingsStore.setProviderDraft({ [key]: value })
+}
+
+function updateProviderSection(section, patch) {
+  settingsStore.setProviderDraft({ [section]: patch })
+}
+
+function beginProviderKeyEdit(section) {
+  updateProviderSection(section, {
+    editing_api_key: true,
+    clear_api_key: false,
+    api_key_input: '',
+  })
+}
+
+function clearProviderKey(section) {
+  updateProviderSection(section, {
+    editing_api_key: false,
+    clear_api_key: true,
+    api_key_input: '',
+  })
+}
+
+function applyRegionPreset(section, regionId) {
+  const presetOptions = section === 'qwen' ? qwenRegionOptions.value : dashscopeRegionOptions.value
+  const preset = presetOptions.find((item) => item.id === regionId)
+  if (!preset) return
+  const patch = { region: regionId }
+  if (regionId !== 'custom' && preset.base_url) {
+    patch.base_url = preset.base_url
+  }
+  updateProviderSection(section, patch)
+}
+
+const providerTestTarget = computed(() => {
+  if (['deepseek', 'qwen'].includes(providerDraft.value?.llm_provider)) return 'llm'
+  if (['deepseek', 'qwen', 'dashscope'].includes(providerDraft.value?.embedding_provider)) return 'embedding'
+  return 'auto'
+})
+
+async function saveProviderSettings() {
+  try {
+    await settingsStore.saveProviderConfig()
+    showToast('模型接入配置已保存', 'success')
+  } catch {
+    // global error toast handled by api layer
+  }
+}
+
+async function runProviderConnectionTest() {
+  try {
+    const result = await settingsStore.testProviderConfig({ target: providerTestTarget.value })
+    showToast(result?.message || '连接测试成功', 'success')
+  } catch {
+    // global error toast handled by api layer
+  }
 }
 
 async function reloadSettings(force = false) {

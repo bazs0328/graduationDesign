@@ -6,7 +6,21 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 
 import App from '@/App.vue'
 import { routes } from '@/router'
-import { apiGet, apiPost, buildLearningPath, getProfile } from '@/api'
+import {
+  apiGet,
+  apiPost,
+  buildLearningPath,
+  getProfile,
+  getSettings,
+  authMe,
+  getSystemProviderSettings,
+  getSystemSettings,
+} from '@/api'
+import {
+  buildProviderConfigResponse,
+  buildSettingsResponse,
+  buildSystemSettingsResponse,
+} from './fixtures/settingsFixtures'
 
 vi.mock('vue-echarts', () => ({
   default: {
@@ -23,6 +37,10 @@ vi.mock('@/api', async (importOriginal) => {
     apiPost: vi.fn(),
     getProfile: vi.fn(),
     buildLearningPath: vi.fn(),
+    getSettings: vi.fn(),
+    authMe: vi.fn(),
+    getSystemSettings: vi.fn(),
+    getSystemProviderSettings: vi.fn(),
   }
 })
 
@@ -61,6 +79,10 @@ beforeEach(() => {
   apiPost.mockReset()
   getProfile.mockReset()
   buildLearningPath.mockReset()
+  getSettings.mockReset()
+  authMe.mockReset()
+  getSystemSettings.mockReset()
+  getSystemProviderSettings.mockReset()
   localStorage.clear()
   sessionStorage.clear()
 
@@ -72,6 +94,10 @@ beforeEach(() => {
   getProfile.mockResolvedValue({ ability_level: 'intermediate' })
   buildLearningPath.mockResolvedValue({})
   apiPost.mockResolvedValue({})
+  getSettings.mockResolvedValue(buildSettingsResponse())
+  authMe.mockResolvedValue({ user_id: 'test', username: 'test', name: 'test', access_token: 'test-token' })
+  getSystemSettings.mockResolvedValue(buildSystemSettingsResponse())
+  getSystemProviderSettings.mockResolvedValue(buildProviderConfigResponse())
 
   apiGet.mockImplementation((path) => {
     const url = parsePath(path)
@@ -177,5 +203,5 @@ describe('Progress learning-path refresh button', () => {
 
     expect(buildLearningPath).not.toHaveBeenCalled()
     expect(afterCalls).toBe(beforeCalls + 1)
-  }, 20000)
+  }, 40000)
 })

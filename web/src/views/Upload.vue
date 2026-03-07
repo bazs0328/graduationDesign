@@ -10,61 +10,50 @@
 
         <div class="space-y-4">
           <div class="space-y-2">
-            <label class="text-sm font-medium text-muted-foreground uppercase tracking-wider">知识库</label>
+            <label class="text-sm font-medium text-muted-foreground uppercase tracking-wider">学习资料库</label>
             <div v-if="busy.init">
               <SkeletonBlock type="list" :lines="2" />
             </div>
-            <div v-else class="flex gap-2 flex-wrap">
-              <KbSelector
-                class="flex-1"
-                :model-value="selectedKbId"
-                :kbs="kbs"
-                label=""
-                placeholder="请选择"
-                :loading="appContext.kbsLoading"
-                @update:model-value="selectedKbId = $event"
-              />
-              <input
-                type="text"
-                v-model="kbNameInput"
-                ref="kbNameInputRef"
-                placeholder="新知识库名称"
-                class="flex-1 min-w-[160px] bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary"
-              />
-              <Button
-                variant="secondary"
-                :disabled="!kbNameInput"
-                :loading="busy.kb"
-                @click="createKb"
-              >
-                创建
-              </Button>
-            </div>
-            <div v-if="!busy.init && selectedKbId" class="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2">
-              <input
-                type="text"
-                v-model="kbRenameInput"
-                placeholder="当前知识库新名称"
-                class="bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary"
-              />
-              <Button
-                variant="outline"
-                :disabled="!kbRenameInput || (selectedKb && kbRenameInput.trim() === selectedKb.name)"
-                :loading="busy.kbManage"
-                @click="renameCurrentKb"
-              >
-                重命名当前库
-              </Button>
-              <Button
-                variant="destructive"
-                :loading="busy.kbDelete"
-                @click="deleteCurrentKb"
-              >
-                删除当前库
-              </Button>
+            <div v-else class="space-y-3">
+              <div v-if="hasAnyKb" class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
+                <KbSelector
+                  class="flex-1"
+                  :model-value="selectedKbId"
+                  :kbs="kbs"
+                  label=""
+                  placeholder="请选择资料库"
+                  :loading="appContext.kbsLoading"
+                  @update:model-value="selectedKbId = $event"
+                />
+                <Button
+                  variant="outline"
+                  :disabled="!selectedKbId"
+                  @click="manageKbDialogOpen = true"
+                >
+                  管理当前资料库
+                </Button>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
+                <input
+                  type="text"
+                  v-model="kbNameInput"
+                  ref="kbNameInputRef"
+                  :placeholder="hasAnyKb ? '新资料库名称' : '先输入资料库名称'"
+                  class="bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary"
+                />
+                <Button
+                  variant="secondary"
+                  :disabled="!kbNameInput"
+                  :loading="busy.kb"
+                  @click="createKb"
+                >
+                  {{ hasAnyKb ? '创建新资料库' : '创建资料库' }}
+                </Button>
+              </div>
             </div>
             <p v-if="selectedKbId" class="text-xs text-muted-foreground">
-              删除非空知识库时会二次确认是否级联删除其下文档。
+              重命名和删除已移入“管理当前资料库”，避免误操作打断上传流程。
             </p>
             <p class="text-xs text-muted-foreground">
               系统级文档识别能力与解析策略由管理员维护；问答与测验常用偏好可在
@@ -102,14 +91,14 @@
             <Button
               class="flex-1 shadow-lg shadow-primary/25"
               size="lg"
-              :disabled="!uploadFile"
+              :disabled="!canUpload"
               :loading="busy.upload"
               @click="uploadDoc"
             >
               <template #icon>
                 <UploadIcon class="w-5 h-5" />
               </template>
-              {{ busy.upload ? '上传中…' : '上传到知识库' }}
+              {{ busy.upload ? '上传中…' : uploadPrimaryLabel }}
             </Button>
             <Button
               variant="secondary"
@@ -324,6 +313,76 @@
       </section>
     </div>
 
+    <section
+      v-if="showUploadNextSteps"
+      class="rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/10 via-card to-card p-6 shadow-sm space-y-4"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="space-y-2">
+          <div class="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-background px-3 py-1 text-xs font-semibold text-primary">
+            下一步
+          </div>
+          <h3 class="text-xl font-bold tracking-tight">资料已上传，继续完成学习闭环</h3>
+          <p class="text-sm text-muted-foreground leading-relaxed max-w-2xl">
+            {{ uploadSuggestionDescription }}
+          </p>
+        </div>
+        <div class="text-xs text-muted-foreground rounded-xl border border-border bg-background/80 px-3 py-2">
+          当前资料：{{ lastUploadedDoc?.filename || '刚上传的文档' }}
+        </div>
+      </div>
+      <div v-if="!providerFeaturesReady" class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        继续前请先到设置中心完成模型接入配置。上传本身已完成，但摘要、问答和测验暂时不可用。
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <button
+          type="button"
+          class="rounded-2xl border border-border bg-background p-4 text-left hover:border-primary/30 hover:bg-primary/5 transition-colors disabled:opacity-60 disabled:hover:border-border disabled:hover:bg-background"
+          :disabled="!providerFeaturesReady"
+          @click="goToPostUploadStep('summary')"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <FileText class="w-5 h-5 text-primary" />
+            <span class="text-[10px] font-bold uppercase tracking-[0.22em] text-muted-foreground">第 1 步</span>
+          </div>
+          <div class="mt-4 space-y-1">
+            <div class="font-semibold">生成摘要</div>
+            <p class="text-sm text-muted-foreground">先快速掌握整体结构和核心内容。</p>
+          </div>
+        </button>
+        <button
+          type="button"
+          class="rounded-2xl border border-border bg-background p-4 text-left hover:border-primary/30 hover:bg-primary/5 transition-colors disabled:opacity-60 disabled:hover:border-border disabled:hover:bg-background"
+          :disabled="!providerFeaturesReady"
+          @click="goToPostUploadStep('qa')"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <MessageSquare class="w-5 h-5 text-primary" />
+            <span class="text-[10px] font-bold uppercase tracking-[0.22em] text-muted-foreground">第 2 步</span>
+          </div>
+          <div class="mt-4 space-y-1">
+            <div class="font-semibold">开始问答</div>
+            <p class="text-sm text-muted-foreground">围绕刚上传的资料直接提问和追问。</p>
+          </div>
+        </button>
+        <button
+          type="button"
+          class="rounded-2xl border border-border bg-background p-4 text-left hover:border-primary/30 hover:bg-primary/5 transition-colors disabled:opacity-60 disabled:hover:border-border disabled:hover:bg-background"
+          :disabled="!providerFeaturesReady"
+          @click="goToPostUploadStep('quiz')"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <PenTool class="w-5 h-5 text-primary" />
+            <span class="text-[10px] font-bold uppercase tracking-[0.22em] text-muted-foreground">第 3 步</span>
+          </div>
+          <div class="mt-4 space-y-1">
+            <div class="font-semibold">开始测验</div>
+            <p class="text-sm text-muted-foreground">用几道题先验证自己是否真正理解。</p>
+          </div>
+        </button>
+      </div>
+    </section>
+
     <section class="bg-card border border-border rounded-2xl p-6 shadow-lg shadow-primary/5 space-y-4">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
@@ -388,22 +447,91 @@
         </div>
       </div>
     </section>
+
+    <teleport to="body">
+      <div
+        v-if="manageKbDialogOpen"
+        class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+        @click.self="manageKbDialogOpen = false"
+      >
+        <section class="w-full max-w-xl rounded-2xl border border-border bg-card shadow-xl overflow-hidden">
+          <header class="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+            <div class="space-y-1">
+              <h3 class="text-lg font-bold">管理当前资料库</h3>
+              <p class="text-sm text-muted-foreground">
+                当前资料库：{{ selectedKb?.name || '未选择' }}
+              </p>
+            </div>
+            <button
+              type="button"
+              class="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-accent"
+              @click="manageKbDialogOpen = false"
+            >
+              关闭
+            </button>
+          </header>
+
+          <div class="px-5 py-5 space-y-5">
+            <div class="space-y-2">
+              <label class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">重命名资料库</label>
+              <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+                <input
+                  type="text"
+                  v-model="kbRenameInput"
+                  placeholder="输入新的资料库名称"
+                  class="bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary"
+                />
+                <Button
+                  variant="outline"
+                  :disabled="!kbRenameInput || (selectedKb && kbRenameInput.trim() === selectedKb.name)"
+                  :loading="busy.kbManage"
+                  @click="renameCurrentKb"
+                >
+                  保存名称
+                </Button>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-destructive/20 bg-destructive/5 p-4 space-y-3">
+              <div class="space-y-1">
+                <p class="text-sm font-semibold text-destructive">删除当前资料库</p>
+                <p class="text-xs text-muted-foreground">
+                  删除非空资料库时会再次确认是否级联删除其中全部文档。
+                </p>
+              </div>
+              <Button
+                variant="destructive"
+                :loading="busy.kbDelete"
+                @click="deleteCurrentKb"
+              >
+                删除当前资料库
+              </Button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </teleport>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
-import { Upload, FileText, Database, X, RefreshCw } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
+import { Upload as UploadIcon, FileText, Database, X, RefreshCw, MessageSquare, PenTool } from 'lucide-vue-next'
 import { apiDelete, apiGet, apiPatch, apiPost, apiUploadWithProgress } from '../api'
 import { useToast } from '../composables/useToast'
 import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
+import { useSettingsStore } from '../stores/settings'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import KbSelector from '../components/context/KbSelector.vue'
+import { buildRouteContextQuery } from '../utils/routeContext'
 
+const router = useRouter()
 const { showToast } = useToast()
 const { appContext, resolvedUserId, kbs, selectedKbId } = useAppKnowledgeScope()
+const settingsStore = useSettingsStore()
 
 const UPLOAD_ALLOWED_EXTENSIONS = new Set(['.pdf', '.txt', '.md', '.docx', '.pptx'])
 const UPLOAD_MAX_FILE_BYTES = 50 * 1024 * 1024
@@ -435,6 +563,8 @@ const uploadProgress = ref({
   docId: null,
 })
 const docBusyMap = ref({})
+const manageKbDialogOpen = ref(false)
+const lastUploadedDoc = ref(null)
 const taskCenter = ref({
   processing: [],
   error: [],
@@ -457,6 +587,35 @@ let docsFilterDebounce = null
 let uploadProgressResetTimer = null
 const selectedKb = computed(() => kbs.value.find((item) => item.id === selectedKbId.value) || null)
 const hasAnyKb = computed(() => kbs.value.length > 0)
+const canUpload = computed(() => {
+  if (!uploadFile.value) return false
+  if (selectedKbId.value) return true
+  return Boolean(String(kbNameInput.value || '').trim())
+})
+const uploadPrimaryLabel = computed(() => {
+  if (!hasAnyKb.value) return '创建资料库并上传'
+  if (!selectedKbId.value) return '先选择资料库'
+  return '上传到当前资料库'
+})
+const showUploadNextSteps = computed(() => (
+  Boolean(lastUploadedDoc.value)
+  && settingsStore.effectiveSettings?.upload?.post_upload_suggestions !== false
+))
+const providerSetup = computed(() => settingsStore.providerSetup)
+const providerFeaturesReady = computed(() => {
+  const setup = providerSetup.value
+  if (!setup) return true
+  return Boolean(setup.llm_ready && setup.embedding_ready)
+})
+const uploadSuggestionDescription = computed(() => {
+  if (!providerFeaturesReady.value) {
+    return '文档已经上传完成。继续摘要、问答或测验前，先到设置中心完成模型接入配置。'
+  }
+  if (lastUploadedDoc.value?.status === 'processing') {
+    return '文档已提交并进入解析流程。你可以先去摘要页或问答页，待状态就绪后继续深入学习。'
+  }
+  return '推荐先看摘要建立全局理解，再用问答澄清细节，最后用测验检查掌握程度。'
+})
 const isDocFilterActive = computed(() => {
   return Boolean(
     (docFilters.value.keyword && docFilters.value.keyword.trim())
@@ -466,12 +625,12 @@ const isDocFilterActive = computed(() => {
 })
 const uploadDocsEmptyDescription = computed(() => {
   if (!hasAnyKb.value) {
-    return '先创建一个知识库，再上传 PDF/TXT/MD/DOCX/PPTX 文档进行解析。'
+    return '先创建一个资料库，再上传 PDF/TXT/MD/DOCX/PPTX 文档进行解析。'
   }
   if (isDocFilterActive.value) {
     return '当前筛选条件下没有匹配文档，可以清空筛选后查看全部结果。'
   }
-  return '选择文件后上传到当前知识库，系统会自动解析并建立索引。'
+  return '选择文件后上传到当前资料库，系统会自动解析并建立索引。'
 })
 const uploadDocsEmptyHint = computed(() => {
   if (!hasAnyKb.value) {
@@ -484,7 +643,7 @@ const uploadDocsEmptyHint = computed(() => {
 })
 const uploadDocsEmptyPrimaryAction = computed(() => {
   if (!hasAnyKb.value) {
-    return { label: '创建知识库' }
+    return { label: '创建资料库' }
   }
   if (isDocFilterActive.value) {
     return { label: '清空筛选', variant: 'secondary' }
@@ -770,6 +929,7 @@ async function uploadDoc() {
   const file = uploadFile.value
   busy.value.upload = true
   clearUploadProgress()
+  let targetKbId = selectedKbId.value
   setUploadProgress({
     phase: 'uploading',
     percent: 0,
@@ -779,12 +939,19 @@ async function uploadDoc() {
     docId: null,
   })
   try {
+    if (!targetKbId) {
+      const createdKb = await createKb({ silent: true })
+      targetKbId = createdKb?.id || ''
+    }
+    if (!targetKbId) {
+      showToast('请先创建资料库后再上传', 'error')
+      focusKbNameInput()
+      return
+    }
     const form = new FormData()
     form.append('file', file)
     form.append('user_id', resolvedUserId.value)
-    if (selectedKbId.value) {
-      form.append('kb_id', selectedKbId.value)
-    }
+    form.append('kb_id', targetKbId)
     const uploadedDoc = await apiUploadWithProgress('/api/docs/upload', form, {
       onProgress({ percent, loaded, total }) {
         setUploadProgress({
@@ -802,6 +969,11 @@ async function uploadDoc() {
       total: file.size || uploadProgress.value.total,
       docId: uploadedDoc?.id || null,
     })
+    lastUploadedDoc.value = {
+      ...(uploadedDoc || {}),
+      kb_id: uploadedDoc?.kb_id || targetKbId,
+      filename: uploadedDoc?.filename || file.name || '',
+    }
     showToast('文档上传成功，正在处理中...', 'success')
     clearSelectedUploadFile()
     await refreshDocs({ resetPage: true })
@@ -845,6 +1017,9 @@ async function checkDocStatus(docId) {
       const nextDocs = docs.value.slice()
       nextDocs.splice(docIndex, 1, doc)
       docs.value = nextDocs
+    }
+    if (lastUploadedDoc.value?.id === docId) {
+      lastUploadedDoc.value = { ...lastUploadedDoc.value, ...doc }
     }
 
     // 如果状态不再是 processing，停止轮询
@@ -896,21 +1071,24 @@ function isDocBusy(docId) {
   return !!docBusyMap.value[docId]
 }
 
-async function createKb() {
+async function createKb(options = {}) {
   if (!kbNameInput.value) return
+  const { silent = false } = options
   busy.value.kb = true
   try {
     const res = await apiPost('/api/kb', {
       name: kbNameInput.value,
       user_id: resolvedUserId.value
     })
-    showToast('知识库创建成功', 'success')
+    if (!silent) {
+      showToast('资料库创建成功', 'success')
+    }
     kbNameInput.value = ''
     await refreshKbs(true)
     if (res?.id) {
       selectedKbId.value = res.id
     }
-    await refreshDocs()
+    return res
   } catch {
     // error toast handled globally
   } finally {
@@ -929,7 +1107,7 @@ async function renameCurrentKb() {
       user_id: resolvedUserId.value,
       name: targetName
     })
-    showToast('知识库重命名成功', 'success')
+    showToast('资料库重命名成功', 'success')
     await refreshKbs(true)
   } catch {
     // error toast handled globally
@@ -943,16 +1121,20 @@ async function deleteCurrentKb() {
   const docCount = docsTotal.value
   let cascade = false
   if (docCount > 0) {
-    cascade = window.confirm(`当前知识库包含 ${docCount} 个文档，是否级联删除该知识库及其全部文档？`)
+    cascade = window.confirm(`当前资料库包含 ${docCount} 个文档，是否级联删除该资料库及其全部文档？`)
     if (!cascade) return
   } else {
-    const confirmed = window.confirm('确认删除当前空知识库？')
+    const confirmed = window.confirm('确认删除当前空资料库？')
     if (!confirmed) return
   }
   busy.value.kbDelete = true
   try {
     await apiDelete(`/api/kb/${selectedKbId.value}?user_id=${encodeURIComponent(resolvedUserId.value)}&cascade=${cascade}`)
-    showToast('知识库已删除', 'success')
+    showToast('资料库已删除', 'success')
+    if (lastUploadedDoc.value?.kb_id === selectedKbId.value) {
+      lastUploadedDoc.value = null
+    }
+    manageKbDialogOpen.value = false
     await refreshKbs(true)
     await refreshDocs({ resetPage: true })
   } catch {
@@ -997,10 +1179,10 @@ async function moveDoc(doc) {
     .filter((kb) => kb.id !== doc.kb_id)
     .map((kb) => `${kb.name} (${kb.id})`)
   if (options.length === 0) {
-    showToast('没有可移动的目标知识库', 'error')
+    showToast('没有可移动的目标资料库', 'error')
     return
   }
-  const input = window.prompt(`输入目标知识库名称或ID：\n${options.join('\n')}`)
+  const input = window.prompt(`输入目标资料库名称或 ID：\n${options.join('\n')}`)
   const target = resolveTargetKb(input, doc.kb_id)
   if (!target) return
 
@@ -1088,7 +1270,7 @@ async function deleteDocItem(doc) {
 
 function kbNameById(kbId) {
   const kb = kbs.value.find((item) => item.id === kbId)
-  return kb ? kb.name : '未知知识库'
+  return kb ? kb.name : '未知资料库'
 }
 
 function statusLabel(status) {
@@ -1112,6 +1294,11 @@ function statusClass(status) {
 onMounted(async () => {
   busy.value.init = true
   try {
+    try {
+      await settingsStore.load({ userId: resolvedUserId.value })
+    } catch {
+      // ignore optional suggestions settings load failure
+    }
     await refreshKbs()
     await refreshDocs()
   } finally {
@@ -1128,6 +1315,7 @@ watch(selectedKbId, async () => {
     clearTimeout(docsFilterDebounce)
     docsFilterDebounce = null
   }
+  manageKbDialogOpen.value = false
   kbRenameInput.value = selectedKb.value ? selectedKb.value.name : ''
   await refreshDocs({ resetPage: true })
 })
@@ -1164,4 +1352,30 @@ onUnmounted(() => {
     uploadProgressResetTimer = null
   }
 })
+
+function postUploadContext() {
+  const kbId = lastUploadedDoc.value?.kb_id || selectedKbId.value || ''
+  const docId = lastUploadedDoc.value?.id || ''
+  return buildRouteContextQuery({
+    kbId,
+    docId,
+  })
+}
+
+function goToPostUploadStep(target) {
+  if (!providerFeaturesReady.value) {
+    router.push('/settings')
+    return
+  }
+  const query = postUploadContext()
+  if (target === 'summary') {
+    router.push({ path: '/summary', query })
+    return
+  }
+  if (target === 'qa') {
+    router.push({ path: '/qa', query })
+    return
+  }
+  router.push({ path: '/quiz', query })
+}
 </script>

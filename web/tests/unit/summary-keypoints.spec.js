@@ -6,14 +6,23 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 
 import App from '@/App.vue'
 import { routes } from '@/router'
-import { apiGet, apiPost } from '@/api'
+import { apiGet, apiPost, getSettings, authMe, getSystemProviderSettings, getSystemSettings } from '@/api'
+import {
+  buildProviderConfigResponse,
+  buildSettingsResponse,
+  buildSystemSettingsResponse,
+} from './fixtures/settingsFixtures'
 
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual,
     apiGet: vi.fn(),
-    apiPost: vi.fn()
+    apiPost: vi.fn(),
+    getSettings: vi.fn(),
+    authMe: vi.fn(),
+    getSystemSettings: vi.fn(),
+    getSystemProviderSettings: vi.fn(),
   }
 })
 
@@ -88,6 +97,10 @@ async function mountAppWithRouter() {
 beforeEach(() => {
   apiGet.mockReset()
   apiPost.mockReset()
+  getSettings.mockReset()
+  authMe.mockReset()
+  getSystemSettings.mockReset()
+  getSystemProviderSettings.mockReset()
   localStorage.clear()
 
   apiGet.mockImplementation((path) => {
@@ -165,6 +178,10 @@ beforeEach(() => {
     }
     return Promise.resolve({})
   })
+  getSettings.mockResolvedValue(buildSettingsResponse())
+  authMe.mockResolvedValue({ user_id: 'test', username: 'test', name: 'test', access_token: 'test-token' })
+  getSystemSettings.mockResolvedValue(buildSystemSettingsResponse())
+  getSystemProviderSettings.mockResolvedValue(buildProviderConfigResponse())
 })
 
 describe('Summary/Keypoints payloads', () => {
@@ -217,7 +234,7 @@ describe('Summary/Keypoints payloads', () => {
     expect(html).toContain('文档片段')
     expect(html).toContain('单文档视图')
     expect(html).toContain('当前展示的是该文档提取结果')
-    expect(html).toContain('查看 KB 学习路径')
+    expect(html).toContain('查看资料库学习路径')
     expect(html).not.toContain('掌握度')
     expect(html).not.toContain('已尝试')
   })
@@ -235,7 +252,7 @@ describe('Summary/Keypoints payloads', () => {
 
     const groupedBtn = wrapper
       .findAll('button')
-      .find((btn) => btn.text().includes('查看知识库聚合知识点'))
+      .find((btn) => btn.text().includes('查看资料库重点知识点'))
     expect(groupedBtn).toBeTruthy()
     await groupedBtn.trigger('click')
     await flushPromises()
@@ -249,11 +266,11 @@ describe('Summary/Keypoints payloads', () => {
     expect(groupedCall?.[0]).toContain('user_id=test')
 
     const html = wrapper.html()
-    expect(html).toContain('知识库聚合视图')
+    expect(html).toContain('资料库聚合视图')
     expect(html).toContain('聚合后 2 项')
     expect(html).toContain('原始 3 项')
     expect(html).toContain('矩阵定义')
-    expect(html).toContain('KB聚合')
+    expect(html).toContain('资料库聚合')
     expect(html).toContain('来自 2 个文档')
     expect(html).toContain('矩阵.pdf')
     expect(html).toContain('线代讲义.pdf')

@@ -6,7 +6,22 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 
 import App from '@/App.vue'
 import { routes } from '@/router'
-import { apiGet, apiPost, apiSsePost, getDifficultyPlan, getProfile } from '@/api'
+import {
+  apiGet,
+  apiPost,
+  apiSsePost,
+  getDifficultyPlan,
+  getProfile,
+  getSettings,
+  authMe,
+  getSystemProviderSettings,
+  getSystemSettings,
+} from '@/api'
+import {
+  buildProviderConfigResponse,
+  buildSettingsResponse,
+  buildSystemSettingsResponse,
+} from './fixtures/settingsFixtures'
 
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal()
@@ -17,6 +32,10 @@ vi.mock('@/api', async (importOriginal) => {
     apiSsePost: vi.fn(),
     getProfile: vi.fn(),
     getDifficultyPlan: vi.fn(),
+    getSettings: vi.fn(),
+    authMe: vi.fn(),
+    getSystemSettings: vi.fn(),
+    getSystemProviderSettings: vi.fn(),
   }
 })
 
@@ -91,12 +110,24 @@ async function mountAppWithRouter() {
   return { wrapper, router }
 }
 
+async function openQaAdvancedPanel(wrapper) {
+  const toggleBtn = wrapper.findAll('button').find((btn) => btn.text().includes('高级选项'))
+  expect(toggleBtn).toBeTruthy()
+  await toggleBtn.trigger('click')
+  await flushPromises()
+  await nextTick()
+}
+
 beforeEach(() => {
   apiGet.mockReset()
   apiPost.mockReset()
   apiSsePost.mockReset()
   getProfile.mockReset()
   getDifficultyPlan.mockReset()
+  getSettings.mockReset()
+  authMe.mockReset()
+  getSystemSettings.mockReset()
+  getSystemProviderSettings.mockReset()
   localStorage.clear()
 
   apiGet.mockImplementation((path) => {
@@ -156,6 +187,10 @@ beforeEach(() => {
 
   getProfile.mockResolvedValue(profileResponse)
   getDifficultyPlan.mockResolvedValue(difficultyPlanResponse)
+  getSettings.mockResolvedValue(buildSettingsResponse())
+  authMe.mockResolvedValue({ user_id: 'test', username: 'test', name: 'test', access_token: 'test-token' })
+  getSystemSettings.mockResolvedValue(buildSystemSettingsResponse())
+  getSystemProviderSettings.mockResolvedValue(buildProviderConfigResponse())
 
   apiSsePost.mockImplementation(async (path, body, handlers) => {
     if (path !== '/api/qa/stream') return
@@ -221,18 +256,23 @@ describe('Q&A', () => {
     await nextTick()
 
     let html = wrapper.html()
-    expect(html).toContain('自适应依据')
-    expect(html).toContain('自适应开')
+    expect(html).not.toContain('回答自适应依据')
 
-    const adaptiveToggle = wrapper.findAll('button').find((btn) => btn.text().includes('自适应开'))
+    await openQaAdvancedPanel(wrapper)
+
+    html = wrapper.html()
+    expect(html).toContain('回答自适应依据')
+    expect(html).toContain('自适应开启')
+
+    const adaptiveToggle = wrapper.findAll('button').find((btn) => btn.text().includes('自适应开启'))
     expect(adaptiveToggle).toBeTruthy()
     await adaptiveToggle.trigger('click')
     await flushPromises()
     await nextTick()
 
     html = wrapper.html()
-    expect(html).toContain('自适应关')
-    expect(html).not.toContain('自适应依据')
+    expect(html).toContain('自适应关闭')
+    expect(html).not.toContain('回答自适应依据')
 
     const textarea = wrapper.find('textarea')
     await textarea.setValue('What is a matrix?')
@@ -275,14 +315,18 @@ describe('Q&A', () => {
     expect(html).toContain(qaResponse.answer)
     expect(html).toContain('参考来源（1）')
     expect(html).toContain('doc')
-    expect(html).toContain('来源可能来自该知识库下多个文档片段')
-    expect(html).toContain('回答生成完成')
-    expect(html).toContain('自适应依据')
-    expect(html).toContain('薄弱知识点 Top 3')
-    expect(html).toContain('矩阵乘法')
-    expect(html).toContain('30%')
-    expect(html).toContain('50%')
-    expect(html).toContain('20%')
+    expect(html).toContain('来源可能来自该资料库下多个文档片段')
+    expect(html).toContain('已完成')
+
+    await openQaAdvancedPanel(wrapper)
+
+    const advancedHtml = wrapper.html()
+    expect(advancedHtml).toContain('回答自适应依据')
+    expect(advancedHtml).toContain('薄弱知识点 Top 3')
+    expect(advancedHtml).toContain('矩阵乘法')
+    expect(advancedHtml).toContain('30%')
+    expect(advancedHtml).toContain('50%')
+    expect(advancedHtml).toContain('20%')
   })
 
   it('refreshes adaptive transparency after stream done', async () => {
@@ -344,7 +388,7 @@ describe('Q&A', () => {
         question: 'What is a matrix?'
       })
     )
-    expect(wrapper.html()).toContain('已回退非流式')
+    expect(wrapper.html()).toContain('已自动回退')
   })
 
   it('shows KB multi-document hint in learning-path context banner when focus is provided', async () => {
@@ -366,7 +410,7 @@ describe('Q&A', () => {
     expect(html).toContain('学习路径上下文')
     expect(html).toContain('当前学习目标')
     expect(html).toContain('矩阵定义')
-    expect(html).toContain('该学习目标可能关联同一知识库中的多个文档来源')
+    expect(html).toContain('该学习目标可能关联同一资料库中的多个文档来源')
   })
 
   it('auto-sends explain mode from route query and clears transient qa query params', async () => {
