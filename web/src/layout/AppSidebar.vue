@@ -10,7 +10,7 @@
     class="flex flex-col h-screen transition-all duration-300 fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] shadow-2xl lg:static lg:translate-x-0 lg:w-64 lg:max-w-none lg:shadow-none bg-slate-50/92 dark:bg-slate-900/90 border-r border-border/80 backdrop-blur-xl"
     :class="[
       mobileOpen ? 'translate-x-0' : '-translate-x-full',
-      collapsed ? 'lg:w-0 lg:min-w-0 lg:overflow-hidden lg:border-r-0' : 'lg:w-64'
+      collapsed ? 'lg:hidden' : 'lg:w-64'
     ]"
   >
     <div class="p-4 lg:p-5 flex items-center gap-3 border-b border-border/70 justify-between">
@@ -49,12 +49,6 @@
       >
         <component :is="item.icon" class="w-5 h-5 shrink-0" :class="$route.path === item.path ? 'text-primary' : 'text-muted-foreground'" />
         <span v-if="showExpandedLabels" class="font-semibold truncate">{{ item.name }}</span>
-        <div
-          v-if="collapsed && !mobileOpen"
-          class="absolute left-16 bg-popover text-popover-foreground px-2 py-1 rounded shadow-md opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap"
-        >
-          {{ item.name }}
-        </div>
       </router-link>
     </nav>
 
@@ -73,10 +67,10 @@
       <button
         class="hidden lg:flex w-full items-center justify-center p-2 rounded-xl hover:bg-white/80 dark:hover:bg-slate-800 transition-colors"
         @click="collapsed = !collapsed"
-        :aria-label="collapsed ? '显示导航栏' : '隐藏导航栏'"
-        :title="collapsed ? '显示导航栏' : '隐藏导航栏'"
+        aria-label="隐藏导航栏"
+        title="隐藏导航栏"
       >
-        <component :is="collapsed ? ChevronRight : ChevronLeft" class="w-5 h-5" />
+        <ChevronLeft class="w-5 h-5" />
       </button>
     </div>
   </aside>
@@ -94,7 +88,6 @@ import {
   BarChart2,
   SlidersHorizontal,
   ChevronLeft,
-  ChevronRight,
   X
 } from 'lucide-vue-next'
 import { getCurrentUser, logout } from '../api'
@@ -109,7 +102,7 @@ const displayName = computed(() => {
   const user = getCurrentUser()
   return user ? (user.name || user.username) : '—'
 })
-const showExpandedLabels = computed(() => mobileOpen.value || !collapsed.value)
+const showExpandedLabels = computed(() => !collapsed.value || mobileOpen.value)
 const sidebarInteractive = computed(() => (isDesktop.value && !collapsed.value) || mobileOpen.value)
 
 let lastFocusedElement = null
