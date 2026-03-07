@@ -8,9 +8,10 @@
             <div class="flex items-center gap-2 min-w-0">
               <button
                 type="button"
-                class="lg:hidden p-2 rounded-full hover:bg-accent transition-colors"
+                class="p-2 rounded-full hover:bg-accent transition-colors"
                 @click="toggleSidebarDrawer"
-                aria-label="打开导航菜单"
+                aria-label="切换导航菜单"
+                title="切换导航菜单"
               >
                 <PanelLeft class="w-5 h-5" />
               </button>

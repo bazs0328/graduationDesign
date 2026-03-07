@@ -10,7 +10,7 @@
     class="flex flex-col h-screen transition-all duration-300 fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] shadow-2xl lg:static lg:translate-x-0 lg:w-64 lg:max-w-none lg:shadow-none bg-slate-50/92 dark:bg-slate-900/90 border-r border-border/80 backdrop-blur-xl"
     :class="[
       mobileOpen ? 'translate-x-0' : '-translate-x-full',
-      collapsed ? 'lg:w-20' : 'lg:w-64'
+      collapsed ? 'lg:w-0 lg:min-w-0 lg:overflow-hidden lg:border-r-0' : 'lg:w-64'
     ]"
   >
     <div class="p-4 lg:p-5 flex items-center gap-3 border-b border-border/70 justify-between">
@@ -73,6 +73,8 @@
       <button
         class="hidden lg:flex w-full items-center justify-center p-2 rounded-xl hover:bg-white/80 dark:hover:bg-slate-800 transition-colors"
         @click="collapsed = !collapsed"
+        :aria-label="collapsed ? '显示导航栏' : '隐藏导航栏'"
+        :title="collapsed ? '显示导航栏' : '隐藏导航栏'"
       >
         <component :is="collapsed ? ChevronRight : ChevronLeft" class="w-5 h-5" />
       </button>
@@ -108,7 +110,7 @@ const displayName = computed(() => {
   return user ? (user.name || user.username) : '—'
 })
 const showExpandedLabels = computed(() => mobileOpen.value || !collapsed.value)
-const sidebarInteractive = computed(() => isDesktop.value || mobileOpen.value)
+const sidebarInteractive = computed(() => (isDesktop.value && !collapsed.value) || mobileOpen.value)
 
 let lastFocusedElement = null
 
@@ -151,7 +153,10 @@ function closeMobileDrawer() {
 }
 
 function handleSidebarToggleEvent() {
-  if (isDesktop.value) return
+  if (isDesktop.value) {
+    collapsed.value = !collapsed.value
+    return
+  }
   if (!mobileOpen.value && typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
     lastFocusedElement = document.activeElement
   }
