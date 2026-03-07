@@ -166,6 +166,7 @@ def _system_status() -> SettingsSystemStatus:
             "qa_top_k": settings.qa_top_k,
             "qa_fetch_k": settings.qa_fetch_k,
             "qa_bm25_k": settings.qa_bm25_k,
+            "qa_dynamic_window_enabled": settings.qa_dynamic_window_enabled,
             "qa_summary_auto_expand_enabled": settings.qa_summary_auto_expand_enabled,
             "qa_summary_top_k": settings.qa_summary_top_k,
             "qa_summary_fetch_k": settings.qa_summary_fetch_k,

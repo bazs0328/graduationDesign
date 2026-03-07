@@ -388,6 +388,7 @@ class QARequest(BaseModel):
     session_id: Optional[str] = None
     question: str
     user_id: Optional[str] = None
+    retrieval_preset: Optional[Literal["fast", "balanced", "deep"]] = None
     top_k: Optional[int] = Field(default=None, ge=1, le=20)
     fetch_k: Optional[int] = Field(default=None, ge=1, le=50)
     focus: Optional[str] = None  # Target keypoint text from learning path

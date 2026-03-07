@@ -2,11 +2,12 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.llm import get_llm
@@ -60,6 +61,7 @@ class QAResolvedContext:
     session: ChatSession | None
     profile: Any
     weak_concepts: list[str]
+    scope_stats: dict[str, int | str]
 
 
 def _truncate_history_text(value: str, limit: int) -> str:
@@ -142,6 +144,64 @@ def _serialize_sources(sources: list[dict]) -> list[dict]:
     ]
 
 
+def _build_scope_stats(
+    db: Session,
+    *,
+    resolved_user_id: str,
+    doc: Document | None = None,
+    doc_id: str | None = None,
+    kb_id: str | None = None,
+) -> dict[str, int | str]:
+    if doc_id:
+        current_doc = doc
+        if current_doc is None or current_doc.id != doc_id:
+            current_doc = (
+                db.query(Document)
+                .filter(Document.id == doc_id, Document.user_id == resolved_user_id)
+                .first()
+            )
+        return {
+            "scope": "doc",
+            "doc_count": 1 if current_doc else 0,
+            "total_chunks": int(getattr(current_doc, "num_chunks", 0) or 0),
+            "total_pages": int(getattr(current_doc, "num_pages", 0) or 0),
+            "num_chunks": int(getattr(current_doc, "num_chunks", 0) or 0),
+            "num_pages": int(getattr(current_doc, "num_pages", 0) or 0),
+        }
+
+    if kb_id:
+        doc_count, total_chunks, total_pages = (
+            db.query(
+                func.count(Document.id),
+                func.coalesce(func.sum(Document.num_chunks), 0),
+                func.coalesce(func.sum(Document.num_pages), 0),
+            )
+            .filter(
+                Document.user_id == resolved_user_id,
+                Document.kb_id == kb_id,
+                Document.status == "ready",
+            )
+            .one()
+        )
+        return {
+            "scope": "kb",
+            "doc_count": int(doc_count or 0),
+            "total_chunks": int(total_chunks or 0),
+            "total_pages": int(total_pages or 0),
+            "num_chunks": 0,
+            "num_pages": 0,
+        }
+
+    return {
+        "scope": "unknown",
+        "doc_count": 0,
+        "total_chunks": 0,
+        "total_pages": 0,
+        "num_chunks": 0,
+        "num_pages": 0,
+    }
+
+
 def _resolve_qa_request_context(payload: QARequest, db: Session) -> QAResolvedContext:
     resolved_user_id = ensure_user(db, payload.user_id)
     doc = None
@@ -210,6 +270,13 @@ def _resolve_qa_request_context(payload: QARequest, db: Session) -> QAResolvedCo
 
     profile = get_or_create_profile(db, resolved_user_id)
     weak_concepts = get_weak_concepts_by_mastery(db, resolved_user_id)
+    scope_stats = _build_scope_stats(
+        db,
+        resolved_user_id=resolved_user_id,
+        doc=doc,
+        doc_id=doc_id,
+        kb_id=kb_id,
+    )
 
     return QAResolvedContext(
         resolved_user_id=resolved_user_id,
@@ -219,6 +286,7 @@ def _resolve_qa_request_context(payload: QARequest, db: Session) -> QAResolvedCo
         session=session,
         profile=profile,
         weak_concepts=weak_concepts,
+        scope_stats=scope_stats,
     )
 
 
@@ -318,12 +386,14 @@ def _qa_stream_response(payload: QARequest, db: Session) -> StreamingResponse:
                 doc_id=ctx.doc_id,
                 kb_id=ctx.kb_id,
                 history=ctx.history,
+                retrieval_preset=payload.retrieval_preset,
                 top_k=payload.top_k,
                 fetch_k=payload.fetch_k,
                 ability_level=ctx.profile.ability_level,
                 weak_concepts=ctx.weak_concepts,
                 focus_keypoint=payload.focus,
                 mode=payload.mode,
+                scope_stats=ctx.scope_stats,
             )
             retrieve_ms = int((time.perf_counter() - retrieve_started) * 1000)
             retrieved_count = int(prepared.get("retrieved_count") or 0)
@@ -493,12 +563,14 @@ def ask_question(payload: QARequest, db: Session = Depends(get_db)):
         doc_id=ctx.doc_id,
         kb_id=ctx.kb_id,
         history=ctx.history,
+        retrieval_preset=payload.retrieval_preset,
         top_k=payload.top_k,
         fetch_k=payload.fetch_k,
         ability_level=ctx.profile.ability_level,
         weak_concepts=ctx.weak_concepts,
         focus_keypoint=payload.focus,
         mode=payload.mode,
+        scope_stats=ctx.scope_stats,
     )
     if prepared["no_results"]:
         answer = NO_RESULTS_ANSWER
@@ -532,6 +604,7 @@ def ask_question_stream_get(
     doc_id: str | None = None,
     kb_id: str | None = None,
     session_id: str | None = None,
+    retrieval_preset: Literal["fast", "balanced", "deep"] | None = Query(default=None),
     top_k: int | None = Query(default=None, ge=1, le=20),
     fetch_k: int | None = Query(default=None, ge=1, le=50),
     focus: str | None = None,
@@ -543,6 +616,7 @@ def ask_question_stream_get(
         doc_id=doc_id,
         kb_id=kb_id,
         session_id=session_id,
+        retrieval_preset=retrieval_preset,
         top_k=top_k,
         fetch_k=fetch_k,
         focus=focus,

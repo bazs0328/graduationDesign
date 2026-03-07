@@ -157,6 +157,31 @@ def test_qa_passes_adaptive_profile_to_service(client, seeded_session):
     assert kwargs["weak_concepts"] == ["矩阵", "特征值"]
 
 
+def test_qa_passes_retrieval_preset_and_doc_scope_stats(client, seeded_session):
+    with (
+        patch("app.routers.qa.prepare_qa_answer", side_effect=_mock_prepare) as mocked_prepare,
+        patch("app.routers.qa.get_llm", return_value=object()),
+        patch("app.routers.qa.generate_qa_answer", return_value="mock answer from LLM"),
+        patch("app.routers.qa._update_mastery_from_qa"),
+    ):
+        resp = client.post(
+            "/api/qa",
+            json={
+                "doc_id": seeded_session["doc_id"],
+                "user_id": seeded_session["user_id"],
+                "question": "What is a matrix?",
+                "retrieval_preset": "deep",
+            },
+        )
+
+    assert resp.status_code == 200
+    kwargs = mocked_prepare.call_args.kwargs
+    assert kwargs["retrieval_preset"] == "deep"
+    assert kwargs["scope_stats"]["scope"] == "doc"
+    assert kwargs["scope_stats"]["num_chunks"] == 1
+    assert kwargs["scope_stats"]["num_pages"] == 1
+
+
 def test_qa_with_invalid_session_id_returns_404(client, seeded_session):
     """POST /api/qa with non-existent session_id returns 404."""
     with patch("app.routers.qa._update_mastery_from_qa"):
@@ -327,7 +352,7 @@ def test_qa_stream_post_no_results_returns_done_without_chunks(client, seeded_se
 
 def test_qa_stream_get_available(client, seeded_session):
     with (
-        patch("app.routers.qa.prepare_qa_answer", side_effect=_mock_prepare_no_results),
+        patch("app.routers.qa.prepare_qa_answer", side_effect=_mock_prepare_no_results) as mocked_prepare,
         patch("app.routers.qa._update_mastery_from_qa"),
     ):
         resp, _events = _read_sse(
@@ -338,10 +363,15 @@ def test_qa_stream_get_available(client, seeded_session):
                 "question": "What is a matrix?",
                 "user_id": seeded_session["user_id"],
                 "kb_id": seeded_session["kb_id"],
+                "retrieval_preset": "fast",
             },
         )
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
+    kwargs = mocked_prepare.call_args.kwargs
+    assert kwargs["retrieval_preset"] == "fast"
+    assert kwargs["scope_stats"]["scope"] == "kb"
+    assert kwargs["scope_stats"]["doc_count"] >= 1
 
 
 def test_qa_stream_persists_sources_in_session(client, seeded_session, db_session):

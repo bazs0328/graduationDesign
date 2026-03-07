@@ -50,6 +50,7 @@ EDITABLE_SYSTEM_KEYS: tuple[str, ...] = (
     "qa_top_k",
     "qa_fetch_k",
     "qa_bm25_k",
+    "qa_dynamic_window_enabled",
     "qa_summary_auto_expand_enabled",
     "qa_summary_top_k",
     "qa_summary_fetch_k",
@@ -218,6 +219,7 @@ _SETTING_LABELS: dict[str, str] = {
     "qa_top_k": "问答参考片段数量",
     "qa_fetch_k": "问答候选范围",
     "qa_bm25_k": "BM25 候选数量",
+    "qa_dynamic_window_enabled": "启用动态检索窗口",
     "qa_summary_auto_expand_enabled": "摘要类问题自动扩展",
     "qa_summary_top_k": "摘要类参考片段数量",
     "qa_summary_fetch_k": "摘要类候选范围",
@@ -229,6 +231,7 @@ _SETTING_LABELS: dict[str, str] = {
 _SETTING_DESCRIPTIONS: dict[str, str] = {
     "llm_provider": "使用 auto 时会根据已配置密钥自动选择。",
     "embedding_provider": "使用 auto 时优先跟随对话模型提供商。",
+    "qa_dynamic_window_enabled": "关闭后问答会退回固定 top_k / fetch_k 方式。",
     "ocr_fallback_engines": "示例：rapidocr,tesseract",
     "lexical_stopwords_global_path": "路径相对 backend 工作目录。",
     "lexical_userdict_global_path": "路径相对 backend 工作目录。",

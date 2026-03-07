@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     qa_top_k: int = 4
     qa_fetch_k: int = 12
     qa_bm25_k: int = 6
+    qa_dynamic_window_enabled: bool = True
     qa_summary_auto_expand_enabled: bool = True
     qa_summary_top_k: int = 8
     qa_summary_fetch_k: int = 28

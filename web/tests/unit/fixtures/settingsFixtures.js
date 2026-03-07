@@ -38,7 +38,7 @@ export function buildSettingsResponse(overrides = {}) {
       embedding_provider_configured: 'dashscope',
       llm_provider_source: 'manual',
       embedding_provider_source: 'manual',
-      qa_defaults_from_env: { qa_top_k: 4, qa_fetch_k: 12, rag_mode: 'hybrid' },
+      qa_defaults_from_env: { qa_top_k: 4, qa_fetch_k: 12, qa_dynamic_window_enabled: true, rag_mode: 'hybrid' },
       ocr_enabled: true,
       pdf_parser_mode: 'auto',
       auth_require_login: true,

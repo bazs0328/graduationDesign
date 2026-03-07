@@ -54,6 +54,7 @@ def test_get_settings_returns_defaults_and_system_status_without_secret_values(c
     assert data["system_status"]["embedding_provider_source"] == "manual"
     assert "openai_api_key" not in data["system_status"]
     assert isinstance(data["system_status"]["secrets_configured"], dict)
+    assert data["system_status"]["qa_defaults_from_env"]["qa_dynamic_window_enabled"] is True
 
     effective = data["effective"]
     assert effective["qa"]["retrieval_preset"] == "balanced"
@@ -238,20 +239,23 @@ def test_system_settings_patch_and_reset_runtime_overrides(client):
     assert initial.status_code == 200
     initial_data = initial.json()
     assert "rag_mode" in initial_data["editable_keys"]
+    assert "qa_dynamic_window_enabled" in initial_data["editable_keys"]
     assert isinstance(initial_data.get("schema"), dict)
     assert isinstance(initial_data["schema"].get("groups"), list)
     assert isinstance(initial_data["schema"].get("fields"), list)
     assert any(item.get("key") == "rag_mode" for item in initial_data["schema"]["fields"])
+    assert any(item.get("key") == "qa_dynamic_window_enabled" for item in initial_data["schema"]["fields"])
 
     patched = client.patch(
         "/api/settings/system",
-        json={"values": {"rag_mode": "dense", "qa_top_k": 9, "qa_fetch_k": 18}},
+        json={"values": {"rag_mode": "dense", "qa_top_k": 9, "qa_fetch_k": 18, "qa_dynamic_window_enabled": False}},
         headers=headers,
     )
     assert patched.status_code == 200
     patched_data = patched.json()
     assert patched_data["overrides"]["rag_mode"] == "dense"
     assert patched_data["overrides"]["qa_top_k"] == 9
+    assert patched_data["overrides"]["qa_dynamic_window_enabled"] is False
     assert patched_data["effective"]["qa_fetch_k"] == 18
 
     status = client.get("/api/settings", headers=headers)
@@ -259,8 +263,9 @@ def test_system_settings_patch_and_reset_runtime_overrides(client):
     status_data = status.json()
     assert status_data["system_status"]["qa_defaults_from_env"]["rag_mode"] == "dense"
     assert status_data["system_status"]["qa_defaults_from_env"]["qa_top_k"] == 9
+    assert status_data["system_status"]["qa_defaults_from_env"]["qa_dynamic_window_enabled"] is False
 
-    reset = client.post("/api/settings/system/reset", json={"keys": ["rag_mode", "qa_top_k", "qa_fetch_k"]}, headers=headers)
+    reset = client.post("/api/settings/system/reset", json={"keys": ["rag_mode", "qa_top_k", "qa_fetch_k", "qa_dynamic_window_enabled"]}, headers=headers)
     assert reset.status_code == 200
     assert "rag_mode" not in reset.json()["overrides"]
 

@@ -1162,6 +1162,10 @@ function buildQaPayload(question, activeSessionId, requestedMode = qaMode.value)
     user_id: resolvedUserId.value,
     mode: normalizedRequestedMode,
   }
+  const retrievalPreset = String(effectiveQaSettings.value?.retrieval_preset || '').trim().toLowerCase()
+  if (['fast', 'balanced', 'deep'].includes(retrievalPreset)) {
+    payload.retrieval_preset = retrievalPreset
+  }
   const topK = Number(effectiveQaSettings.value?.top_k)
   if (Number.isFinite(topK) && topK > 0) {
     payload.top_k = topK

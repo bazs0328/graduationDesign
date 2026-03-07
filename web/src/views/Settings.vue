@@ -625,15 +625,15 @@
         </div>
 
         <div class="space-y-2">
-          <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">回答深度</label>
+          <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">检索深度</label>
           <select
             :value="userDraft.qa.retrieval_preset"
             class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
             @change="updateUserSection('qa', { retrieval_preset: $event.target.value })"
           >
-            <option value="fast">快速（更简洁）</option>
+            <option value="fast">快速（参考更少）</option>
             <option value="balanced">均衡（推荐）</option>
-            <option value="deep">深入（参考更多内容）</option>
+            <option value="deep">深入（参考更广）</option>
           </select>
         </div>
 
@@ -721,7 +721,7 @@
       <template #advanced>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div class="space-y-2">
-            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">手动参考片段数量（可空）</label>
+            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">兜底参考片段数量（可空）</label>
             <input
               type="number"
               min="1"
@@ -733,7 +733,7 @@
             />
           </div>
           <div class="space-y-2">
-            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">手动候选范围（可空）</label>
+            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">兜底候选范围（可空）</label>
             <input
               type="number"
               min="1"
@@ -747,7 +747,7 @@
         </div>
         <div class="flex items-center justify-between gap-3 text-xs">
           <p class="text-muted-foreground">
-            当手动值为空时，系统会自动按预设估算参考片段数量与候选范围。
+            系统会优先根据问题类型和资料范围动态调整；只有动态策略关闭或不可用时，才使用这些兜底值。
           </p>
           <button
             type="button"
@@ -806,7 +806,7 @@
         </div>
 
         <div class="space-y-2">
-          <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">回答深度覆盖</label>
+          <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">检索深度覆盖</label>
           <select
             :value="kbDraft.qa.retrieval_preset || ''"
             class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
@@ -863,7 +863,7 @@
       <template #advanced>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div class="space-y-2">
-            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">参考片段数量覆盖（可空）</label>
+            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">兜底参考片段数量覆盖（可空）</label>
             <input
               type="number"
               min="1"
@@ -875,7 +875,7 @@
             />
           </div>
           <div class="space-y-2">
-            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">候选范围覆盖（可空）</label>
+            <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">兜底候选范围覆盖（可空）</label>
             <input
               type="number"
               min="1"
@@ -888,7 +888,7 @@
           </div>
         </div>
         <div class="text-xs text-muted-foreground">
-          留空表示跟随用户默认；若用户默认也为空，则按预设映射自动计算。
+          留空表示跟随用户默认；当动态检索关闭或不可用时，系统会回退到这里对应的默认/预设值。
         </div>
       </template>
     </SettingsPanel>

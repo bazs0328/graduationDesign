@@ -1,4 +1,5 @@
 import logging
+import math
 import re
 from typing import Any, Iterator, List, Tuple
 
@@ -29,10 +30,52 @@ _QA_TOP_K_MAX = 20
 _QA_FETCH_K_MIN = 1
 _QA_FETCH_K_MAX = 50
 
+_RETRIEVAL_PRESET_WINDOW_MAP: dict[str, tuple[int, int]] = {
+    "fast": (3, 8),
+    "balanced": (4, 12),
+    "deep": (6, 20),
+}
+
 _SUMMARY_QUERY_PATTERNS = [
     re.compile(r"\b(summary|summari[sz]e|overview|recap|synopsis)\b", re.IGNORECASE),
     re.compile(r"(总结|概括|归纳|梳理|总览|综述|提炼|总结一下|概述)"),
     re.compile(r"(全文|整篇|本章|这一章|这章|本节|这节).{0,12}(讲了什么|主要内容|核心内容|重点)"),
+]
+_COMPARE_QUERY_PATTERNS = [
+    re.compile(r"\b(compare|comparison|contrast|different(?:ce|ces)?|vs\.?|versus|similarit(?:y|ies))\b", re.IGNORECASE),
+    re.compile(r"(比较|对比|区别|差异|异同|不同点|相同点)"),
+]
+_RELATION_QUERY_PATTERNS = [
+    re.compile(r"\b(relation|relationship|related|association|interact(?:ion)?)\b", re.IGNORECASE),
+    re.compile(r"(关系|联系|关联|相互作用)"),
+]
+_LIST_QUERY_PATTERNS = [
+    re.compile(r"\b(list|enumerate|identify|examples?|types?|kinds?|categories?)\b", re.IGNORECASE),
+    re.compile(r"(列举|列出|有哪些|有什么|举例|类型|种类|类别|包括哪些)"),
+]
+_STEPS_QUERY_PATTERNS = [
+    re.compile(r"\b(step(?:s)?|procedure|process|workflow|how to)\b", re.IGNORECASE),
+    re.compile(r"(步骤|流程|过程|如何|怎么做|怎么计算|怎样)"),
+]
+_CAUSES_QUERY_PATTERNS = [
+    re.compile(r"\b(cause|causes|reason|reasons|why|because)\b", re.IGNORECASE),
+    re.compile(r"(原因|为什么|成因|导致|引起)"),
+]
+_PROS_CONS_QUERY_PATTERNS = [
+    re.compile(r"\b(pros?\s+and\s+cons|advantages?|disadvantages?|strengths?|weaknesses?|trade[- ]?offs?)\b", re.IGNORECASE),
+    re.compile(r"(优缺点|利弊|优势|劣势|好处|坏处|取舍)"),
+]
+_COMPLEX_QUERY_PATTERN_GROUPS = (
+    _COMPARE_QUERY_PATTERNS,
+    _RELATION_QUERY_PATTERNS,
+    _LIST_QUERY_PATTERNS,
+    _STEPS_QUERY_PATTERNS,
+    _CAUSES_QUERY_PATTERNS,
+    _PROS_CONS_QUERY_PATTERNS,
+)
+_MULTI_PART_QUERY_PATTERNS = [
+    re.compile(r"(分别|同时|以及|并且|一方面|另一方面)"),
+    re.compile(r"\b(and|or|while|whereas|both)\b", re.IGNORECASE),
 ]
 
 _QA_HUMAN_TEMPLATE = (
@@ -108,6 +151,13 @@ def _clamp_int(value: int, *, lower: int, upper: int) -> int:
     return value
 
 
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except Exception:
+        return 0
+
+
 def _truncate_text(value: str, limit: int) -> str:
     normalized = " ".join(str(value or "").replace("\r", "\n").split())
     if limit <= 0:
@@ -129,11 +179,15 @@ def _should_rewrite_question(question: str | None, history: str | None) -> bool:
 def _resolve_retrieval_window(
     *,
     question: str,
+    retrieval_preset: str | None = None,
     top_k: int | None,
     fetch_k: int | None,
 ) -> tuple[int, int]:
-    k = int(top_k or settings.qa_top_k or _QA_TOP_K_MIN)
-    fetch = int(fetch_k or settings.qa_fetch_k or k)
+    preset = _RETRIEVAL_PRESET_WINDOW_MAP.get(str(retrieval_preset or "").strip().lower())
+    default_k = int(preset[0]) if preset else int(settings.qa_top_k or _QA_TOP_K_MIN)
+    default_fetch = int(preset[1]) if preset else int(settings.qa_fetch_k or default_k)
+    k = int(top_k or default_k)
+    fetch = int(fetch_k or default_fetch or k)
     k = _clamp_int(k, lower=_QA_TOP_K_MIN, upper=_QA_TOP_K_MAX)
     fetch = _clamp_int(fetch, lower=_QA_FETCH_K_MIN, upper=_QA_FETCH_K_MAX)
     if fetch < k:
@@ -165,6 +219,133 @@ def _resolve_retrieval_window(
             resolved_fetch,
         )
     return resolved_k, resolved_fetch
+
+
+def _normalize_retrieval_preset(preset: str | None) -> str | None:
+    normalized = str(preset or "").strip().lower()
+    if normalized in _RETRIEVAL_PRESET_WINDOW_MAP:
+        return normalized
+    return None
+
+
+def _is_multi_part_question(question: str | None) -> bool:
+    normalized = _normalize_question_text(question)
+    if not normalized:
+        return False
+    if len(re.findall(r"[；;?？]", normalized)) >= 2:
+        return True
+    if len(re.findall(r"[，,、；;]", normalized)) >= 2:
+        return True
+    return any(pattern.search(normalized) for pattern in _MULTI_PART_QUERY_PATTERNS)
+
+
+def _is_complex_coverage_question(question: str | None) -> bool:
+    normalized = _normalize_question_text(question)
+    if not normalized:
+        return False
+    if _is_summary_like_question(normalized) or _is_multi_part_question(normalized):
+        return True
+    for group in _COMPLEX_QUERY_PATTERN_GROUPS:
+        if any(pattern.search(normalized) for pattern in group):
+            return True
+    return False
+
+
+def _is_medium_complexity_question(question: str | None, *, rewritten_for_retrieval: bool = False) -> bool:
+    normalized = _normalize_question_text(question)
+    if rewritten_for_retrieval:
+        return True
+    if len(normalized) > 40:
+        return True
+    return _is_multi_part_question(normalized)
+
+
+def _resolve_dynamic_retrieval_window(
+    *,
+    question: str,
+    retrieval_preset: str | None,
+    scope_stats: dict[str, Any] | None = None,
+    rewritten_for_retrieval: bool = False,
+) -> tuple[int, int]:
+    normalized_preset = _normalize_retrieval_preset(retrieval_preset)
+    if not normalized_preset:
+        raise ValueError("Dynamic retrieval requires a valid preset")
+
+    k, fetch = _RETRIEVAL_PRESET_WINDOW_MAP[normalized_preset]
+    normalized_question = _normalize_question_text(question)
+
+    if _is_complex_coverage_question(normalized_question):
+        k += 2
+        fetch += 8
+
+    if _is_medium_complexity_question(
+        normalized_question,
+        rewritten_for_retrieval=rewritten_for_retrieval,
+    ):
+        k += 1
+        fetch += 4
+
+    stats = scope_stats or {}
+    scope = str(stats.get("scope") or "").strip().lower()
+    if scope == "doc":
+        if _safe_int(stats.get("num_chunks")) > 120 or _safe_int(stats.get("num_pages")) > 40:
+            k += 1
+            fetch += 4
+    elif scope == "kb":
+        doc_count = _safe_int(stats.get("doc_count"))
+        total_chunks = _safe_int(stats.get("total_chunks"))
+        if doc_count > 15 or total_chunks > 800:
+            k += 3
+            fetch += 12
+        elif doc_count > 6 or total_chunks > 300:
+            k += 2
+            fetch += 8
+
+    k = _clamp_int(k, lower=_QA_TOP_K_MIN, upper=_QA_TOP_K_MAX)
+    fetch = _clamp_int(fetch, lower=_QA_FETCH_K_MIN, upper=_QA_FETCH_K_MAX)
+    if fetch < k:
+        fetch = k
+    return k, fetch
+
+
+def _resolve_retry_window(k: int, fetch: int) -> tuple[int, int]:
+    retry_k = min(max(int(k) + 2, int(math.ceil(int(k) * 1.5))), _QA_TOP_K_MAX)
+    retry_fetch = min(max(int(fetch) + 8, int(math.ceil(int(fetch) * 1.8))), _QA_FETCH_K_MAX)
+    if retry_fetch < retry_k:
+        retry_fetch = retry_k
+    return retry_k, retry_fetch
+
+
+def _coverage_metrics(docs: list[Any]) -> dict[str, int]:
+    unique_groups: set[tuple[Any, Any]] = set()
+    total_chars = 0
+    for doc in docs or []:
+        total_chars += len(str(getattr(doc, "page_content", "") or "").strip())
+        meta = getattr(doc, "metadata", {}) or {}
+        unique_groups.add((meta.get("doc_id"), meta.get("page")))
+    return {
+        "total_chars": total_chars,
+        "unique_page_groups": len(unique_groups),
+        "doc_count": len(docs or []),
+    }
+
+
+def _should_retry_low_coverage(question: str, docs: list[Any]) -> bool:
+    metrics = _coverage_metrics(docs)
+    if metrics["doc_count"] <= 0:
+        return True
+    if metrics["total_chars"] < 600:
+        return True
+    if _is_complex_coverage_question(question) and metrics["unique_page_groups"] < 2:
+        return True
+    return False
+
+
+def _coverage_rank(question: str, docs: list[Any]) -> tuple[int, int, int]:
+    metrics = _coverage_metrics(docs)
+    if _is_complex_coverage_question(question):
+        return (metrics["unique_page_groups"], metrics["total_chars"], metrics["doc_count"])
+    return (metrics["total_chars"], metrics["unique_page_groups"], metrics["doc_count"])
 
 
 def _rewrite_standalone_question(question: str, history: str | None, llm: Any) -> str:
@@ -285,12 +466,14 @@ def answer_question(
     doc_id: str | None = None,
     kb_id: str | None = None,
     history: str | None = None,
+    retrieval_preset: str | None = None,
     top_k: int | None = None,
     fetch_k: int | None = None,
     ability_level: str = "intermediate",
     weak_concepts: list[str] | None = None,
     focus_keypoint: str | None = None,
     mode: str | None = None,
+    scope_stats: dict[str, Any] | None = None,
 ) -> Tuple[str, List[dict]]:
     prepared = prepare_qa_answer(
         user_id=user_id,
@@ -298,12 +481,14 @@ def answer_question(
         doc_id=doc_id,
         kb_id=kb_id,
         history=history,
+        retrieval_preset=retrieval_preset,
         top_k=top_k,
         fetch_k=fetch_k,
         ability_level=ability_level,
         weak_concepts=weak_concepts,
         focus_keypoint=focus_keypoint,
         mode=mode,
+        scope_stats=scope_stats,
     )
     if prepared["no_results"]:
         return NO_RESULTS_ANSWER, []
@@ -318,30 +503,38 @@ def prepare_qa_answer(
     doc_id: str | None = None,
     kb_id: str | None = None,
     history: str | None = None,
+    retrieval_preset: str | None = None,
     top_k: int | None = None,
     fetch_k: int | None = None,
     ability_level: str = "intermediate",
     weak_concepts: list[str] | None = None,
     focus_keypoint: str | None = None,
     mode: str | None = None,
+    scope_stats: dict[str, Any] | None = None,
 ) -> dict:
     resolved_mode = normalize_qa_mode(mode)
     normalized_question = _normalize_question_text(question)
     retrieval_question = normalized_question or str(question or "")
+    rewritten_for_retrieval = False
     if _should_rewrite_question(retrieval_question, history):
         rewrite_llm = get_llm(temperature=0.0)
-        retrieval_question = _rewrite_standalone_question(
+        rewritten_question = _rewrite_standalone_question(
             question=retrieval_question,
             history=history,
             llm=rewrite_llm,
         )
+        rewritten_for_retrieval = rewritten_question != retrieval_question
+        retrieval_question = rewritten_question
     docs = retrieve_documents(
         user_id=user_id,
         question=retrieval_question,
         doc_id=doc_id,
         kb_id=kb_id,
+        retrieval_preset=retrieval_preset,
         top_k=top_k,
         fetch_k=fetch_k,
+        scope_stats=scope_stats,
+        rewritten_for_retrieval=rewritten_for_retrieval,
     )
     if not docs:
         return {
@@ -523,8 +716,11 @@ def retrieve_documents(
     question: str,
     doc_id: str | None = None,
     kb_id: str | None = None,
+    retrieval_preset: str | None = None,
     top_k: int | None = None,
     fetch_k: int | None = None,
+    scope_stats: dict[str, Any] | None = None,
+    rewritten_for_retrieval: bool = False,
 ) -> list:
     vectorstore = get_vectorstore(user_id)
     search_filter = None
@@ -533,115 +729,144 @@ def retrieve_documents(
     elif kb_id:
         search_filter = {"kb_id": kb_id}
 
-    k, fetch = _resolve_retrieval_window(
-        question=question,
-        top_k=top_k,
-        fetch_k=fetch_k,
-    )
+    def _retrieve_documents_once(*, k: int, fetch: int) -> list[Any]:
+        docs = []
+        if settings.rag_mode == "dense":
+            try:
+                docs = vectorstore.max_marginal_relevance_search(
+                    question, k=k, fetch_k=fetch, filter=search_filter
+                )
+            except Exception:
+                docs = vectorstore.similarity_search(question, k=k, filter=search_filter)
+            filtered = _filter_low_quality_docs(question, docs)
+            return filtered[:k] if len(filtered) > k else filtered
 
-    docs = []
-    if settings.rag_mode == "dense":
         try:
-            docs = vectorstore.max_marginal_relevance_search(
-                question, k=k, fetch_k=fetch, filter=search_filter
-            )
-        except Exception:
-            docs = vectorstore.similarity_search(question, k=k, filter=search_filter)
-        filtered = _filter_low_quality_docs(question, docs)
-        return filtered[:k] if len(filtered) > k else filtered
-
-    dense_results: list[tuple[Any, float]] = []
-    try:
-        raw_dense_results = vectorstore.similarity_search_with_relevance_scores(
-            question, k=fetch, filter=search_filter
-        )
-        for doc, score in raw_dense_results:
-            dense_results.append((doc, float(score)))
-    except Exception:
-        try:
-            raw_dense_results = vectorstore.similarity_search_with_score(
+            raw_dense_results = vectorstore.similarity_search_with_relevance_scores(
                 question, k=fetch, filter=search_filter
             )
-            for doc, score in raw_dense_results:
-                dense_results.append((doc, 1.0 / (1.0 + max(float(score), 0.0))))
+            dense_results = [(doc, float(score)) for doc, score in raw_dense_results]
         except Exception:
-            dense_results = []
+            try:
+                raw_dense_results = vectorstore.similarity_search_with_score(
+                    question, k=fetch, filter=search_filter
+                )
+                dense_results = [
+                    (doc, 1.0 / (1.0 + max(float(score), 0.0)))
+                    for doc, score in raw_dense_results
+                ]
+            except Exception:
+                dense_results = []
 
-    bm25_k = settings.qa_bm25_k
-    if bm25_k < k:
-        bm25_k = k
-    lexical_results = []
-    if kb_id:
-        lexical_results = bm25_search(
-            user_id,
-            kb_id,
-            question,
-            top_k=bm25_k,
-            doc_id=doc_id,
+        bm25_k = max(int(settings.qa_bm25_k or 0), int(k), min(int(fetch), _QA_FETCH_K_MAX))
+        lexical_results = []
+        if kb_id:
+            lexical_results = bm25_search(
+                user_id,
+                kb_id,
+                question,
+                top_k=bm25_k,
+                doc_id=doc_id,
+            )
+
+        combined = {}
+        for doc, score in dense_results:
+            meta = doc.metadata or {}
+            key = (
+                meta.get("doc_id"),
+                meta.get("page"),
+                meta.get("chunk"),
+                doc.page_content[:80],
+            )
+            dense_score = float(score)
+            if key not in combined:
+                combined[key] = {
+                    "doc": doc,
+                    "dense": dense_score,
+                    "bm25": 0.0,
+                }
+            else:
+                combined[key]["dense"] = max(combined[key]["dense"], dense_score)
+
+        for doc, score in lexical_results:
+            meta = doc.metadata or {}
+            key = (
+                meta.get("doc_id"),
+                meta.get("page"),
+                meta.get("chunk"),
+                doc.page_content[:80],
+            )
+            if key not in combined:
+                combined[key] = {"doc": doc, "dense": 0.0, "bm25": float(score)}
+            else:
+                combined[key]["bm25"] = max(combined[key]["bm25"], float(score))
+
+        if not combined:
+            return []
+
+        dense_scores = [item["dense"] for item in combined.values()]
+        bm25_scores = [item["bm25"] for item in combined.values()]
+        dense_min = min(dense_scores)
+        dense_max = max(dense_scores)
+        bm25_min = min(bm25_scores)
+        bm25_max = max(bm25_scores)
+
+        def _norm(val: float, min_val: float, max_val: float) -> float:
+            if max_val - min_val < 1e-9:
+                return 0.0
+            return (val - min_val) / (max_val - min_val)
+
+        dense_weight = max(0.0, settings.rag_dense_weight)
+        bm25_weight = max(0.0, settings.rag_bm25_weight)
+        if dense_weight + bm25_weight < 1e-9:
+            dense_weight = 1.0
+
+        weighted = []
+        for item in combined.values():
+            dense_norm = _norm(item["dense"], dense_min, dense_max)
+            bm25_norm = _norm(item["bm25"], bm25_min, bm25_max)
+            score = dense_norm * dense_weight + bm25_norm * bm25_weight
+            weighted.append((item["doc"], score))
+
+        weighted.sort(key=lambda x: x[1], reverse=True)
+        selected = [doc for doc, _ in weighted[:k]]
+        return _filter_low_quality_docs(question, selected)
+
+    def _retrieve_static_documents() -> list[Any]:
+        k, fetch = _resolve_retrieval_window(
+            question=question,
+            retrieval_preset=retrieval_preset,
+            top_k=top_k,
+            fetch_k=fetch_k,
         )
+        return _retrieve_documents_once(k=k, fetch=fetch)
 
-    combined = {}
-    for doc, score in dense_results:
-        meta = doc.metadata or {}
-        key = (
-            meta.get("doc_id"),
-            meta.get("page"),
-            meta.get("chunk"),
-            doc.page_content[:80],
+    if not bool(getattr(settings, "qa_dynamic_window_enabled", True)):
+        return _retrieve_static_documents()
+
+    normalized_preset = _normalize_retrieval_preset(retrieval_preset)
+    if not normalized_preset:
+        return _retrieve_static_documents()
+
+    try:
+        k, fetch = _resolve_dynamic_retrieval_window(
+            question=question,
+            retrieval_preset=normalized_preset,
+            scope_stats=scope_stats,
+            rewritten_for_retrieval=rewritten_for_retrieval,
         )
-        dense_score = float(score)
-        if key not in combined:
-            combined[key] = {
-                "doc": doc,
-                "dense": dense_score,
-                "bm25": 0.0,
-            }
-        else:
-            combined[key]["dense"] = max(combined[key]["dense"], dense_score)
+        primary_docs = _retrieve_documents_once(k=k, fetch=fetch)
+        if not _should_retry_low_coverage(question, primary_docs):
+            return primary_docs
 
-    for doc, score in lexical_results:
-        meta = doc.metadata or {}
-        key = (
-            meta.get("doc_id"),
-            meta.get("page"),
-            meta.get("chunk"),
-            doc.page_content[:80],
-        )
-        if key not in combined:
-            combined[key] = {"doc": doc, "dense": 0.0, "bm25": float(score)}
-        else:
-            combined[key]["bm25"] = max(combined[key]["bm25"], float(score))
-
-    if not combined:
-        return []
-
-    dense_scores = [item["dense"] for item in combined.values()]
-    bm25_scores = [item["bm25"] for item in combined.values()]
-    dense_min = min(dense_scores)
-    dense_max = max(dense_scores)
-    bm25_min = min(bm25_scores)
-    bm25_max = max(bm25_scores)
-
-    def _norm(val: float, min_val: float, max_val: float) -> float:
-        if max_val - min_val < 1e-9:
-            return 0.0
-        return (val - min_val) / (max_val - min_val)
-
-    dense_weight = max(0.0, settings.rag_dense_weight)
-    bm25_weight = max(0.0, settings.rag_bm25_weight)
-    if dense_weight + bm25_weight < 1e-9:
-        dense_weight = 1.0
-
-    weighted = []
-    for item in combined.values():
-        dense_norm = _norm(item["dense"], dense_min, dense_max)
-        bm25_norm = _norm(item["bm25"], bm25_min, bm25_max)
-        score = dense_norm * dense_weight + bm25_norm * bm25_weight
-        weighted.append((item["doc"], score))
-
-    weighted.sort(key=lambda x: x[1], reverse=True)
-    selected = [doc for doc, _ in weighted[:k]]
-    return _filter_low_quality_docs(question, selected)
+        retry_k, retry_fetch = _resolve_retry_window(k, fetch)
+        retry_docs = _retrieve_documents_once(k=retry_k, fetch=retry_fetch)
+        if _coverage_rank(question, retry_docs) >= _coverage_rank(question, primary_docs):
+            return retry_docs
+        return primary_docs
+    except Exception:
+        logger.exception("QA dynamic retrieval failed, falling back to static window")
+        return _retrieve_static_documents()
 
 
 def build_sources_and_context(docs: list, user_id: str | None = None) -> Tuple[List[dict], str]:

@@ -235,6 +235,7 @@ describe('Q&A', () => {
       '/api/qa/stream',
       expect.objectContaining({
         kb_id: 'kb-1',
+        retrieval_preset: 'balanced',
         question: 'What is a matrix?'
       }),
       expect.any(Object)
@@ -385,6 +386,7 @@ describe('Q&A', () => {
       '/api/qa',
       expect.objectContaining({
         kb_id: 'kb-1',
+        retrieval_preset: 'balanced',
         question: 'What is a matrix?'
       })
     )
@@ -453,6 +455,7 @@ describe('Q&A', () => {
         kb_id: 'kb-1',
         focus: '矩阵定义',
         mode: 'explain',
+        retrieval_preset: 'balanced',
         question: '请讲解这道错题'
       }),
       expect.any(Object)
