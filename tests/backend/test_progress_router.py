@@ -1,6 +1,6 @@
 """Tests for progress router aggregate behavior and auth scoping."""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from app.models import (
     Document,
@@ -12,6 +12,7 @@ from app.models import (
     SummaryRecord,
     User,
 )
+from app.utils.time import utc_now
 
 
 def _register_or_login(client, username: str, password: str = "pass123456"):
@@ -84,7 +85,7 @@ def test_progress_kb_branch_returns_expected_aggregates_without_doc_id_list_leak
     user_id = "progress_user_agg"
     kb_id = "progress_kb_agg"
     other_kb = "progress_kb_other"
-    base_time = datetime.utcnow()
+    base_time = utc_now()
     db_session.add(User(id=user_id, username=user_id, password_hash="hash", name="Progress User"))
     db_session.add(KnowledgeBase(id=kb_id, user_id=user_id, name="主KB"))
     db_session.add(KnowledgeBase(id=other_kb, user_id=user_id, name="其他KB"))

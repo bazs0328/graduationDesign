@@ -2,7 +2,6 @@ import hashlib
 import glob
 import os
 import shutil
-from datetime import datetime
 from uuid import uuid4
 import re
 
@@ -60,6 +59,7 @@ from app.services.layout_sidecar import (
 from app.services.text_noise_guard import clean_fragment, infer_format_hint, is_low_quality
 from app.utils.document_validator import DocumentValidator
 from app.utils.pagination import normalize_page_args
+from app.utils.time import utc_now
 
 router = APIRouter()
 
@@ -394,7 +394,7 @@ def _queue_doc_reprocess(
     doc.status = "processing"
     doc.error_message = None
     doc.retry_count = int(doc.retry_count or 0) + 1
-    doc.last_retry_at = datetime.utcnow()
+    doc.last_retry_at = utc_now()
     doc.num_chunks = 0
     doc.num_pages = 0
     doc.char_count = 0

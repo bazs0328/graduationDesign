@@ -1,7 +1,7 @@
 """Tests for quiz router (generate + submit, mimic style/reference, parse-reference PDF)."""
 import io
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
@@ -12,6 +12,7 @@ from app.models import Document, Keypoint, KeypointDependency, LearnerProfile, Q
 from app.routers.quiz import _resolve_keypoints_for_question
 from app.services.learning_path import DEPENDENCY_RELATION
 from app.services.text_extraction import ExtractionResult
+from app.utils.time import utc_now
 
 
 def _mock_generate_quiz(*args, **kwargs):
@@ -1475,7 +1476,7 @@ def test_quiz_submit_kb_bound_keypoint_collapses_to_representative_keypoint(
     quiz_id = "quiz-kb-dedup-1"
     rep_id = "quiz-kb-dedup-kp-1"
     dup_id = "quiz-kb-dedup-kp-2"
-    base = datetime.utcnow()
+    base = utc_now()
 
     db_session.add(
         Document(
@@ -1569,7 +1570,7 @@ def test_quiz_submit_doc_context_bound_keypoint_still_collapses_to_kb_representa
     quiz_id = "quiz-doc-dedup-1"
     rep_id = "quiz-doc-dedup-kp-1"
     dup_id = "quiz-doc-dedup-kp-2"
-    base = datetime.utcnow()
+    base = utc_now()
 
     db_session.add(
         Document(

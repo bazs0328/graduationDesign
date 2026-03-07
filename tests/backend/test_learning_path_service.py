@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 from unittest.mock import patch
 
 from app.models import (
@@ -15,6 +15,7 @@ from app.services.learning_path import (
     generate_learning_path,
     invalidate_learning_path_result_cache,
 )
+from app.utils.time import utc_now
 
 
 def _seed_learning_path_fixture(db_session, *, user_id: str, kb_id: str, doc_id: str):
@@ -99,7 +100,7 @@ def _seed_multi_doc_duplicate_fixture(db_session, *, user_id: str, kb_id: str):
             ),
         ]
     )
-    base = datetime.utcnow()
+    base = utc_now()
     db_session.add_all(
         [
             Keypoint(

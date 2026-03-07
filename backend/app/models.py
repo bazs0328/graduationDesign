@@ -1,8 +1,7 @@
-from datetime import datetime
-
 from sqlalchemy import Column, DateTime, Float, Integer, String, Text, ForeignKey
 
 from app.db import Base
+from app.utils.time import utc_now
 
 
 class User(Base):
@@ -13,7 +12,7 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     name = Column(String, nullable=True)
     preferences_json = Column(Text, nullable=True)  # User-level UX/behavior preferences
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 
 class KnowledgeBase(Base):
@@ -24,7 +23,7 @@ class KnowledgeBase(Base):
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     preferences_json = Column(Text, nullable=True)  # KB-level overrides for user preferences
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 
 class ChatSession(Base):
@@ -35,7 +34,7 @@ class ChatSession(Base):
     kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=True, index=True)
     doc_id = Column(String, ForeignKey("documents.id"), nullable=True, index=True)
     title = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 
 class ChatMessage(Base):
@@ -46,7 +45,7 @@ class ChatMessage(Base):
     role = Column(String, nullable=False)
     content = Column(Text, nullable=False)
     sources_json = Column(Text, nullable=True)  # JSON array of SourceSnippet-compatible dicts
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 
 class Document(Base):
@@ -68,7 +67,7 @@ class Document(Base):
     retry_count = Column(Integer, default=0)
     last_retry_at = Column(DateTime, nullable=True)
     processed_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 
 class SummaryRecord(Base):
@@ -78,7 +77,7 @@ class SummaryRecord(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     doc_id = Column(String, ForeignKey("documents.id"), index=True)
     summary_text = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 
 class KeypointRecord(Base):
@@ -88,7 +87,7 @@ class KeypointRecord(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     doc_id = Column(String, ForeignKey("documents.id"), index=True)
     points_json = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 
 class Keypoint(Base):
@@ -106,8 +105,8 @@ class Keypoint(Base):
     mastery_level = Column(Float, default=0.0)
     attempt_count = Column(Integer, default=0)
     correct_count = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 class QARecord(Base):
@@ -119,7 +118,7 @@ class QARecord(Base):
     doc_id = Column(String, ForeignKey("documents.id"), index=True)
     question = Column(Text, nullable=False)
     answer = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 
 class Quiz(Base):
@@ -133,7 +132,7 @@ class Quiz(Base):
     question_type = Column(String, default="mcq")
     questions_json = Column(Text, nullable=False)
     paper_meta_json = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 
 class QuizAttempt(Base):
@@ -145,7 +144,7 @@ class QuizAttempt(Base):
     answers_json = Column(Text, nullable=False)
     score = Column(Float, nullable=False)
     total = Column(Integer, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 
 class LearnerProfile(Base):
@@ -160,7 +159,7 @@ class LearnerProfile(Base):
     recent_accuracy = Column(Float, default=0.5)
     total_attempts = Column(Integer, default=0)
     consecutive_low_scores = Column(Integer, default=0)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 class KeypointDependency(Base):
@@ -172,7 +171,7 @@ class KeypointDependency(Base):
     to_keypoint_id = Column(String, ForeignKey("keypoints_v2.id"), nullable=False, index=True)
     relation = Column(String, default="prerequisite")
     confidence = Column(Float, default=1.0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 
 class LearningPathOrderAnchor(Base):
@@ -181,4 +180,4 @@ class LearningPathOrderAnchor(Base):
     user_id = Column(String, ForeignKey("users.id"), primary_key=True, index=True)
     kb_id = Column(String, ForeignKey("knowledge_bases.id"), primary_key=True, index=True)
     keypoint_ids_json = Column(Text, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)

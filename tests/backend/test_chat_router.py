@@ -1,8 +1,9 @@
 """Tests for chat router."""
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import uuid4
 
 from app.models import ChatMessage, ChatSession, Document, KnowledgeBase, User
+from app.utils.time import utc_now
 
 
 def _create_temp_session(db_session, seeded_session, *, title=None):
@@ -55,7 +56,7 @@ def test_list_sessions_page_returns_metadata_and_stable_order(client, db_session
             status="ready",
         )
     )
-    base_time = datetime.utcnow()
+    base_time = utc_now()
     db_session.add(
         ChatSession(
             id="sess-a",

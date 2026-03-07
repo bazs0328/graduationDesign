@@ -7,7 +7,6 @@ import time
 from collections import defaultdict, deque
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime
 from threading import Lock
 from typing import Any, Callable, Optional
 from uuid import uuid4
@@ -36,6 +35,7 @@ from app.services.mastery import (
     mastery_priority,
 )
 from app.utils.json_tools import safe_json_loads
+from app.utils.time import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -214,13 +214,13 @@ def _save_order_anchor_ids(
             user_id=user_id,
             kb_id=kb_id,
             keypoint_ids_json=payload,
-            updated_at=datetime.utcnow(),
+            updated_at=utc_now(),
         )
     else:
         if row.keypoint_ids_json == payload:
             return
         row.keypoint_ids_json = payload
-        row.updated_at = datetime.utcnow()
+        row.updated_at = utc_now()
     db.add(row)
     db.commit()
 

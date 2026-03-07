@@ -1,7 +1,7 @@
 import os
 from typing import Any
 
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 
 from app.core.llm import get_embeddings
 from app.core.paths import ensure_user_dirs, user_base_dir
@@ -33,7 +33,6 @@ def delete_doc_vectors(user_id: str, doc_id: str) -> int:
     if not ids:
         return 0
     vectorstore.delete(ids=ids)
-    vectorstore.persist()
     return len(ids)
 
 
@@ -72,7 +71,6 @@ def update_doc_vector_metadata(
         return 0
 
     collection.update(ids=ids, metadatas=updated_metadatas)
-    vectorstore.persist()
     return len(ids)
 
 

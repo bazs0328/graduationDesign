@@ -1,7 +1,7 @@
 """Tests for QA router."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -11,6 +11,7 @@ from app.models import ChatMessage, Document, Keypoint, KeypointDependency, Know
 from app.routers.qa import QA_HISTORY_TOTAL_CHAR_BUDGET, _update_mastery_from_qa
 from app.services.learning_path import DEPENDENCY_RELATION
 from app.utils.chroma_filters import build_chroma_eq_filter
+from app.utils.time import utc_now
 
 
 MOCK_SOURCES = [{"source": "doc p.1 c.0", "snippet": "snippet text", "doc_id": "doc-1"}]
@@ -250,7 +251,7 @@ def test_qa_session_history_is_budgeted_and_keeps_recent_messages(client, seeded
     session_id = seeded_session["session_id"]
     user_id = seeded_session["user_id"]
     doc_id = seeded_session["doc_id"]
-    base_time = datetime.utcnow() - timedelta(minutes=20)
+    base_time = utc_now() - timedelta(minutes=20)
 
     for idx in range(14):
         role = "user" if idx % 2 == 0 else "assistant"
@@ -437,7 +438,7 @@ def test_update_mastery_from_qa_kb_vector_hits_collapse_to_representative(db_ses
     doc2 = "qa_kb_dedup_doc2"
     rep_id = "qa_kb_dedup_kp1"
     dup_id = "qa_kb_dedup_kp2"
-    base = datetime.utcnow()
+    base = utc_now()
 
     db_session.add(User(id=user_id, username=user_id, password_hash="hash", name="User"))
     db_session.add(KnowledgeBase(id=kb_id, user_id=user_id, name="KB"))
@@ -524,7 +525,7 @@ def test_update_mastery_from_qa_doc_vector_hits_collapse_to_kb_representative(db
     doc2 = "qa_doc_dedup_doc2"
     rep_id = "qa_doc_dedup_kp1"
     dup_id = "qa_doc_dedup_kp2"
-    base = datetime.utcnow()
+    base = utc_now()
 
     db_session.add(User(id=user_id, username=user_id, password_hash="hash", name="User"))
     db_session.add(KnowledgeBase(id=kb_id, user_id=user_id, name="KB"))

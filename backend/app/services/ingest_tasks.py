@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from sqlalchemy.orm import Session
 
 from app.core.kb_metadata import record_file_hash
 from app.db import SessionLocal
 from app.models import Document
 from app.services.ingest import ingest_document
+from app.utils.time import utc_now
 
 
 def process_document_task(
@@ -34,7 +33,7 @@ def process_document_task(
             doc.char_count = char_count
             doc.status = "ready"
             doc.error_message = None
-            doc.processed_at = datetime.utcnow()
+            doc.processed_at = utc_now()
             db.commit()
 
             if file_hash:
@@ -42,7 +41,7 @@ def process_document_task(
         except Exception as exc:  # noqa: BLE001
             doc.status = "error"
             doc.error_message = str(exc)[:800]
-            doc.processed_at = datetime.utcnow()
+            doc.processed_at = utc_now()
             db.commit()
     finally:
         db.close()

@@ -1,6 +1,6 @@
 """Tests for activity router pagination behavior."""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from app.models import (
     Document,
@@ -12,6 +12,7 @@ from app.models import (
     SummaryRecord,
     User,
 )
+from app.utils.time import utc_now
 
 
 def _register_or_login(client, username: str, password: str = "pass123456"):
@@ -34,7 +35,7 @@ def test_activity_supports_offset_pagination_with_metadata(client, db_session):
     kb_id = "activity_page_kb_1"
     doc_id = "activity_page_doc_1"
     quiz_id = "activity_page_quiz_1"
-    base_time = datetime.utcnow()
+    base_time = utc_now()
 
     db_session.add(User(id=user_id, username=user_id, password_hash="test_hash", name="Activity User"))
     db_session.add(KnowledgeBase(id=kb_id, user_id=user_id, name="Activity KB"))
@@ -133,7 +134,7 @@ def test_activity_uses_authenticated_user_context_without_user_id(client, db_ses
     user_a_id = user_a["user_id"]
     user_b_id = user_b["user_id"]
 
-    base_time = datetime.utcnow()
+    base_time = utc_now()
     db_session.add(
         Document(
             id="activity-auth-doc-a",
@@ -182,7 +183,7 @@ def test_activity_resolves_doc_name_for_quiz_attempt_and_other_sources(client, d
     kb_id = "activity_map_kb_1"
     doc_id = "activity_map_doc_1"
     quiz_id = "activity_map_quiz_1"
-    base_time = datetime.utcnow()
+    base_time = utc_now()
 
     db_session.add(User(id=user_id, username=user_id, password_hash="test_hash", name="Map User"))
     db_session.add(KnowledgeBase(id=kb_id, user_id=user_id, name="Map KB"))

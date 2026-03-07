@@ -3,6 +3,8 @@ from typing import Any, Dict, List, Optional, Literal
 
 from pydantic import BaseModel, Field, ConfigDict
 
+from app.utils.time import utc_now
+
 
 class AuthRegisterRequest(BaseModel):
     username: str = Field(min_length=3, max_length=32)
@@ -813,5 +815,5 @@ class RecommendationsResponse(BaseModel):
     learning_path_stages: List[LearningPathStage] = []
     learning_path_modules: List[LearningPathModule] = []
     learning_path_summary: Dict[str, Any] = {}
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=utc_now)
     next_step: Optional[RecommendationNextStep] = None

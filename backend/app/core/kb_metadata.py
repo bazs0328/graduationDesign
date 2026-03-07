@@ -1,9 +1,9 @@
 import json
 import os
-from datetime import datetime
 from typing import Any, Dict
 
 from app.core.paths import ensure_kb_dirs, kb_base_dir
+from app.utils.time import utc_now
 
 
 def _metadata_path(user_id: str, kb_id: str) -> str:
@@ -13,7 +13,7 @@ def _metadata_path(user_id: str, kb_id: str) -> str:
 def _build_default_metadata(kb_id: str) -> Dict[str, Any]:
     return {
         "kb_id": kb_id,
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": utc_now().isoformat(),
         "last_updated": None,
         "rag_provider": "chroma",
         "file_hashes": {},
@@ -51,7 +51,7 @@ def record_file_hash(user_id: str, kb_id: str, filename: str, file_hash: str) ->
     metadata = load_kb_metadata(user_id, kb_id)
     metadata.setdefault("file_hashes", {})
     metadata["file_hashes"][filename] = file_hash
-    metadata["last_updated"] = datetime.utcnow().isoformat()
+    metadata["last_updated"] = utc_now().isoformat()
     save_kb_metadata(user_id, kb_id, metadata)
 
 
@@ -61,7 +61,7 @@ def remove_file_hash(user_id: str, kb_id: str, filename: str) -> bool:
     if filename not in hashes:
         return False
     hashes.pop(filename, None)
-    metadata["last_updated"] = datetime.utcnow().isoformat()
+    metadata["last_updated"] = utc_now().isoformat()
     save_kb_metadata(user_id, kb_id, metadata)
     return True
 
@@ -77,7 +77,7 @@ def rename_file_hash(
     if old_filename not in hashes:
         return False
     hashes[new_filename] = hashes.pop(old_filename)
-    metadata["last_updated"] = datetime.utcnow().isoformat()
+    metadata["last_updated"] = utc_now().isoformat()
     save_kb_metadata(user_id, kb_id, metadata)
     return True
 
@@ -104,10 +104,10 @@ def transfer_file_hash(
         target_meta = load_kb_metadata(user_id, to_kb_id)
         target_hashes = target_meta.setdefault("file_hashes", {})
         target_hashes[target_name] = hash_value
-        target_meta["last_updated"] = datetime.utcnow().isoformat()
+        target_meta["last_updated"] = utc_now().isoformat()
         save_kb_metadata(user_id, to_kb_id, target_meta)
         moved = True
 
-    source_meta["last_updated"] = datetime.utcnow().isoformat()
+    source_meta["last_updated"] = utc_now().isoformat()
     save_kb_metadata(user_id, from_kb_id, source_meta)
     return moved

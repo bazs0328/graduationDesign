@@ -72,7 +72,6 @@ def ingest_document(
 
     vectorstore = get_vectorstore(user_id)
     vectorstore.add_documents(text_docs)
-    vectorstore.persist()
 
     append_lexical_chunks(user_id, kb_id, text_docs)
     _write_layout_sidecar(

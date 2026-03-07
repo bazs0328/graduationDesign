@@ -1,6 +1,6 @@
 """Tests for document lifecycle endpoints."""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 import io
 import json
 import os
@@ -20,6 +20,7 @@ from app.models import (
     SummaryRecord,
     User,
 )
+from app.utils.time import utc_now
 
 
 def _seed_user_kbs_doc(db_session, *, user_id: str, kb_id: str, doc_id: str):
@@ -384,7 +385,7 @@ def test_list_docs_supports_filter_search_and_sort(client, db_session):
     base_doc.filename = "linear-algebra-notes.pdf"
     base_doc.file_type = "pdf"
     base_doc.status = "ready"
-    base_doc.created_at = datetime.utcnow() - timedelta(days=2)
+    base_doc.created_at = utc_now() - timedelta(days=2)
     db_session.add(base_doc)
     db_session.add(
         Document(
@@ -399,7 +400,7 @@ def test_list_docs_supports_filter_search_and_sort(client, db_session):
             char_count=300,
             file_hash="hash-doc-list-error",
             status="error",
-            created_at=datetime.utcnow() - timedelta(days=1),
+            created_at=utc_now() - timedelta(days=1),
         )
     )
     db_session.add(
@@ -415,7 +416,7 @@ def test_list_docs_supports_filter_search_and_sort(client, db_session):
             char_count=200,
             file_hash="hash-doc-list-md",
             status="ready",
-            created_at=datetime.utcnow(),
+            created_at=utc_now(),
         )
     )
     db_session.commit()
@@ -489,9 +490,9 @@ def test_list_docs_page_returns_metadata_and_items(client, db_session):
 
     docs = db_session.query(Document).filter(Document.user_id == user_id).all()
     name_map = {
-        "doc_page_a": ("alpha.pdf", datetime.utcnow() - timedelta(days=3)),
-        "doc_page_b": ("beta.pdf", datetime.utcnow() - timedelta(days=2)),
-        "doc_page_c": ("gamma.pdf", datetime.utcnow() - timedelta(days=1)),
+        "doc_page_a": ("alpha.pdf", utc_now() - timedelta(days=3)),
+        "doc_page_b": ("beta.pdf", utc_now() - timedelta(days=2)),
+        "doc_page_c": ("gamma.pdf", utc_now() - timedelta(days=1)),
     }
     for doc in docs:
         filename, created_at = name_map[doc.id]

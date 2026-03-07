@@ -1,6 +1,6 @@
 """Tests for keypoints KB grouped dedup behavior."""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -8,6 +8,7 @@ from app.models import Document, Keypoint, KeypointDependency, KnowledgeBase, Us
 from app.services.keypoint_dedup import find_kb_representative_by_text
 from app.services.learning_path import DEPENDENCY_RELATION
 from app.utils.chroma_filters import build_chroma_eq_filter
+from app.utils.time import utc_now
 
 
 def _seed_kb_with_docs(
@@ -47,7 +48,7 @@ def test_get_keypoints_by_kb_grouped_exact_dedup_and_vector_failure_fallback(cli
         kb_id=kb_id,
         docs=[(doc1, "a.txt"), (doc2, "b.txt")],
     )
-    base = datetime.utcnow()
+    base = utc_now()
     db_session.add_all(
         [
             Keypoint(
@@ -146,7 +147,7 @@ def test_get_keypoints_by_kb_grouped_semantic_dedup(client, db_session):
         kb_id=kb_id,
         docs=[(doc1, "m1.txt"), (doc2, "m2.txt")],
     )
-    base = datetime.utcnow()
+    base = utc_now()
     db_session.add_all(
         [
             Keypoint(
@@ -225,7 +226,7 @@ def test_get_keypoints_by_kb_grouped_soft_exact_dedup_removes_structural_de(clie
         kb_id=kb_id,
         docs=[(doc1, "soft-1.txt"), (doc2, "soft-2.txt")],
     )
-    base = datetime.utcnow()
+    base = utc_now()
     db_session.add_all(
         [
             Keypoint(
@@ -287,7 +288,7 @@ def test_get_keypoints_by_kb_grouped_semantic_dedup_does_not_merge_contains_only
         kb_id=kb_id,
         docs=[(doc1, "guard-1.txt"), (doc2, "guard-2.txt")],
     )
-    base = datetime.utcnow()
+    base = utc_now()
     db_session.add_all(
         [
             Keypoint(
@@ -364,7 +365,7 @@ def test_find_kb_representative_by_text_uses_soft_exact_without_contains_fallbac
         kb_id=kb_id,
         docs=[(doc1, "lookup-1.txt"), (doc2, "lookup-2.txt")],
     )
-    base = datetime.utcnow()
+    base = utc_now()
     db_session.add_all(
         [
             Keypoint(
