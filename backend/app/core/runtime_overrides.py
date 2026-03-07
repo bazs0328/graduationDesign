@@ -83,7 +83,7 @@ _GROUP_LABELS: dict[str, str] = {
 
 _ENUM_OPTIONS: dict[str, tuple[Any, ...]] = {
     "llm_provider": ("auto", "openai", "gemini", "deepseek", "qwen"),
-    "embedding_provider": ("auto", "openai", "gemini", "deepseek", "qwen", "dashscope"),
+    "embedding_provider": ("auto", "openai", "gemini", "qwen", "dashscope"),
     "index_text_cleanup_mode": ("balanced", "conservative", "aggressive", "structure_preserving"),
     "index_text_cleanup_non_pdf_mode": ("balanced", "conservative", "aggressive", "structure_preserving"),
     "noise_filter_level": ("balanced", "conservative", "aggressive", "structure_preserving"),
@@ -104,7 +104,6 @@ _OPTION_LABELS: dict[str, dict[Any, str]] = {
         "auto": "自动选择",
         "openai": "OpenAI",
         "gemini": "Gemini",
-        "deepseek": "DeepSeek",
         "qwen": "Qwen",
         "dashscope": "DashScope",
     },
@@ -173,7 +172,6 @@ _SETTING_LABELS: dict[str, str] = {
     "gemini_embedding_model": "Gemini 向量模型",
     "deepseek_base_url": "DeepSeek 基础地址",
     "deepseek_model": "DeepSeek 对话模型",
-    "deepseek_embedding_model": "DeepSeek 向量模型",
     "qwen_base_url": "Qwen 基础地址",
     "qwen_model": "Qwen 对话模型",
     "qwen_embedding_model": "Qwen 向量模型",

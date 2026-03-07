@@ -50,12 +50,21 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def auth_context_middleware(request: Request, call_next):
+        def auth_error_response(status_code: int, detail: str) -> JSONResponse:
+            response = JSONResponse(status_code=status_code, content={"detail": detail})
+            origin = request.headers.get("origin")
+            if origin:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Vary"] = "Origin"
+            return response
+
         request_user_id: str | None = None
         token = extract_bearer_token(request.headers.get("Authorization"))
         if token:
             request_user_id = verify_access_token(token)
             if not request_user_id:
-                return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
+                return auth_error_response(401, "Invalid or expired token")
 
         is_api_path = request.url.path.startswith("/api")
         is_public_path = request.url.path.startswith("/api/auth") or request.url.path.startswith(
@@ -69,7 +78,7 @@ def create_app() -> FastAPI:
             and not request_user_id
             and not settings.auth_allow_legacy_user_id
         ):
-            return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+            return auth_error_response(401, "Authentication required")
 
         token_ctx = set_request_user_id(request_user_id)
         try:

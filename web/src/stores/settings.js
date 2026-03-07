@@ -133,7 +133,7 @@ function normalizeProviderConfigShape(value = {}) {
       : ['auto', 'deepseek', 'qwen'],
     supportedEmbeddingProviders: Array.isArray(value?.supported_embedding_providers)
       ? value.supported_embedding_providers.map((item) => String(item))
-      : ['auto', 'deepseek', 'qwen', 'dashscope'],
+      : ['auto', 'qwen', 'dashscope'],
     regionPresets: {
       qwen: Array.isArray(value?.region_presets?.qwen)
         ? value.region_presets.qwen.map((item) => ({

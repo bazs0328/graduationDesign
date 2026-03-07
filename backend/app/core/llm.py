@@ -9,10 +9,9 @@ from openai import OpenAI
 from app.core.config import settings
 
 LLM_PROVIDERS = {"openai", "gemini", "deepseek", "qwen"}
-EMBEDDING_PROVIDERS = {"openai", "gemini", "deepseek", "qwen", "dashscope"}
+EMBEDDING_PROVIDERS = {"openai", "gemini", "qwen", "dashscope"}
 LLM_AUTO_PRIORITY = ("qwen", "openai", "deepseek", "gemini")
-EMBEDDING_AUTO_FALLBACK_PRIORITY = ("openai", "qwen", "dashscope", "gemini", "deepseek")
-DEEPSEEK_EMBEDDING_FALLBACK_PRIORITY = ("openai", "dashscope", "gemini")
+EMBEDDING_AUTO_FALLBACK_PRIORITY = ("openai", "qwen", "dashscope", "gemini")
 _UNCONFIGURED_PROVIDER = "unconfigured"
 
 
@@ -92,6 +91,8 @@ def _normalize_provider(value: str | None, *, kind: str) -> str:
     normalized = str(value or "").strip().lower() or "auto"
     if kind == "embedding" and normalized in {"qwen_vl", "qwen3_vl"}:
         return "dashscope"
+    if kind == "embedding" and normalized == "deepseek":
+        return "auto"
     return normalized
 
 
@@ -118,35 +119,11 @@ def _embedding_provider_ready(provider: str) -> bool:
         return _is_configured(settings.qwen_api_key)
     if provider == "gemini":
         return _is_configured(settings.google_api_key)
-    if provider == "deepseek":
-        return _is_configured(settings.deepseek_api_key) and _is_configured(settings.deepseek_embedding_model)
     return False
 
 
-def _resolve_deepseek_embedding_provider(*, strict: bool) -> str | None:
-    model = (settings.deepseek_embedding_model or "").strip()
-    has_key = _is_configured(settings.deepseek_api_key)
-    if model:
-        if has_key:
-            return "deepseek"
-        if strict:
-            raise ValueError("DEEPSEEK_API_KEY is not set")
-        return None
-
-    for provider in DEEPSEEK_EMBEDDING_FALLBACK_PRIORITY:
-        if _embedding_provider_ready(provider):
-            return provider
-
-    if strict:
-        raise ValueError(
-            "DeepSeek embeddings not configured. Set DEEPSEEK_EMBEDDING_MODEL or configure one of "
-            "OPENAI_API_KEY / QWEN_API_KEY / GOOGLE_API_KEY."
-        )
-    return None
-
-
 def _embedding_provider_following_llm(provider: str | None) -> str | None:
-    if provider in {"openai", "qwen", "gemini", "deepseek"}:
+    if provider in {"openai", "qwen", "gemini"}:
         return provider
     return None
 
@@ -188,38 +165,22 @@ def resolve_embedding_provider(*, strict: bool = True, resolved_llm_provider: st
                 llm_provider = None
 
         follow_provider = _embedding_provider_following_llm(llm_provider)
-        if follow_provider == "deepseek":
-            deepseek_target = _resolve_deepseek_embedding_provider(strict=False)
-            if deepseek_target:
-                return deepseek_target, configured, "auto"
-        elif follow_provider and _embedding_provider_ready(follow_provider):
+        if follow_provider and _embedding_provider_ready(follow_provider):
             return follow_provider, configured, "auto"
 
         for provider in EMBEDDING_AUTO_FALLBACK_PRIORITY:
-            if provider == "deepseek":
-                deepseek_target = _resolve_deepseek_embedding_provider(strict=False)
-                if deepseek_target:
-                    return deepseek_target, configured, "auto"
-                continue
             if _embedding_provider_ready(provider):
                 return provider, configured, "auto"
 
         if strict:
             raise ValueError(
                 "No embedding provider is available. Configure one of "
-                "OPENAI_API_KEY / QWEN_API_KEY / GOOGLE_API_KEY or "
-                "set DEEPSEEK_API_KEY + DEEPSEEK_EMBEDDING_MODEL."
+                "OPENAI_API_KEY / QWEN_API_KEY / GOOGLE_API_KEY."
             )
         return _UNCONFIGURED_PROVIDER, configured, "auto"
 
     if configured not in EMBEDDING_PROVIDERS:
         raise ValueError(f"Unsupported embedding provider: {settings.embedding_provider}")
-
-    if configured == "deepseek":
-        deepseek_target = _resolve_deepseek_embedding_provider(strict=strict)
-        if deepseek_target:
-            return deepseek_target, configured, "manual"
-        return configured, configured, "manual"
 
     if strict and not _embedding_provider_ready(configured):
         if configured == "openai":
@@ -308,12 +269,6 @@ def get_embeddings():
             api_key=settings.qwen_api_key,
             model=settings.dashscope_embedding_model,
             base_url=settings.dashscope_base_url,
-        )
-    if provider == "deepseek":
-        return OpenAIEmbeddings(
-            api_key=settings.deepseek_api_key,
-            base_url=settings.deepseek_base_url,
-            model=settings.deepseek_embedding_model,
         )
     if provider == "gemini":
         return GoogleGenerativeAIEmbeddings(

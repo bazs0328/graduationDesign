@@ -623,7 +623,16 @@
 import { ref, onMounted, onActivated, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessageSquare, Send, Database, FileText, Sparkles, User, Bot, PanelRightClose } from 'lucide-vue-next'
-import { apiDelete, apiGet, apiPatch, apiPost, apiSsePost, getDifficultyPlan, getProfile } from '../api'
+import {
+  apiDelete,
+  apiGet,
+  apiPatch,
+  apiPost,
+  apiSsePost,
+  getDifficultyPlan,
+  getProfile,
+  toUserFacingApiErrorMessage,
+} from '../api'
 import { useToast } from '../composables/useToast'
 import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import { useSettingsStore } from '../stores/settings'
@@ -1600,7 +1609,7 @@ async function openQaSource(source) {
     }
   } catch (err) {
     sourcePreview.value.loading = false
-    sourcePreview.value.error = err?.message || '无法加载来源片段'
+    sourcePreview.value.error = toUserFacingApiErrorMessage(err, '暂时无法加载来源片段，请稍后重试')
   }
 }
 
@@ -1907,18 +1916,22 @@ async function askQuestion(options = {}) {
         })
       }
     } else {
+      const friendlyErrorMessage = toUserFacingApiErrorMessage(
+        err,
+        '这次回答没有成功生成，请稍后再试'
+      )
       const msg = qaMessages.value[placeholderIndex]
       if (msg && msg.role === 'answer') {
-        msg.content = `错误：${err.message}`
+        msg.content = friendlyErrorMessage
         msg.streaming = false
         msg.status = 'error'
         msg.errorCode = err?.qaStream?.code || 'request_failed'
       } else {
-        qaMessages.value.push({ role: 'answer', content: '错误：' + err.message, status: 'error' })
+        qaMessages.value.push({ role: 'answer', content: friendlyErrorMessage, status: 'error' })
       }
       updateQaFlow({
         phase: 'failed',
-        message: err?.message || '问答请求失败',
+        message: friendlyErrorMessage,
         errorCode: err?.qaStream?.code || 'request_failed',
       })
     }

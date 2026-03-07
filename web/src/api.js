@@ -66,6 +66,29 @@ function createErrorFromResponseText(text, status) {
   return createErrorWithStatus(text || `Request failed: ${status}`, status)
 }
 
+export function toUserFacingApiErrorMessage(err, fallback = '请求失败，请稍后重试') {
+  if (!err) return fallback
+  if (err?.status === 401) return '登录状态已失效，请重新登录'
+  if (err?.name === 'AbortError') return '请求超时，请检查网络或稍后重试'
+
+  const raw = String(err?.message || '').trim()
+  if (!raw) return fallback
+
+  if (raw === 'Failed to fetch' || err?.name === 'TypeError') {
+    return '暂时无法连接到服务，请检查网络或稍后重试'
+  }
+
+  if (/NetworkError|ERR_FAILED|Load failed/i.test(raw)) {
+    return '网络连接异常，请检查服务状态或稍后重试'
+  }
+
+  if (/CORS|Access-Control-Allow-Origin/i.test(raw)) {
+    return '服务暂时不可达，请稍后重试'
+  }
+
+  return raw
+}
+
 function handleApiError(err, path) {
   if (err?.status === 401) {
     logout()
@@ -73,9 +96,7 @@ function handleApiError(err, path) {
   }
   if (globalErrorToast && !path?.includes('/api/auth')) {
     const { showToast } = useToast()
-    const message = err?.name === 'AbortError'
-      ? '请求超时，请检查网络或稍后重试'
-      : (err?.message || '请求失败')
+    const message = toUserFacingApiErrorMessage(err)
     showToast(message, 'error')
   }
 }

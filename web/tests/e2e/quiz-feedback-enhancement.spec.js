@@ -59,6 +59,25 @@ async function waitForDocReady(page, filename) {
   await expect(item.getByText('就绪')).toBeVisible({ timeout: 60000 })
 }
 
+async function ensureKbSelected(uploadCard) {
+  const kbSelect = uploadCard.locator('select').first()
+  const options = await kbSelect
+    .locator('option')
+    .evaluateAll((rows) => rows.map((row) => ({
+      value: row.getAttribute('value') || '',
+      label: (row.textContent || '').trim(),
+    })))
+
+  const target = options.find((item) => item.value)
+  if (!target) {
+    throw new Error('No selectable knowledge base option found')
+  }
+
+  await kbSelect.selectOption(target.value, { timeout: 15000 })
+  await expect(kbSelect).toHaveValue(target.value)
+  return target
+}
+
 async function waitForQuizGenerated(page) {
   await expect(page.getByRole('button', { name: '提交全部答案' })).toBeVisible({
     timeout: 120000
@@ -110,7 +129,6 @@ test.describe('Quiz Feedback Enhancement', () => {
   }) => {
     test.skip(!runLLM, 'Set E2E_LLM=1 to run LLM-backed flows')
 
-    const kbName = 'Default'
     const quizCount = 5
     const auth = await ensureAuthUser(request, 'e2e_quiz_feedback_user')
     await page.addInitScript((user) => {
@@ -135,8 +153,7 @@ test.describe('Quiz Feedback Enhancement', () => {
     const uploadCard = page.getByTestId('upload-current-kb-card')
     await expect(uploadCard).toBeVisible()
 
-    const kbSelect = uploadCard.locator('select').first()
-    await kbSelect.selectOption({ label: kbName }, { timeout: 15000 })
+    const selectedKb = await ensureKbSelected(uploadCard)
 
     await uploadCard.locator('input[type="file"]').setInputFiles(fixturePath)
     await uploadCard.getByRole('button', { name: '上传文档' }).click()
@@ -146,7 +163,7 @@ test.describe('Quiz Feedback Enhancement', () => {
 
     await page.getByRole('link', { name: '测验' }).click()
     const quizCard = page.getByTestId('quiz-setup-card')
-    await quizCard.locator('select').first().selectOption({ label: kbName })
+    await quizCard.locator('select').first().selectOption(selectedKb.value)
     await quizCard.locator('input[type="number"]').fill(quizCount.toString())
 
     const generateResponsePromise = page.waitForResponse(

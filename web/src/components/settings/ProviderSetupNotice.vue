@@ -40,7 +40,6 @@ const FIELD_LABEL_MAP = {
   'deepseek.api_key': 'DeepSeek API 密钥',
   'deepseek.base_url': 'DeepSeek 服务地址',
   'deepseek.model': 'DeepSeek 对话模型',
-  'deepseek.embedding_model': 'DeepSeek 向量模型',
   'qwen.api_key': 'Qwen API 密钥',
   'qwen.base_url': 'Qwen 服务地址',
   'qwen.model': 'Qwen 对话模型',

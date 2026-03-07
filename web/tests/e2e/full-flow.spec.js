@@ -44,6 +44,25 @@ async function selectDocInCard(card, filename) {
   await select.selectOption({ label: filename }, { timeout: 60000 })
 }
 
+async function ensureKbSelected(uploadCard) {
+  const kbSelect = uploadCard.locator('select').first()
+  const options = await kbSelect
+    .locator('option')
+    .evaluateAll((rows) => rows.map((row) => ({
+      value: row.getAttribute('value') || '',
+      label: (row.textContent || '').trim(),
+    })))
+
+  const target = options.find((item) => item.value)
+  if (!target) {
+    throw new Error('No selectable knowledge base option found')
+  }
+
+  await kbSelect.selectOption(target.value, { timeout: 15000 })
+  await expect(kbSelect).toHaveValue(target.value)
+  return target
+}
+
 async function waitForDocReady(page, filename) {
   const docsCard = page.getByTestId('upload-documents-card')
   const refreshButton = page.getByRole('button', { name: '刷新列表' })
@@ -95,7 +114,6 @@ test.describe('GradTutor E2E', () => {
   }) => {
     test.skip(!runLLM, 'Set E2E_LLM=1 to run LLM-backed flows')
 
-    const kbName = 'Default'
     const auth = await ensureAuthUser(request, 'e2e_full_flow_llm_user')
     await page.addInitScript((user) => {
       localStorage.setItem('gradtutor_user_id', user.user_id)
@@ -119,8 +137,7 @@ test.describe('GradTutor E2E', () => {
     const uploadCard = page.getByTestId('upload-current-kb-card')
     await expect(uploadCard).toBeVisible()
 
-    const kbSelect = uploadCard.locator('select').first()
-    await kbSelect.selectOption({ label: kbName }, { timeout: 15000 })
+    const selectedKb = await ensureKbSelected(uploadCard)
 
     await uploadCard.locator('input[type="file"]').setInputFiles(fixturePath)
     await uploadCard.getByRole('button', { name: '上传文档' }).click()
@@ -141,14 +158,14 @@ test.describe('GradTutor E2E', () => {
 
     await page.getByRole('link', { name: '问答' }).click()
     const qaContextCard = page.getByTestId('qa-scope-card')
-    await qaContextCard.locator('select').first().selectOption({ label: kbName })
+    await qaContextCard.locator('select').first().selectOption(selectedKb.value)
     await page.getByPlaceholder('在此输入你的问题…').fill('What is a matrix?')
     await page.getByPlaceholder('在此输入你的问题…').locator('..').getByRole('button').click()
     await expect(page.getByText('学习助手')).toBeVisible({ timeout: 120000 })
 
     await page.getByRole('link', { name: '测验' }).click()
     const quizCard = page.getByTestId('quiz-setup-card')
-    await quizCard.locator('select').first().selectOption({ label: kbName })
+    await quizCard.locator('select').first().selectOption(selectedKb.value)
     await quizCard.locator('input[type="number"]').fill('3')
     await quizCard.getByRole('button', { name: '生成测验' }).click()
 
@@ -167,7 +184,7 @@ test.describe('GradTutor E2E', () => {
     await page.getByRole('link', { name: '进度' }).click()
     const progressKbSection = page.getByTestId('progress-kb-stats-card')
     await expect(progressKbSection).toBeVisible()
-    await progressKbSection.locator('select').selectOption({ label: kbName })
+    await progressKbSection.locator('select').selectOption(selectedKb.value)
     await expect(page.getByText(/文档数|测验数/).first()).toBeVisible({ timeout: 60000 })
   })
 })

@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     auth_allow_legacy_user_id: bool = False
 
     llm_provider: str = "auto"  # auto, openai, gemini, deepseek, qwen
-    embedding_provider: str = "auto"  # auto, openai, gemini, deepseek, qwen, dashscope
+    embedding_provider: str = "auto"  # auto, openai, gemini, qwen, dashscope
 
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"

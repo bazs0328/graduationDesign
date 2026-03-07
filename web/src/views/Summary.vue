@@ -330,7 +330,7 @@
 import { ref, onMounted, onActivated, watch, computed, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { FileText, Sparkles, Layers } from 'lucide-vue-next'
-import { apiGet, apiPost } from '../api'
+import { apiGet, apiPost, toUserFacingApiErrorMessage } from '../api'
 import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import { useToast } from '../composables/useToast'
 import { useSettingsStore } from '../stores/settings'
@@ -559,7 +559,7 @@ async function openKeypointSource(point) {
     }
   } catch (err) {
     sourcePreview.value.loading = false
-    sourcePreview.value.error = err?.message || '无法加载来源片段'
+    sourcePreview.value.error = toUserFacingApiErrorMessage(err, '暂时无法加载来源片段，请稍后重试')
   }
 }
 
@@ -719,6 +719,9 @@ async function generateKeypoints(force = false) {
 function normalizeDocSelection() {
   if (selectedDocId.value && !docs.value.some((doc) => doc.id === selectedDocId.value)) {
     selectedDocId.value = ''
+  }
+  if (!selectedDocId.value && docs.value.length === 1) {
+    selectedDocId.value = docs.value[0].id
   }
 }
 

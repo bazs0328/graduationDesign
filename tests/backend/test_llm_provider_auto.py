@@ -42,20 +42,18 @@ def test_auto_provider_priority_qwen_over_openai(monkeypatch):
     assert provider == "qwen"
 
 
-def test_deepseek_embedding_falls_back_to_dashscope_when_model_missing(monkeypatch):
+def test_deprecated_deepseek_embedding_setting_falls_back_to_qwen(monkeypatch):
     monkeypatch.setattr(settings, "embedding_provider", "deepseek")
-    monkeypatch.setattr(settings, "deepseek_api_key", "deepseek_test_key")
     monkeypatch.setattr(settings, "qwen_api_key", "qwen_test_key")
-    monkeypatch.setattr(settings, "google_api_key", "google_test_key")
 
     provider, configured, source = llm.resolve_embedding_provider(
         strict=True,
         resolved_llm_provider="deepseek",
     )
 
-    assert provider == "dashscope"
-    assert configured == "deepseek"
-    assert source == "manual"
+    assert provider == "qwen"
+    assert configured == "auto"
+    assert source == "auto"
 
 
 def test_auto_provider_raises_clear_error_when_no_key_configured():
@@ -64,4 +62,3 @@ def test_auto_provider_raises_clear_error_when_no_key_configured():
 
     with pytest.raises(ValueError, match="No embedding provider is available"):
         llm.resolve_embedding_provider(strict=True)
-

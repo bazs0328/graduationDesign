@@ -139,11 +139,11 @@
               <div class="space-y-1">
                 <div class="flex items-center justify-between gap-2">
                   <h3 class="text-base font-bold tracking-tight">DeepSeek</h3>
-                  <span class="text-[10px] font-semibold px-2 py-1 rounded-full border" :class="providerBadgeClass(providerDraft.llm_provider === 'deepseek' || providerDraft.embedding_provider === 'deepseek')">
-                    {{ providerDraft.llm_provider === 'deepseek' || providerDraft.embedding_provider === 'deepseek' ? '当前使用' : '可配置' }}
+                  <span class="text-[10px] font-semibold px-2 py-1 rounded-full border" :class="providerBadgeClass(providerDraft.llm_provider === 'deepseek')">
+                    {{ providerDraft.llm_provider === 'deepseek' ? '当前使用' : '可配置' }}
                   </span>
                 </div>
-                <p class="text-xs text-muted-foreground">适合作为统一的对话与向量服务。</p>
+                <p class="text-xs text-muted-foreground">适合作为对话模型服务；当前不作为官方向量服务来源展示。</p>
               </div>
 
               <div class="space-y-2">
@@ -188,16 +188,6 @@
                 />
               </div>
 
-              <div v-if="providerDraft.embedding_provider === 'deepseek'" class="space-y-2">
-                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">向量模型</label>
-                <input
-                  type="text"
-                  :value="providerDraft.deepseek.embedding_model"
-                  class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="如：deepseek-embedding"
-                  @input="updateProviderSection('deepseek', { embedding_model: $event.target.value })"
-                />
-              </div>
             </article>
 
             <article class="rounded-2xl border border-border bg-background/50 p-4 space-y-4">
@@ -983,7 +973,7 @@ const llmProviderOptions = computed(() => (
   }))
 ))
 const embeddingProviderOptions = computed(() => (
-  (providerConfig.value?.supportedEmbeddingProviders || ['auto', 'deepseek', 'qwen', 'dashscope']).map((value) => ({
+  (providerConfig.value?.supportedEmbeddingProviders || ['auto', 'qwen', 'dashscope']).map((value) => ({
     value,
     label: providerOptionLabel(value),
   }))
@@ -1066,7 +1056,6 @@ function providerMissingLabel(value) {
     'deepseek.api_key': 'DeepSeek API 密钥',
     'deepseek.base_url': 'DeepSeek 服务地址',
     'deepseek.model': 'DeepSeek 对话模型',
-    'deepseek.embedding_model': 'DeepSeek 向量模型',
     'qwen.api_key': 'Qwen API 密钥',
     'qwen.base_url': 'Qwen 服务地址',
     'qwen.model': 'Qwen 对话模型',
@@ -1122,7 +1111,7 @@ function applyRegionPreset(section, regionId) {
 
 const providerTestTarget = computed(() => {
   if (['deepseek', 'qwen'].includes(providerDraft.value?.llm_provider)) return 'llm'
-  if (['deepseek', 'qwen', 'dashscope'].includes(providerDraft.value?.embedding_provider)) return 'embedding'
+  if (['qwen', 'dashscope'].includes(providerDraft.value?.embedding_provider)) return 'embedding'
   return 'auto'
 })
 

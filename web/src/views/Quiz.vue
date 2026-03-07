@@ -68,6 +68,7 @@
               class="w-full"
               size="lg"
               :disabled="!selectedKbId || !canGenerateQuiz || quizActionBlocked"
+              :title="quizSetupHint || ''"
               :loading="busy.quiz"
               @click="generateQuiz"
             >
@@ -76,8 +77,12 @@
               </template>
               {{ busy.quiz ? '正在生成题目…' : '生成测验' }}
             </Button>
-            <p v-if="quizActionBlocked" class="text-xs text-amber-700">
-              先到设置中心完成模型接入配置，测验生成功能才可用。
+            <p
+              v-if="quizSetupHint"
+              class="text-xs"
+              :class="quizActionBlocked ? 'text-amber-700' : 'text-muted-foreground'"
+            >
+              {{ quizSetupHint }}
             </p>
 
             <AdvancedPanel
@@ -753,25 +758,40 @@ const hasAnyKb = computed(() => kbs.value.length > 0)
 const quizEmptyTitle = computed(() => {
   if (!hasAnyKb.value) return '先上传文档再开始测验'
   if (!selectedKbId.value) return '先选择资料库'
+  if (busy.value.focusKeypoints) return '正在准备可用知识点…'
+  if (quizNeedsPreparation.value) return '先准备可出题的知识点'
   return '准备好检验掌握程度了吗？'
 })
 const quizEmptyDescription = computed(() => {
   if (!hasAnyKb.value) return '当前还没有资料库，上传并解析文档后才能生成测验。'
   if (!selectedKbId.value) return '先选择资料范围，再决定题量和难度。'
+  if (busy.value.focusKeypoints) return '正在同步当前范围的知识点，完成后即可生成测验。'
+  if (quizNeedsPreparation.value) {
+    return '测验依赖当前范围内已解锁的聚合知识点。先去摘要页生成摘要并提取要点，再回来出题。'
+  }
   return '选好资料范围后即可直接生成测验。'
 })
 const quizEmptyHint = computed(() => {
   if (!hasAnyKb.value) return '上传完成后返回本页即可生成题目。'
   if (!selectedKbId.value) return '默认按资料库范围出题，需要时再限定到具体文档。'
+  if (busy.value.focusKeypoints) return '知识点同步完成前，生成按钮会暂时保持不可用。'
+  if (quizNeedsPreparation.value) {
+    return selectedDocId.value
+      ? '会保留当前文档范围，跳转后可直接提取要点。'
+      : '如果资料库里只有一份文档，摘要页会自动帮你选中它。'
+  }
   return '生成后可直接提交批改，再看错题归类与能力变化。'
 })
 const quizEmptyPrimaryAction = computed(() => {
   if (!hasAnyKb.value) return { label: '去上传文档' }
   if (!selectedKbId.value) return null
+  if (quizNeedsPreparation.value) {
+    return { label: '去摘要提取要点', variant: 'secondary' }
+  }
   return {
     label: '生成测验',
     loading: busy.value.quiz,
-    disabled: quizActionBlocked.value,
+    disabled: quizActionBlocked.value || !canGenerateQuiz.value,
   }
 })
 const quizAdvancedDefaultOpen = computed(() => false)
@@ -813,6 +833,25 @@ const scopeConceptCount = computed(() => collectScopeConceptsForGenerate().lengt
 const canGenerateQuiz = computed(() => {
   if (busy.value.focusKeypoints) return false
   return scopeConceptCount.value > 0
+})
+const quizNeedsPreparation = computed(() => (
+  Boolean(selectedKbId.value)
+  && !busy.value.focusKeypoints
+  && scopeConceptCount.value === 0
+))
+const quizSetupHint = computed(() => {
+  if (quizActionBlocked.value) {
+    return '先到设置中心完成模型接入配置，测验生成功能才可用。'
+  }
+  if (selectedKbId.value && busy.value.focusKeypoints) {
+    return '正在同步当前范围的知识点，请稍候。'
+  }
+  if (quizNeedsPreparation.value) {
+    return selectedDocId.value
+      ? '当前文档还没有可用于出题的知识点，先去摘要页提取要点。'
+      : '当前范围暂无可用于出题的知识点，先去摘要页提取要点。'
+  }
+  return ''
 })
 const paperSectionTotalCount = computed(() => {
   return (paperSections.value || []).reduce((sum, section) => {
@@ -1170,12 +1209,24 @@ function goToUpload() {
   router.push({ path: '/upload' })
 }
 
+function goToSummaryPreparation() {
+  const query = buildRouteContextQuery({
+    kbId: selectedKbId.value,
+    docId: selectedDocId.value,
+  })
+  router.push({ path: '/summary', query })
+}
+
 function handleQuizEmptyPrimary() {
   if (!hasAnyKb.value) {
     goToUpload()
     return
   }
   if (!selectedKbId.value) return
+  if (quizNeedsPreparation.value) {
+    goToSummaryPreparation()
+    return
+  }
   generateQuiz()
 }
 

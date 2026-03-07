@@ -95,7 +95,7 @@ export function buildProviderConfigResponse(overrides = {}) {
     editable: true,
     read_only_reason: '',
     supported_llm_providers: ['auto', 'deepseek', 'qwen'],
-    supported_embedding_providers: ['auto', 'deepseek', 'qwen', 'dashscope'],
+    supported_embedding_providers: ['auto', 'qwen', 'dashscope'],
     region_presets: {
       qwen: [
         { id: 'china', label: '中国站', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
@@ -116,7 +116,6 @@ export function buildProviderConfigResponse(overrides = {}) {
         api_key_masked: '',
         base_url: 'https://api.deepseek.com/v1',
         model: 'deepseek-chat',
-        embedding_model: 'deepseek-embedding',
       },
       qwen: {
         api_key_configured: true,

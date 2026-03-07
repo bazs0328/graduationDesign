@@ -96,6 +96,80 @@ test('wrong answer can jump to QA explain mode and auto-send', async ({ page }) 
       )
     }
 
+    if (pathname === '/api/profile/difficulty-plan' && method === 'GET') {
+      return route.fulfill(
+        jsonResponse({
+          ability_level: 'intermediate',
+          recommended_difficulty: 'medium',
+          target_accuracy: 0.75,
+        })
+      )
+    }
+
+    if (pathname === '/api/settings' && method === 'GET') {
+      return route.fulfill(
+        jsonResponse({
+          system_status: {
+            provider_setup: {
+              llm_ready: true,
+              embedding_ready: true,
+              missing: [],
+              current_llm_provider: 'mock-llm',
+              current_embedding_provider: 'mock-embedding',
+            },
+          },
+          user_defaults: {},
+          effective: {},
+        })
+      )
+    }
+
+    if (pathname === '/api/settings/system' && method === 'GET') {
+      return route.fulfill(
+        jsonResponse({
+          editable_keys: [],
+          overrides: {},
+          effective: {},
+          schema: { groups: [], fields: [] },
+        })
+      )
+    }
+
+    if (pathname === '/api/settings/system/providers' && method === 'GET') {
+      return route.fulfill(
+        jsonResponse({
+          supported_llm_providers: ['auto', 'deepseek', 'qwen'],
+          supported_embedding_providers: ['auto', 'qwen', 'dashscope'],
+          effective: {
+            llm_provider: 'auto',
+            embedding_provider: 'auto',
+          },
+          setup: {
+            llm_ready: true,
+            embedding_ready: true,
+            missing: [],
+            current_llm_provider: 'mock-llm',
+            current_embedding_provider: 'mock-embedding',
+          },
+        })
+      )
+    }
+
+    if (pathname === '/api/keypoints/kb/kb-1' && method === 'GET') {
+      return route.fulfill(
+        jsonResponse({
+          keypoints: [
+            {
+              id: 'kp-1',
+              text: '矩阵可逆性',
+              member_count: 1,
+              source_doc_ids: [],
+            },
+          ],
+        })
+      )
+    }
+
     if (pathname === '/api/chat/sessions' && method === 'GET') {
       return route.fulfill(jsonResponse(state.sessions))
     }
@@ -305,7 +379,7 @@ test('wrong answer can jump to QA explain mode and auto-send', async ({ page }) 
   const qaPayload = state.qaStreamBodies.at(-1)
   expect(qaPayload.mode).toBe('explain')
   expect(qaPayload.kb_id).toBe('kb-1')
-  expect(String(qaPayload.question || '')).toContain('请用讲解模式解析这道选择题')
+  expect(String(qaPayload.question || '')).toContain('请用讲解模式解析这道题')
   expect(String(qaPayload.question || '')).toContain('正确答案')
   expect(String(qaPayload.question || '')).toContain('额外要求')
 

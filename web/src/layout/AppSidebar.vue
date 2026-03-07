@@ -5,6 +5,8 @@
     @click="closeMobileDrawer"
   ></div>
   <aside
+    :aria-hidden="sidebarInteractive ? 'false' : 'true'"
+    :inert="sidebarInteractive ? null : ''"
     class="flex flex-col h-screen transition-all duration-300 fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] shadow-2xl lg:static lg:translate-x-0 lg:w-64 lg:max-w-none lg:shadow-none bg-slate-50/92 dark:bg-slate-900/90 border-r border-border/80 backdrop-blur-xl"
     :class="[
       mobileOpen ? 'translate-x-0' : '-translate-x-full',
@@ -20,6 +22,7 @@
         </div>
       </div>
       <button
+        ref="mobileCloseButtonRef"
         type="button"
         class="lg:hidden p-2 rounded-md hover:bg-accent transition-colors"
         @click="closeMobileDrawer"
@@ -78,7 +81,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   Home,
@@ -97,12 +100,17 @@ import { getCurrentUser, logout } from '../api'
 const route = useRoute()
 const collapsed = ref(false)
 const mobileOpen = ref(false)
+const isDesktop = ref(true)
+const mobileCloseButtonRef = ref(null)
 
 const displayName = computed(() => {
   const user = getCurrentUser()
   return user ? (user.name || user.username) : '—'
 })
 const showExpandedLabels = computed(() => mobileOpen.value || !collapsed.value)
+const sidebarInteractive = computed(() => isDesktop.value || mobileOpen.value)
+
+let lastFocusedElement = null
 
 function handleLogout() {
   logout()
@@ -114,14 +122,39 @@ function isDesktopViewport() {
   return window.matchMedia('(min-width: 1024px)').matches
 }
 
+function syncViewportState() {
+  isDesktop.value = isDesktopViewport()
+}
+
+function setBodyScrollLock(locked) {
+  if (typeof document === 'undefined') return
+  document.body.style.overflow = locked ? 'hidden' : ''
+}
+
+function restoreFocusAfterClose() {
+  if (!(lastFocusedElement instanceof HTMLElement)) {
+    lastFocusedElement = null
+    return
+  }
+  try {
+    lastFocusedElement.focus()
+  } catch {
+    // ignore stale focus targets
+  }
+  lastFocusedElement = null
+}
+
 function closeMobileDrawer() {
-  if (!isDesktopViewport()) {
+  if (!isDesktop.value) {
     mobileOpen.value = false
   }
 }
 
 function handleSidebarToggleEvent() {
-  if (isDesktopViewport()) return
+  if (isDesktop.value) return
+  if (!mobileOpen.value && typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+    lastFocusedElement = document.activeElement
+  }
   mobileOpen.value = !mobileOpen.value
 }
 
@@ -143,15 +176,39 @@ watch(() => route.fullPath, () => {
   closeMobileDrawer()
 })
 
+watch(mobileOpen, async (open) => {
+  if (isDesktop.value) {
+    setBodyScrollLock(false)
+    return
+  }
+  setBodyScrollLock(open)
+  if (open) {
+    await nextTick()
+    mobileCloseButtonRef.value?.focus?.()
+    return
+  }
+  restoreFocusAfterClose()
+})
+
+watch(isDesktop, (nextIsDesktop) => {
+  if (!nextIsDesktop) return
+  mobileOpen.value = false
+  setBodyScrollLock(false)
+})
+
 onMounted(() => {
   if (typeof window === 'undefined') return
+  syncViewportState()
   window.addEventListener('gradtutor:toggle-sidebar', handleSidebarToggleEvent)
   window.addEventListener('gradtutor:close-sidebar', handleSidebarCloseEvent)
+  window.addEventListener('resize', syncViewportState)
 })
 
 onUnmounted(() => {
   if (typeof window === 'undefined') return
   window.removeEventListener('gradtutor:toggle-sidebar', handleSidebarToggleEvent)
   window.removeEventListener('gradtutor:close-sidebar', handleSidebarCloseEvent)
+  window.removeEventListener('resize', syncViewportState)
+  setBodyScrollLock(false)
 })
 </script>

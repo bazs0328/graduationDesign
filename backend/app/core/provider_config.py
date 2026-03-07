@@ -20,7 +20,7 @@ from app.core.llm import (
 )
 
 SUPPORTED_LLM_PROVIDERS: tuple[str, ...] = ("auto", "deepseek", "qwen")
-SUPPORTED_EMBEDDING_PROVIDERS: tuple[str, ...] = ("auto", "deepseek", "qwen", "dashscope")
+SUPPORTED_EMBEDDING_PROVIDERS: tuple[str, ...] = ("auto", "qwen", "dashscope")
 
 QWEN_REGION_PRESETS: dict[str, dict[str, str | None]] = {
     "china": {
@@ -134,6 +134,13 @@ def _normalize_region(value: Any) -> str | None:
     return None
 
 
+def _normalize_embedding_provider_choice(value: Any) -> str | None:
+    text = _normalize_text(value)
+    if text == "deepseek":
+        return "auto"
+    return text
+
+
 def _mask_secret(value: str | None) -> str | None:
     secret = _normalize_text(value)
     if not secret:
@@ -178,7 +185,7 @@ def _normalize_persisted_config(raw: dict[str, Any] | None) -> dict[str, Any]:
     if llm_provider in SUPPORTED_LLM_PROVIDERS:
         normalized["llm_provider"] = llm_provider
 
-    embedding_provider = _normalize_text(data.get("embedding_provider"))
+    embedding_provider = _normalize_embedding_provider_choice(data.get("embedding_provider"))
     if embedding_provider in SUPPORTED_EMBEDDING_PROVIDERS:
         normalized["embedding_provider"] = embedding_provider
 
@@ -322,12 +329,7 @@ def _provider_missing_fields(provider: str, *, target: str) -> list[str]:
         return missing
 
     if provider == "deepseek":
-        if not _normalize_text(settings.deepseek_api_key):
-            missing.append("deepseek.api_key")
-        if not _normalize_text(settings.deepseek_base_url):
-            missing.append("deepseek.base_url")
-        if not _normalize_text(settings.deepseek_embedding_model):
-            missing.append("deepseek.embedding_model")
+        missing.extend(_provider_missing_fields("qwen", target="embedding"))
     elif provider == "qwen":
         if not _normalize_text(settings.qwen_api_key):
             missing.append("qwen.api_key")
@@ -348,13 +350,7 @@ def _provider_missing_fields(provider: str, *, target: str) -> list[str]:
     elif provider == "gemini" and not _normalize_text(settings.google_api_key):
         missing.append("gemini.api_key")
     elif provider == _UNCONFIGURED_PROVIDER:
-        llm_status = llm_provider_status()
-        if llm_status["resolved"] == "deepseek":
-            missing.extend(_provider_missing_fields("deepseek", target="embedding"))
-        elif llm_status["resolved"] == "qwen":
-            missing.extend(_provider_missing_fields("qwen", target="embedding"))
-        else:
-            missing.extend(["qwen.api_key", "deepseek.api_key", "deepseek.embedding_model"])
+        missing.extend(_provider_missing_fields("qwen", target="embedding"))
     return missing
 
 
@@ -393,7 +389,7 @@ def _is_read_only_effective_provider() -> str | None:
 def get_provider_config_payload() -> dict[str, Any]:
     setup = provider_setup_status()
     effective_llm_provider = _normalize_text(settings.llm_provider) or "auto"
-    effective_embedding_provider = _normalize_text(settings.embedding_provider) or "auto"
+    effective_embedding_provider = _normalize_embedding_provider_choice(settings.embedding_provider) or "auto"
     qwen_base_url = _normalize_text(settings.qwen_base_url)
     dashscope_base_url = _normalize_text(settings.dashscope_base_url) or str(
         DASHSCOPE_REGION_PRESETS["china"]["base_url"] or ""
@@ -462,8 +458,9 @@ def _merge_provider_config(current: dict[str, Any], values: dict[str, Any]) -> d
     merged = deepcopy(current or {})
     if "llm_provider" in values and _normalize_text(values.get("llm_provider")) in SUPPORTED_LLM_PROVIDERS:
         merged["llm_provider"] = _normalize_text(values.get("llm_provider"))
-    if "embedding_provider" in values and _normalize_text(values.get("embedding_provider")) in SUPPORTED_EMBEDDING_PROVIDERS:
-        merged["embedding_provider"] = _normalize_text(values.get("embedding_provider"))
+    normalized_embedding_provider = _normalize_embedding_provider_choice(values.get("embedding_provider"))
+    if "embedding_provider" in values and normalized_embedding_provider in SUPPORTED_EMBEDDING_PROVIDERS:
+        merged["embedding_provider"] = normalized_embedding_provider
 
     if "deepseek" in values:
         merged["deepseek"] = _merge_provider_block(
@@ -552,7 +549,7 @@ def test_provider_connection(values: dict[str, Any], target: str = "auto") -> di
         if resolved_llm == _UNCONFIGURED_PROVIDER:
             resolved_llm = None
         provider, _, _ = resolve_embedding_provider(strict=True, resolved_llm_provider=resolved_llm)
-        if provider not in {"deepseek", "qwen", "dashscope"}:
+        if provider not in {"qwen", "dashscope"}:
             raise ValueError(f"当前向量 provider 不在本期前端支持范围：{provider}")
         embeddings = get_embeddings()
         embeddings.embed_query("连接测试")

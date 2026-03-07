@@ -256,7 +256,7 @@ class DashScopeProviderPatch(BaseModel):
 
 class ProviderConfigValues(BaseModel):
     llm_provider: Optional[Literal["auto", "deepseek", "qwen"]] = None
-    embedding_provider: Optional[Literal["auto", "deepseek", "qwen", "dashscope"]] = None
+    embedding_provider: Optional[Literal["auto", "qwen", "dashscope"]] = None
     deepseek: Optional[DeepSeekProviderPatch] = None
     qwen: Optional[QwenProviderPatch] = None
     dashscope: Optional[DashScopeProviderPatch] = None
