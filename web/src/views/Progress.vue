@@ -1641,6 +1641,12 @@ const pathChartOption = computed(() => {
   const nodePositions = layout.nodePositions || {}
   const headerPills = layout.headerPills || []
   const edgeCurvenessByKey = layout.edgeCurvenessByKey || {}
+  const graphBounds = layout.graphBounds || {
+    x: 0,
+    y: 0,
+    width: pathChartCanvasWidth.value,
+    height: pathChartCanvasHeight.value,
+  }
 
   const nodes = learningPath.value.map((item) => {
     const stageId = item.stage || 'foundation'
@@ -1794,6 +1800,12 @@ const pathChartOption = computed(() => {
     series: [{
       type: 'graph',
       layout: 'none',
+      // ECharts graph still maps node x/y through its view rect; pinning the series view
+      // to the node bounding box keeps node coordinates aligned with absolute `graphic` bands.
+      left: graphBounds.x,
+      top: graphBounds.y,
+      width: graphBounds.width,
+      height: graphBounds.height,
       // Keep nodes aligned with static `graphic` level bands; scrolling is handled by the outer container.
       roam: false,
       draggable: false,

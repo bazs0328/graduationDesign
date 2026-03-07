@@ -78,4 +78,30 @@ describe('learningPathChartLayout', () => {
       )
     }
   })
+
+  it('returns graph bounds that match the node coordinate bounding box for fixed-position rendering', () => {
+    const items = [
+      makeItem('l0-1', 0),
+      makeItem('l1-1', 1),
+      makeItem('l1-2', 1),
+      makeItem('l2-1', 2),
+    ]
+
+    const layout = buildLearningPathChartLayout(items, [])
+    const positions = Object.values(layout.nodePositions)
+    const xs = positions.map((pos) => pos.x)
+    const ys = positions.map((pos) => pos.y)
+
+    expect(layout.graphBounds.x).toBe(Math.min(...xs))
+    expect(layout.graphBounds.y).toBe(Math.min(...ys))
+    expect(layout.graphBounds.width).toBe(Math.max(...xs) - Math.min(...xs))
+    expect(layout.graphBounds.height).toBe(Math.max(...ys) - Math.min(...ys))
+  })
+
+  it('pads graph bounds for single-node layouts so the series view rect never collapses to zero', () => {
+    const layout = buildLearningPathChartLayout([makeItem('solo', 0)], [])
+
+    expect(layout.graphBounds.width).toBeGreaterThan(0)
+    expect(layout.graphBounds.height).toBeGreaterThan(0)
+  })
 })

@@ -53,6 +53,12 @@ export function buildLearningPathChartLayout(items = [], edges = []) {
       canvasWidth: LEARNING_PATH_CHART_LAYOUT.minCanvasWidth,
       canvasHeight: LEARNING_PATH_CHART_LAYOUT.minCanvasHeight,
       viewportHeight: LEARNING_PATH_CHART_LAYOUT.minViewportHeight,
+      graphBounds: {
+        x: 0,
+        y: 0,
+        width: LEARNING_PATH_CHART_LAYOUT.minCanvasWidth,
+        height: LEARNING_PATH_CHART_LAYOUT.minCanvasHeight,
+      },
       maxRowsPerLevel: 0,
       levelValues: [],
       levelCounts: {},
@@ -191,10 +197,44 @@ export function buildLearningPathChartLayout(items = [], edges = []) {
     }
   }
 
+  let graphMinX = Number.POSITIVE_INFINITY
+  let graphMaxX = Number.NEGATIVE_INFINITY
+  let graphMinY = Number.POSITIVE_INFINITY
+  let graphMaxY = Number.NEGATIVE_INFINITY
+
+  for (const meta of Object.values(nodePositions)) {
+    graphMinX = Math.min(graphMinX, meta.x)
+    graphMaxX = Math.max(graphMaxX, meta.x)
+    graphMinY = Math.min(graphMinY, meta.y)
+    graphMaxY = Math.max(graphMaxY, meta.y)
+  }
+
+  if (!Number.isFinite(graphMinX) || !Number.isFinite(graphMaxX)) {
+    graphMinX = 0
+    graphMaxX = LEARNING_PATH_CHART_LAYOUT.minCanvasWidth
+  } else if (graphMaxX - graphMinX === 0) {
+    graphMinX -= 1
+    graphMaxX += 1
+  }
+
+  if (!Number.isFinite(graphMinY) || !Number.isFinite(graphMaxY)) {
+    graphMinY = 0
+    graphMaxY = LEARNING_PATH_CHART_LAYOUT.minCanvasHeight
+  } else if (graphMaxY - graphMinY === 0) {
+    graphMinY -= 1
+    graphMaxY += 1
+  }
+
   return {
     canvasWidth,
     canvasHeight,
     viewportHeight,
+    graphBounds: {
+      x: graphMinX,
+      y: graphMinY,
+      width: graphMaxX - graphMinX,
+      height: graphMaxY - graphMinY,
+    },
     maxRowsPerLevel,
     levelValues,
     levelCounts,
