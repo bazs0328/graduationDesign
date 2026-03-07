@@ -277,13 +277,13 @@ test('wrong answer can jump to QA explain mode and auto-send', async ({ page }) 
   })
 
   await page.goto('/quiz')
-  await expect(page.getByRole('heading', { name: '测验生成' })).toBeVisible()
+  await expect(page.getByTestId('quiz-setup-card')).toBeVisible()
 
-  const quizCard = page.getByRole('heading', { name: '测验生成' }).locator('../..')
+  const quizCard = page.getByTestId('quiz-setup-card')
   const kbSelect = quizCard.locator('select').first()
   await expect(kbSelect).toHaveValue('kb-1')
 
-  await quizCard.getByRole('button', { name: '生成新测验' }).click()
+  await quizCard.getByRole('button', { name: '生成测验' }).click()
   await expect(page.getByRole('button', { name: '提交全部答案' })).toBeVisible()
 
   const wrongOption = page.locator('input[type="radio"][name="q-0"][value="0"]')
@@ -294,7 +294,7 @@ test('wrong answer can jump to QA explain mode and auto-send', async ({ page }) 
   await expect(explainButton).toBeVisible()
   await explainButton.click()
 
-  await expect(page.getByRole('heading', { name: 'AI 辅导对话' })).toBeVisible()
+  await expect(page.getByTestId('qa-learning-dialogue-card')).toBeVisible()
   await expect(page.getByText('讲解模式').first()).toBeVisible()
   await expect(page.getByText('题意理解').first()).toBeVisible()
 

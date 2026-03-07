@@ -1,27 +1,21 @@
 <template>
-  <div class="space-y-8 max-w-6xl mx-auto">
-    <section
-      v-if="entryDocContextId || entryKeypointText"
-      class="bg-primary/5 border border-primary/20 rounded-xl px-4 py-3 space-y-1"
-    >
-      <p class="text-[10px] font-bold uppercase tracking-widest text-primary">学习路径上下文</p>
-      <p class="text-sm text-muted-foreground">
-        <span v-if="entryDocContextId">
-          当前目标文档：<span class="font-semibold text-foreground">{{ entryDocContextName }}</span>
-        </span>
-        <span v-if="entryKeypointText">
-          <span v-if="entryDocContextId"> · </span>
-          学习目标：<span class="font-semibold text-foreground">{{ entryKeypointText }}</span>
-        </span>
-      </p>
-    </section>
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+  <div class="space-y-5 md:space-y-6 max-w-6xl mx-auto">
+    <ContextSummaryBar
+      :kb-name="selectedKbName === '未知' ? '' : selectedKbName"
+      :doc-name="selectedDoc?.filename || entryDocContextName"
+      :focus="entryKeypointText"
+      :source-tag="entryDocContextId || entryKeypointText ? '学习路径上下文' : '当前资料范围'"
+      subtitle="摘要与知识点会围绕当前文档生成，跨文档聚合视图默认收起。"
+      compact
+      tone="info"
+    />
+    <div class="grid grid-cols-1 lg:grid-cols-[320px,minmax(0,1fr)] gap-5 lg:gap-6">
       <!-- Sidebar: Doc Selection -->
-      <aside class="space-y-6">
-        <div class="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
+      <aside class="space-y-4 self-start">
+        <div data-testid="summary-current-doc-card" class="workspace-card p-5 sm:p-6 space-y-4">
           <div class="flex items-center gap-3">
             <FileText class="w-6 h-6 text-primary" />
-            <h2 class="text-xl font-bold">选择范围</h2>
+            <h2 class="text-lg font-bold tracking-tight">{{ UI_NAMING.currentDoc }}</h2>
           </div>
           <SkeletonBlock v-if="busy.init" type="list" :lines="4" />
           <KnowledgeScopePicker
@@ -39,7 +33,7 @@
             @update:doc-id="selectedDocId = $event"
           >
             <p class="text-[11px] text-muted-foreground">
-              摘要与要点生成作用于单文档；你可以先选资料库，再选具体文档。
+              先选资料库，再选具体文档。
             </p>
           </KnowledgeScopePicker>
           <div class="flex flex-col gap-2 pt-2">
@@ -74,7 +68,7 @@
           </div>
         </div>
 
-        <div v-if="selectedDocId" class="bg-card border border-border rounded-xl p-4 text-xs space-y-2">
+        <div v-if="selectedDocId" class="workspace-card-soft p-4 text-xs space-y-2">
           <div class="flex justify-between">
             <span class="text-muted-foreground">文档 ID：</span>
             <span class="font-mono">{{ selectedDocId.slice(0, 8) }}...</span>
@@ -87,13 +81,13 @@
       </aside>
 
       <!-- Main Content: Summary & Keypoints -->
-      <div class="lg:col-span-2 space-y-8">
+      <div class="space-y-5 lg:space-y-6">
         <!-- Summary Card -->
-        <section class="bg-card border border-border rounded-xl p-8 shadow-sm space-y-6 min-h-[300px]">
+        <section data-testid="summary-result-card" class="workspace-card p-6 sm:p-7 space-y-5 min-h-[300px]">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-3">
               <Sparkles class="w-6 h-6 text-primary" />
-              <h2 class="text-2xl font-bold">内容摘要</h2>
+              <h2 class="text-2xl font-bold">{{ UI_NAMING.summary }}</h2>
             </div>
             <span v-if="summaryCached" class="text-[10px] font-bold bg-green-500/10 text-green-500 px-2 py-1 rounded-full uppercase tracking-tighter">
               已缓存
@@ -123,11 +117,11 @@
         </section>
 
         <!-- Keypoints Card -->
-        <section class="bg-card border border-border rounded-xl p-8 shadow-sm space-y-6">
+        <section data-testid="summary-keypoints-card" class="workspace-card p-6 sm:p-7 space-y-5">
           <div class="flex items-center justify-between gap-3">
             <div class="flex items-center gap-3 flex-wrap">
               <Layers class="w-6 h-6 text-primary" />
-              <h2 class="text-2xl font-bold">核心知识点</h2>
+              <h2 class="text-2xl font-bold">{{ UI_NAMING.keypoints }}</h2>
               <span class="text-[10px] font-bold px-2 py-1 rounded-full border border-primary/20 bg-primary/10 text-primary uppercase tracking-tighter">
                 单文档视图
               </span>
@@ -341,11 +335,13 @@ import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import { useToast } from '../composables/useToast'
 import { useSettingsStore } from '../stores/settings'
 import KnowledgeScopePicker from '../components/context/KnowledgeScopePicker.vue'
+import ContextSummaryBar from '../components/context/ContextSummaryBar.vue'
 import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import LoadingSpinner from '../components/ui/LoadingSpinner.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import SourcePreviewModal from '../components/ui/SourcePreviewModal.vue'
+import { UI_NAMING } from '../constants/uiNaming'
 import { renderMarkdown } from '../utils/markdown'
 import { buildRouteContextQuery, parseRouteContext } from '../utils/routeContext'
 
@@ -422,16 +418,16 @@ const summaryEmptyDescription = computed(() => {
     return '还没有可分析的文档，请先上传并完成解析。'
   }
   if (!hasSelectedDoc.value) {
-    return '左侧文档列表已有内容，请先选择一个目标文档。'
+    return '先在左侧选择一个目标文档。'
   }
-  return '系统会基于当前文档生成结构化内容摘要。'
+  return '系统会围绕当前文档生成结构化摘要。'
 })
 const summaryEmptyHint = computed(() => {
   if (!hasDocs.value) {
     return '上传后返回本页即可生成摘要与要点。'
   }
   if (!hasSelectedDoc.value) {
-    return '选择文档后可直接点击生成摘要，支持强制刷新缓存。'
+    return '选择文档后即可直接生成摘要。'
   }
   return '生成结果会缓存，重复查看更快。'
 })
@@ -454,16 +450,16 @@ const keypointsEmptyDescription = computed(() => {
     return '当前还没有文档，无法提取知识点。'
   }
   if (!hasSelectedDoc.value) {
-    return '先在左侧选择文档，再提取核心知识点。'
+    return '先在左侧选择文档，再提取知识点。'
   }
-  return '提取后会展示知识点、讲解与来源定位信息。'
+  return '提取后会展示知识点、讲解与来源定位。'
 })
 const keypointsEmptyHint = computed(() => {
   if (!hasDocs.value) {
     return '建议先上传课程讲义、笔记或教材片段。'
   }
   if (!hasSelectedDoc.value) {
-    return '提取结果可用于后续学习路径与测验推荐。'
+    return '提取结果会直接用于学习路径与测验推荐。'
   }
   return '生成完成后可直接跳转到学习路径查看后续建议。'
 })

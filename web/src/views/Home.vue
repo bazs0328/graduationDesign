@@ -12,7 +12,7 @@
           用 <span class="text-cyan-300">AI</span> 掌握<br/>你的知识
         </h1>
         <p class="text-base sm:text-lg md:text-xl text-blue-50/90 leading-relaxed max-w-2xl font-medium">
-          GradTutor 将你的文档转化为互动学习体验，支持摘要、测验与 AI 辅导对话。
+          GradTutor 将你的文档转化为互动学习体验，支持摘要、问答与测验等学习流程。
         </p>
         <div class="flex flex-wrap gap-3 sm:gap-4 pt-2 sm:pt-4">
           <router-link to="/upload" class="px-6 sm:px-8 py-3.5 sm:py-4 bg-white text-slate-900 rounded-2xl font-black text-base sm:text-lg shadow-xl hover:scale-105 active:scale-95 transition-all">
@@ -127,8 +127,8 @@ const features = [
     icon: FileText
   },
   {
-    name: '互动问答',
-    description: '与理解你文档内容的 AI 辅导进行深度对话。',
+    name: '学习对话',
+    description: '围绕资料内容进行多轮提问、追问与讲解。',
     icon: MessageSquare
   },
   {
@@ -142,8 +142,8 @@ const features = [
     icon: BarChart2
   },
   {
-    name: 'AI 解析',
-    description: '用简明解释拆解难懂定理与定义。',
+    name: '分步讲解',
+    description: '用清晰步骤拆解难懂概念、定理与定义。',
     icon: Sparkles
   }
 ]

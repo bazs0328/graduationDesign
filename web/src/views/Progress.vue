@@ -1,8 +1,84 @@
 <template>
-  <div class="space-y-6 md:space-y-8 max-w-6xl mx-auto">
+  <div class="space-y-5 md:space-y-6 max-w-6xl mx-auto">
+    <ContextSummaryBar
+      :kb-name="selectedKbName"
+      subtitle="进度页会汇总当前资料库的统计、推荐和学习路径。"
+      source-tag="当前资料范围"
+      compact
+      tone="neutral"
+    />
+    <section v-if="showProgressOnboarding" class="workspace-card p-6 sm:p-7 space-y-6">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="space-y-2 max-w-3xl">
+          <p class="workspace-label text-primary/80">学习尚未开始</p>
+          <h2 class="text-2xl font-bold tracking-tight">先完成第一轮学习动作，再回来查看进度</h2>
+          <p class="workspace-copy">
+            进度页会在你上传文档、生成摘要、完成问答或测验后逐步形成统计、推荐和学习路径。现在先从主流程开始。
+          </p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity"
+            @click="goToUpload"
+          >
+            去上传文档
+          </button>
+          <button
+            type="button"
+            class="px-4 py-2 rounded-xl border border-input bg-background text-sm font-semibold hover:bg-accent transition-colors"
+            @click="goToSummaryFromProgress"
+          >
+            去摘要页
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        <article class="workspace-card-soft p-4 space-y-2">
+          <span class="workspace-label">01</span>
+          <h3 class="text-base font-semibold">上传资料</h3>
+          <p class="text-sm text-muted-foreground">先创建资料库并上传课程讲义、教材或笔记。</p>
+        </article>
+        <article class="workspace-card-soft p-4 space-y-2">
+          <span class="workspace-label">02</span>
+          <h3 class="text-base font-semibold">生成摘要</h3>
+          <p class="text-sm text-muted-foreground">用摘要和知识点建立对内容的整体认识。</p>
+        </article>
+        <article class="workspace-card-soft p-4 space-y-2">
+          <span class="workspace-label">03</span>
+          <h3 class="text-base font-semibold">开始测验</h3>
+          <p class="text-sm text-muted-foreground">完成一轮测验后，这里会开始累计得分和掌握度变化。</p>
+        </article>
+        <article class="workspace-card-soft p-4 space-y-2">
+          <span class="workspace-label">04</span>
+          <h3 class="text-base font-semibold">复盘推荐</h3>
+          <p class="text-sm text-muted-foreground">随后返回本页查看推荐动作和学习路径解锁情况。</p>
+        </article>
+      </div>
+
+      <div class="flex flex-wrap gap-2">
+        <button
+          type="button"
+          class="px-4 py-2 rounded-xl border border-input bg-background text-sm font-semibold hover:bg-accent transition-colors"
+          @click="goToQaFromProgressContext"
+        >
+          直接去问答
+        </button>
+        <button
+          type="button"
+          class="px-4 py-2 rounded-xl border border-input bg-background text-sm font-semibold hover:bg-accent transition-colors"
+          @click="goToQuizFromProgressContext"
+        >
+          直接去测验
+        </button>
+      </div>
+    </section>
+
+    <template v-else>
     <!-- Top Stats Bar -->
     <section v-if="progress" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-      <div v-for="stat in topStats" :key="stat.label" class="bg-card border border-border rounded-xl p-4 sm:p-6 shadow-sm flex items-center gap-4">
+      <div v-for="stat in topStats" :key="stat.label" class="workspace-card-soft p-4 sm:p-6 flex items-center gap-4">
         <div class="w-12 h-12 rounded-lg flex items-center justify-center" :class="stat.color">
           <component :is="stat.icon" class="w-6 h-6" />
         </div>
@@ -13,7 +89,7 @@
       </div>
     </section>
     <section v-else-if="showTopStatsSkeleton" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-      <div v-for="index in 4" :key="`top-skeleton-${index}`" class="bg-card border border-border rounded-xl p-4 sm:p-6 shadow-sm">
+      <div v-for="index in 4" :key="`top-skeleton-${index}`" class="workspace-card-soft p-4 sm:p-6">
         <SkeletonBlock type="card" :lines="3" />
       </div>
     </section>
@@ -26,11 +102,11 @@
         </section>
         <LearnerProfileCard v-else :profile="profile" :kb-id="profileContextKbId" />
         <!-- KB Selector & Stats -->
-        <section class="bg-card border border-border rounded-xl p-4 sm:p-6 lg:p-8 shadow-sm space-y-6 lg:space-y-8">
+        <section data-testid="progress-kb-stats-card" class="bg-card border border-border rounded-xl p-4 sm:p-6 lg:p-8 shadow-sm space-y-6 lg:space-y-8">
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div class="flex items-center gap-3">
               <Database class="w-6 h-6 text-primary" />
-              <h2 class="text-xl md:text-2xl font-bold">知识库统计</h2>
+              <h2 class="text-xl md:text-2xl font-bold">资料库统计</h2>
               <span v-if="showProgressRefreshIndicator" class="text-sm text-muted-foreground flex items-center gap-2">
                 <RefreshCw class="w-4 h-4 animate-spin" />
                 <span>正在刷新统计...</span>
@@ -41,7 +117,7 @@
               :model-value="selectedKbId"
               :kbs="kbs"
               label=""
-              placeholder="选择知识库…"
+              placeholder="选择资料库…"
               :loading="appContext.kbsLoading"
               @update:model-value="selectedKbId = $event"
             />
@@ -59,8 +135,8 @@
           <EmptyState
             v-else
             :icon="Database"
-            :title="kbs.length === 0 ? '先上传文档再查看统计' : '选择知识库查看详细统计'"
-            :description="kbs.length === 0 ? '当前还没有知识库，上传并解析文档后会显示知识库维度的统计数据。' : '右上角选择知识库后，可查看文档数、测验次数、问答次数和平均分。'"
+            :title="kbs.length === 0 ? '先上传文档再查看统计' : '选择资料库查看详细统计'"
+            :description="kbs.length === 0 ? '当前还没有资料库，上传并解析文档后会显示资料库维度的统计数据。' : '右上角选择资料库后，可查看文档数、测验次数、问答次数和平均分。'"
             :hint="kbs.length === 0 ? '上传完成后返回本页即可自动汇总。' : '统计会随问答、摘要、测验等行为持续更新。'"
             :primary-action="kbs.length === 0 ? { label: '去上传文档' } : null"
             @primary="goToUpload"
@@ -181,8 +257,8 @@
             <EmptyState
               v-else
               :icon="Sparkles"
-              :title="selectedKbId ? '该知识库暂时没有推荐' : (kbs.length === 0 ? '先上传文档获取推荐' : '先选择知识库查看推荐')"
-              :description="selectedKbId ? '通常在生成摘要、提取要点、完成测验或问答后，系统会给出下一步学习建议。' : (kbs.length === 0 ? '系统需要基于知识库内容与学习行为生成个性化推荐。' : '选择一个知识库后，系统会展示该知识库的下一步学习动作。')"
+              :title="selectedKbId ? '该资料库暂时没有推荐' : (kbs.length === 0 ? '先上传文档获取推荐' : '先选择资料库查看推荐')"
+              :description="selectedKbId ? '通常在生成摘要、提取要点、完成测验或问答后，系统会给出下一步学习建议。' : (kbs.length === 0 ? '系统需要基于资料库内容与学习行为生成个性化推荐。' : '选择一个资料库后，系统会展示该资料库的下一步学习动作。')"
               :hint="selectedKbId ? '你可以先去测验或问答，积累学习记录后再查看推荐。' : (kbs.length === 0 ? '上传并解析文档后即可开始生成推荐。' : '推荐会附带建议原因和可执行动作。')"
               :primary-action="selectedKbId ? { label: '去测验' } : (kbs.length === 0 ? { label: '去上传文档' } : null)"
               :secondary-action="selectedKbId ? { label: '去问答', variant: 'outline' } : null"
@@ -220,7 +296,7 @@
           </div>
           <div v-else-if="learningPath.length" class="space-y-6">
             <div class="rounded-lg border border-primary/15 bg-primary/5 px-4 py-3 text-xs text-muted-foreground">
-              学习路径中的知识点已按知识库跨文档去重合并，掌握度为聚合口径。阶段与模块的进度按知识点掌握度加权计算（已掌握 1 分、部分掌握 0.5 分）。
+              学习路径中的知识点已按资料库范围跨文档去重合并，掌握度为聚合口径。阶段与模块的进度按知识点掌握度加权计算（已掌握 1 分、部分掌握 0.5 分）。
             </div>
             <!-- Path summary -->
             <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -450,8 +526,8 @@
             v-else-if="activity.length === 0"
             class="h-full"
             :icon="Clock"
-            :title="selectedKbId ? '还没有最近动态' : (kbs.length === 0 ? '先上传文档开始学习记录' : '选择知识库后开始积累动态')"
-            :description="selectedKbId ? '完成摘要、问答或测验后，这里会记录最近学习行为。' : (kbs.length === 0 ? '上传文档、提取要点、问答和测验都会写入活动流。' : '选择知识库后进行问答或测验，动态会自动更新。')"
+            :title="selectedKbId ? '还没有最近动态' : (kbs.length === 0 ? '先上传文档开始学习记录' : '选择资料库后开始积累动态')"
+            :description="selectedKbId ? '完成摘要、问答或测验后，这里会记录最近学习行为。' : (kbs.length === 0 ? '上传文档、提取要点、问答和测验都会写入活动流。' : '选择资料库后进行问答或测验，动态会自动更新。')"
             :hint="selectedKbId ? '可以先发起一次测验，快速产生首条学习记录。' : '活动流可用于展示学习节奏与近期进展。'"
             size="sm"
             :primary-action="selectedKbId ? { label: '去测验' } : (kbs.length === 0 ? { label: '去上传文档' } : null)"
@@ -491,6 +567,7 @@
         </div>
       </section>
     </div>
+    </template>
   </div>
 </template>
 
@@ -513,6 +590,7 @@ import {
 import { apiGet, getProfile } from '../api'
 import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import KbSelector from '../components/context/KbSelector.vue'
+import ContextSummaryBar from '../components/context/ContextSummaryBar.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import { MASTERY_MASTERED, MASTERY_PARTIAL, masteryPercent } from '../utils/mastery'
@@ -550,9 +628,11 @@ const STAGE_COLOR_MAP = {
   advanced: '#f59e0b',
   application: '#ef4444',
 }
-const PROGRESS_REC_CACHE_TTL_MS = 5 * 60 * 1000
-const PROGRESS_REC_CACHE_PREFIX = 'gradtutor_progress_rec_v2:'
-const PROGRESS_PATH_CACHE_PREFIX = 'gradtutor_progress_path_v1:'
+const PROGRESS_CACHE_SCHEMA_VERSION = 1
+const PROGRESS_CACHE_SOFT_TTL_MS = 30 * 60 * 1000
+const PROGRESS_CACHE_HARD_TTL_MS = 7 * 24 * 60 * 60 * 1000
+const PROGRESS_REC_CACHE_PREFIX = 'gradtutor_progress_rec_v3:'
+const PROGRESS_PATH_CACHE_PREFIX = 'gradtutor_progress_path_v2:'
 
 const router = useRouter()
 const route = useRoute()
@@ -596,6 +676,11 @@ const topStats = computed(() => {
     { label: '问答数', value: progress.value.total_questions, icon: MessageSquare, color: 'bg-green-500/10 text-green-500' },
     { label: '平均分', value: `${Math.round(progress.value.avg_score * 100)}%`, icon: TrendingUp, color: 'bg-purple-500/10 text-purple-500' },
   ]
+})
+
+const selectedKbName = computed(() => {
+  const kb = kbs.value.find((item) => item.id === selectedKbId.value)
+  return kb?.name || ''
 })
 
 const kbProgress = computed(() => {
@@ -663,6 +748,18 @@ const showLearningPathRefreshIndicator = computed(() => (
 const showActivitySkeleton = computed(() => busy.value.activity && !activityLoaded.value)
 const showActivityRefreshIndicator = computed(() => busy.value.activity && activityLoaded.value)
 const showActivityFooter = computed(() => activity.value.length > 0)
+const showProgressOnboarding = computed(() => {
+  if (busy.value.progress || busy.value.pathLoad || busy.value.recommendations || busy.value.activity) return false
+  if (!progress.value) return kbs.value.length === 0
+  const noCoreData = Number(progress.value.total_docs || 0) === 0
+    && Number(progress.value.total_attempts || 0) === 0
+    && Number(progress.value.total_questions || 0) === 0
+  const noDerivedData = activity.value.length === 0
+    && learningPath.value.length === 0
+    && recommendations.value.length === 0
+    && !nextRecommendation.value
+  return noCoreData && noDerivedData
+})
 
 const itemById = computed(() => {
   const map = {}
@@ -951,17 +1048,38 @@ function learningPathCacheKey(kbId) {
 function readProgressCache(key) {
   if (!key) return null
   try {
-    const raw = sessionStorage.getItem(key)
+    const raw = localStorage.getItem(key)
     if (!raw) return null
     const parsed = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object') return null
+    const version = Number(parsed.version || 0)
     const savedAt = Number(parsed.saved_at || 0)
-    if (!savedAt || (Date.now() - savedAt) > PROGRESS_REC_CACHE_TTL_MS) {
-      sessionStorage.removeItem(key)
+    const payload = parsed.payload
+    if (
+      version !== PROGRESS_CACHE_SCHEMA_VERSION
+      || !savedAt
+      || !payload
+      || typeof payload !== 'object'
+    ) {
+      localStorage.removeItem(key)
       return null
     }
-    return parsed.payload || null
+    const age = Date.now() - savedAt
+    if (age > PROGRESS_CACHE_HARD_TTL_MS) {
+      localStorage.removeItem(key)
+      return null
+    }
+    return {
+      payload,
+      savedAt,
+      stale: age > PROGRESS_CACHE_SOFT_TTL_MS,
+    }
   } catch {
+    try {
+      localStorage.removeItem(key)
+    } catch {
+      // ignore cache cleanup failures
+    }
     return null
   }
 }
@@ -969,7 +1087,8 @@ function readProgressCache(key) {
 function writeProgressCache(key, payload) {
   if (!key) return
   try {
-    sessionStorage.setItem(key, JSON.stringify({
+    localStorage.setItem(key, JSON.stringify({
+      version: PROGRESS_CACHE_SCHEMA_VERSION,
       saved_at: Date.now(),
       payload,
     }))
@@ -1016,10 +1135,10 @@ function applyRecommendationsPayload(payload = {}, options = {}) {
 }
 
 function hydrateRecommendationsFromCache(kbId) {
-  const payload = readRecommendationCache(kbId)
-  if (!payload) return false
-  applyRecommendationsPayload(payload, { kbId })
-  return true
+  const cacheEntry = readRecommendationCache(kbId)
+  if (!cacheEntry?.payload) return null
+  applyRecommendationsPayload(cacheEntry.payload, { kbId })
+  return cacheEntry
 }
 
 function applyLearningPathPayload(payload = {}, options = {}) {
@@ -1046,10 +1165,10 @@ function applyLearningPathPayload(payload = {}, options = {}) {
 }
 
 function hydrateLearningPathFromCache(kbId) {
-  const payload = readLearningPathCache(kbId)
-  if (!payload) return false
-  applyLearningPathPayload(payload, { kbId })
-  return true
+  const cacheEntry = readLearningPathCache(kbId)
+  if (!cacheEntry?.payload) return null
+  applyLearningPathPayload(cacheEntry.payload, { kbId })
+  return cacheEntry
 }
 
 async function fetchRecommendations(options = {}) {
@@ -1063,8 +1182,9 @@ async function fetchRecommendations(options = {}) {
   }
   const requestKbId = selectedKbId.value
   const hadSameKbRecommendations = recommendationsStateKbId.value === requestKbId
+  const cacheEntry = preferCache ? hydrateRecommendationsFromCache(requestKbId) : null
 
-  if (preferCache && hydrateRecommendationsFromCache(requestKbId)) {
+  if (cacheEntry) {
     if (!refreshAfterCache) {
       return
     }
@@ -1101,8 +1221,9 @@ async function fetchLearningPath(options = {}) {
   if (!selectedKbId.value) return
   const requestKbId = selectedKbId.value
   const hadSameKbLearningPath = learningPathStateKbId.value === requestKbId
+  const cacheEntry = preferCache ? hydrateLearningPathFromCache(requestKbId) : null
 
-  if (preferCache && hydrateLearningPathFromCache(requestKbId)) {
+  if (cacheEntry) {
     if (!refreshAfterCache) {
       return
     }
@@ -1214,6 +1335,31 @@ function recommendationActionBtnLabel(action) {
     case 'challenge': return '去挑战'
     default: return '去执行'
   }
+}
+
+function resolveLearningPathTargetItem(item, visited = new Set()) {
+  if (!item) return null
+  const itemId = String(item.keypoint_id || '').trim()
+  if (itemId) {
+    if (visited.has(itemId)) return item
+    visited.add(itemId)
+  }
+  if (!isLearningPathItemBlocked(item)) return item
+
+  const prereqIds = Array.isArray(item.unmet_prerequisite_ids) && item.unmet_prerequisite_ids.length
+    ? item.unmet_prerequisite_ids
+    : Array.isArray(item.prerequisite_ids)
+      ? item.prerequisite_ids
+      : []
+
+  for (const prereqId of prereqIds) {
+    const prereqItem = itemById.value[prereqId]
+    if (!prereqItem) continue
+    const resolved = resolveLearningPathTargetItem(prereqItem, visited)
+    if (resolved) return resolved
+  }
+
+  return item
 }
 
 function goToUpload() {
@@ -1683,33 +1829,42 @@ function actionBtnLabel(action, blocked = false) {
 
 function goToAction(item) {
   if (!item) return
-  if (isLearningPathItemBlocked(item)) {
-    const prereqText = unmetPrereqLabels(item)[0] || ''
-    if (!prereqText) return
+  const targetItem = resolveLearningPathTargetItem(item)
+  if (!targetItem) return
+
+  const fallbackFocus = unmetPrereqLabels(item)[0] || item.text || ''
+  const focusText = String(targetItem.text || fallbackFocus || '').trim()
+
+  if (targetItem.action === 'summary' || targetItem.action === 'keypoints') {
+    if (!targetItem.doc_id) return
     router.push({
-      path: '/qa',
+      path: '/summary',
       query: buildRouteContextQuery({
         kbId: selectedKbId.value,
-        focus: prereqText,
+        docId: targetItem.doc_id,
       }),
     })
     return
   }
-  if (item.action === 'quiz') {
+
+  if (targetItem.action === 'quiz' || targetItem.action === 'challenge') {
     router.push({
       path: '/quiz',
       query: buildRouteContextQuery({
         kbId: selectedKbId.value,
-        focus: item.text || '',
+        docId: targetItem.doc_id,
+        focus: focusText,
       }),
     })
     return
   }
+
   router.push({
     path: '/qa',
     query: buildRouteContextQuery({
       kbId: selectedKbId.value,
-      focus: item.text || '',
+      docId: targetItem.doc_id,
+      focus: focusText,
     }),
   })
 }
@@ -1763,13 +1918,13 @@ async function refreshProgressPageData(options = {}) {
         refreshAfterCache: refreshRecommendationAfterCache,
       })
       : Promise.resolve(),
+    selectedKbId.value
+      ? fetchLearningPath({
+        preferCache: preferRecommendationCache,
+        refreshAfterCache: refreshRecommendationAfterCache,
+      })
+      : Promise.resolve(),
   ])
-  if (selectedKbId.value) {
-    void fetchLearningPath({
-      preferCache: preferRecommendationCache,
-      refreshAfterCache: refreshRecommendationAfterCache,
-    })
-  }
 }
 
 onMounted(async () => {

@@ -1,37 +1,21 @@
 <template>
-  <div class="space-y-6 md:space-y-8 max-w-6xl mx-auto">
-    <section
-      v-if="hasPathContext"
-      class="bg-primary/5 border border-primary/20 rounded-xl px-4 py-3 space-y-1"
-    >
-      <p class="text-[10px] font-bold uppercase tracking-widest text-primary">学习路径上下文</p>
-      <p class="text-sm text-muted-foreground">
-        <span v-if="entryKbContextId">
-          当前资料库：<span class="font-semibold text-foreground">{{ entryKbContextName }}</span>
-        </span>
-        <span v-if="entryDocContextId">
-          <span v-if="entryKbContextId"> · </span>
-          当前文档：<span class="font-semibold text-foreground">{{ entryDocContextName }}</span>
-        </span>
-        <span v-if="entryFocusContext">
-          <span v-if="entryKbContextId || entryDocContextId"> · </span>
-          重点概念：<span class="font-semibold text-foreground">{{ entryFocusContext }}</span>
-        </span>
-      </p>
-    </section>
+  <div class="space-y-5 md:space-y-6 max-w-6xl mx-auto">
     <ContextSummaryBar
       :kb-name="selectedKbName"
       :doc-name="selectedDoc?.filename || ''"
       :focus="quizFocusConcepts[0] || entryFocusContext || ''"
-      subtitle="系统会优先基于这里显示的资料范围生成题目"
+      :source-tag="hasPathContext ? '学习路径上下文' : '当前资料范围'"
+      subtitle="系统会优先基于这里展示的资料范围生成题目。"
+      compact
+      tone="info"
     />
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-8">
+    <div class="grid grid-cols-1 lg:grid-cols-[320px,minmax(0,1fr)] gap-5 lg:gap-6">
       <!-- Left: Quiz Generation -->
-      <aside class="space-y-4 md:space-y-6">
-        <section class="bg-card border border-border rounded-xl p-4 sm:p-6 shadow-sm space-y-6">
+      <aside class="space-y-4 self-start">
+        <section data-testid="quiz-setup-card" class="workspace-card p-5 sm:p-6 space-y-5">
           <div class="flex items-center gap-3">
             <PenTool class="w-6 h-6 text-primary" />
-            <h2 class="text-lg sm:text-xl font-bold">测验生成</h2>
+            <h2 class="text-lg sm:text-xl font-bold">{{ UI_NAMING.quizSetup }}</h2>
           </div>
 
           <div class="space-y-4">
@@ -49,11 +33,11 @@
               @update:doc-id="selectedDocId = $event"
             >
               <p class="text-[11px] text-muted-foreground">
-                默认会按整个资料库出题；如果你只想基于某份文档练习，可继续限定文档。
+                默认按整个资料库出题；需要时再限定到文档。
               </p>
             </KnowledgeScopePicker>
 
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-2 gap-3">
               <div class="space-y-2">
                 <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">题目数量</label>
                 <input type="number" min="1" max="20" v-model.number="quizCount" class="w-full bg-background border border-input rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary text-sm" />
@@ -90,7 +74,7 @@
               <template #icon>
                 <Sparkles class="w-5 h-5" />
               </template>
-              {{ busy.quiz ? '正在生成题目…' : '生成新测验' }}
+              {{ busy.quiz ? '正在生成题目…' : '生成测验' }}
             </Button>
             <p v-if="quizActionBlocked" class="text-xs text-amber-700">
               先到设置中心完成模型接入配置，测验生成功能才可用。
@@ -98,8 +82,8 @@
 
             <AdvancedPanel
               title="高级选项"
-              eyebrow="临时调节"
-              description="聚焦知识点、默认值保存、自适应依据和考试模式都收在这里。"
+              eyebrow=""
+              description="知识点聚焦、默认配置、自适应依据和考试模式统一放在这里。"
               :default-open="quizAdvancedDefaultOpen"
               content-class="max-h-[56vh] overflow-y-auto pr-1"
             >
@@ -268,7 +252,7 @@
                     :class="usePaperBlueprint ? 'bg-primary/10 text-primary border-primary/30' : 'bg-background text-muted-foreground'"
                     @click="usePaperBlueprint = !usePaperBlueprint"
                   >
-                    {{ usePaperBlueprint ? '已开启' : '默认基础模式' }}
+                    {{ usePaperBlueprint ? '已开启' : '基础模式' }}
                   </button>
                 </div>
                 <div v-if="usePaperBlueprint" class="space-y-3">
@@ -344,7 +328,7 @@
           </div>
         </section>
 
-        <div v-if="quizResult" class="bg-card border border-border rounded-xl p-4 sm:p-6 shadow-sm space-y-4 text-center">
+        <div v-if="quizResult" class="workspace-card-soft p-4 sm:p-6 space-y-4 text-center">
           <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground">上次结果</h3>
           <div class="relative inline-flex items-center justify-center">
             <svg class="w-24 h-24">
@@ -428,10 +412,10 @@
       </aside>
 
       <!-- Right: Quiz Content -->
-      <section class="lg:col-span-2 space-y-4 md:space-y-6 relative">
+      <section class="space-y-4 md:space-y-5 relative">
         <LoadingOverlay :show="busy.quiz" message="正在根据资料库生成题目…" />
         <div v-if="quiz" class="space-y-6">
-          <div v-for="(q, idx) in quiz.questions" :id="`question-${idx + 1}`" :key="idx" class="bg-card border border-border rounded-xl p-4 sm:p-6 shadow-sm space-y-4 transition-all" :class="{ 'border-primary/50 ring-1 ring-primary/20': quizResult }">
+          <div v-for="(q, idx) in quiz.questions" :id="`question-${idx + 1}`" :key="idx" class="workspace-card p-4 sm:p-6 space-y-4 transition-all" :class="{ 'border-primary/50 ring-1 ring-primary/20': quizResult }">
             <div class="flex items-start gap-4">
               <div class="flex-shrink-0 w-8 h-8 bg-accent text-accent-foreground rounded-lg flex items-center justify-center font-bold">
                 {{ idx + 1 }}
@@ -646,7 +630,7 @@
           </div>
         </div>
 
-        <div v-else class="bg-card border border-border rounded-xl p-4 sm:p-6 lg:p-8 min-h-[420px] flex items-center justify-center">
+        <div v-else class="workspace-card p-4 sm:p-6 lg:p-8 min-h-[420px] flex items-center justify-center">
           <EmptyState
             :icon="PenTool"
             :title="quizEmptyTitle"
@@ -681,6 +665,7 @@ import { masteryLabel, masteryPercent, masteryBadgeClass, masteryBorderClass } f
 import { renderMarkdown, renderMarkdownInline } from '../utils/markdown'
 import { buildRouteContextQuery, normalizeDifficulty, parseRouteContext } from '../utils/routeContext'
 import { buildAdaptiveInsight } from '../utils/adaptiveTransparency'
+import { UI_NAMING } from '../constants/uiNaming'
 
 const { showToast } = useToast()
 const settingsStore = useSettingsStore()
@@ -773,23 +758,23 @@ const quizEmptyTitle = computed(() => {
 const quizEmptyDescription = computed(() => {
   if (!hasAnyKb.value) return '当前还没有资料库，上传并解析文档后才能生成测验。'
   if (!selectedKbId.value) return '先选择资料范围，再决定题量和难度。'
-  return '已选资料范围后可直接生成测验，不必先研究高级配置。'
+  return '选好资料范围后即可直接生成测验。'
 })
 const quizEmptyHint = computed(() => {
-  if (!hasAnyKb.value) return '上传完成后返回本页即可一键生成题目。'
-  if (!selectedKbId.value) return '默认会按当前资料库范围出题，如有需要再限定到具体文档。'
-  return '生成后可直接提交批改，再查看错题归类与能力变化。'
+  if (!hasAnyKb.value) return '上传完成后返回本页即可生成题目。'
+  if (!selectedKbId.value) return '默认按资料库范围出题，需要时再限定到具体文档。'
+  return '生成后可直接提交批改，再看错题归类与能力变化。'
 })
 const quizEmptyPrimaryAction = computed(() => {
   if (!hasAnyKb.value) return { label: '去上传文档' }
   if (!selectedKbId.value) return null
   return {
-    label: '生成新测验',
+    label: '生成测验',
     loading: busy.value.quiz,
     disabled: quizActionBlocked.value,
   }
 })
-const quizAdvancedDefaultOpen = computed(() => Boolean(settingsStore.effectiveSettings?.ui?.show_advanced_controls))
+const quizAdvancedDefaultOpen = computed(() => false)
 const providerSetup = computed(() => settingsStore.providerSetup)
 const quizActionBlocked = computed(() => {
   const setup = providerSetup.value

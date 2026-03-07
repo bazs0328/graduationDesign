@@ -338,7 +338,7 @@ describe('Quiz wrong-answer explain link', () => {
     await flushPromises()
     await nextTick()
 
-    const generateButton = wrapper.findAll('button').find((btn) => btn.text().includes('生成新测验'))
+    const generateButton = wrapper.findAll('button').find((btn) => btn.text().includes('生成测验'))
     expect(generateButton).toBeTruthy()
     await generateButton.trigger('click')
     await flushPromises()
@@ -434,7 +434,7 @@ describe('Quiz wrong-answer explain link', () => {
 
     const beforePlanCalls = getDifficultyPlan.mock.calls.length
 
-    const generateButton = wrapper.findAll('button').find((btn) => btn.text().includes('生成新测验'))
+    const generateButton = wrapper.findAll('button').find((btn) => btn.text().includes('生成测验'))
     expect(generateButton).toBeTruthy()
     await generateButton.trigger('click')
     await flushPromises()

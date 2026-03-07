@@ -1,5 +1,5 @@
 <template>
-  <section class="rounded-2xl border border-border bg-card/95 shadow-sm overflow-hidden">
+  <section class="workspace-card-soft overflow-hidden">
     <button
       type="button"
       class="w-full px-4 py-3 sm:px-5 sm:py-4 flex items-start justify-between gap-4 text-left hover:bg-accent/40 transition-colors"
@@ -7,19 +7,19 @@
       @click="toggle"
     >
       <div class="space-y-1 min-w-0">
-        <p class="text-[10px] font-bold uppercase tracking-[0.24em] text-primary/80">{{ eyebrow }}</p>
-        <h3 class="text-sm sm:text-base font-bold tracking-tight">{{ title }}</h3>
+        <p v-if="eyebrow" class="workspace-label text-primary/80">{{ eyebrow }}</p>
+        <h3 class="text-sm sm:text-[0.95rem] font-bold tracking-tight">{{ title }}</h3>
         <p v-if="description" class="text-xs sm:text-sm text-muted-foreground leading-relaxed">
           {{ description }}
         </p>
       </div>
-      <span class="shrink-0 inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-border bg-background text-[11px] font-semibold text-muted-foreground">
+      <span class="shrink-0 inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-border bg-background/90 text-[11px] font-semibold text-muted-foreground shadow-sm">
         {{ openState ? collapseLabel : expandLabel }}
         <ChevronDown class="w-3.5 h-3.5 transition-transform" :class="openState ? 'rotate-180' : ''" />
       </span>
     </button>
 
-    <div v-if="openState" class="px-4 pb-4 sm:px-5 sm:pb-5 border-t border-border/70 bg-background/35">
+    <div v-if="openState" class="px-4 pb-4 sm:px-5 sm:pb-5 border-t border-border/70 bg-background/32">
       <div class="pt-4 space-y-4 min-w-0" :class="contentClass">
         <slot />
       </div>

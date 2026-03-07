@@ -136,7 +136,7 @@ describe('settings view simplification', () => {
     getSystemProviderSettings.mockResolvedValue(buildProviderConfigResponse())
   })
 
-  it('hides technical diagnostics by default and reveals them when expanded', async () => {
+  it('keeps diagnostics and per-kb overrides out of the first screen, then reveals them in their tabs', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const wrapper = mount(SettingsView, {
@@ -157,6 +157,13 @@ describe('settings view simplification', () => {
     expect(initialText).not.toContain('模型状态（高级）')
     expect(initialText).not.toContain('当前资料库覆盖设置')
 
+    const advancedTabBtn = wrapper
+      .findAll('button')
+      .find((btn) => btn.text().includes('高级诊断'))
+    expect(advancedTabBtn).toBeTruthy()
+    await advancedTabBtn.trigger('click')
+    await flush()
+
     const toggleBtn = wrapper
       .findAll('button')
       .find((btn) => btn.text().includes('展开高级诊断'))
@@ -166,10 +173,18 @@ describe('settings view simplification', () => {
 
     const expandedText = wrapper.text()
     expect(expandedText).toContain('模型状态（高级）')
-    expect(expandedText).toContain('当前资料库覆盖设置')
     expect(expandedText).toContain('系统高级参数（可编辑）')
     expect(wrapper.find('textarea').exists()).toBe(false)
     expect(wrapper.findAll('input[type="number"]').length).toBeGreaterThan(0)
-    expect(wrapper.findAll('select').length).toBeGreaterThan(1)
+    expect(wrapper.findAll('select').length).toBeGreaterThan(0)
+
+    const preferencesTabBtn = wrapper
+      .findAll('button')
+      .find((btn) => btn.text().includes('学习偏好'))
+    expect(preferencesTabBtn).toBeTruthy()
+    await preferencesTabBtn.trigger('click')
+    await flush()
+
+    expect(wrapper.text()).toContain('当前资料库覆盖设置')
   })
 })

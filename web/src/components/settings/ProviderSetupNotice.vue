@@ -37,18 +37,18 @@ import { useRouter } from 'vue-router'
 import { Settings2 } from 'lucide-vue-next'
 
 const FIELD_LABEL_MAP = {
-  'deepseek.api_key': 'DeepSeek API Key',
-  'deepseek.base_url': 'DeepSeek Base URL',
+  'deepseek.api_key': 'DeepSeek API 密钥',
+  'deepseek.base_url': 'DeepSeek 服务地址',
   'deepseek.model': 'DeepSeek 对话模型',
   'deepseek.embedding_model': 'DeepSeek 向量模型',
-  'qwen.api_key': 'Qwen API Key',
-  'qwen.base_url': 'Qwen Base URL',
+  'qwen.api_key': 'Qwen API 密钥',
+  'qwen.base_url': 'Qwen 服务地址',
   'qwen.model': 'Qwen 对话模型',
   'qwen.embedding_model': 'Qwen 向量模型',
-  'dashscope.base_url': 'DashScope Base URL',
+  'dashscope.base_url': 'DashScope 服务地址',
   'dashscope.embedding_model': 'DashScope 向量模型',
-  'openai.api_key': 'OpenAI API Key',
-  'gemini.api_key': 'Gemini API Key',
+  'openai.api_key': 'OpenAI API 密钥',
+  'gemini.api_key': 'Gemini API 密钥',
 }
 
 const props = defineProps({
@@ -58,7 +58,7 @@ const props = defineProps({
   },
   description: {
     type: String,
-    default: '填写 API Key 和基础地址后，摘要、问答与测验功能才能正常使用。',
+    default: '填写 API 密钥和服务地址后，摘要、问答与测验功能才能正常使用。',
   },
   missing: {
     type: Array,

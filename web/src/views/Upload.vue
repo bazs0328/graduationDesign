@@ -2,15 +2,15 @@
   <div class="space-y-8 max-w-6xl mx-auto">
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
       <!-- Upload Card -->
-      <section class="bg-card border border-border rounded-2xl p-6 shadow-lg shadow-primary/5 space-y-6">
+      <section data-testid="upload-current-kb-card" class="bg-card border border-border rounded-2xl p-6 shadow-lg shadow-primary/5 space-y-6">
         <div class="flex items-center gap-3">
           <UploadIcon class="w-6 h-6 text-primary" />
-          <h2 class="text-xl font-bold">上传文档</h2>
+          <h2 class="text-xl font-bold">{{ UI_NAMING.currentKb }}</h2>
         </div>
 
         <div class="space-y-4">
           <div class="space-y-2">
-            <label class="text-sm font-medium text-muted-foreground uppercase tracking-wider">学习资料库</label>
+            <label class="text-sm font-medium text-muted-foreground uppercase tracking-wider">{{ UI_NAMING.currentKb }}</label>
             <div v-if="busy.init">
               <SkeletonBlock type="list" :lines="2" />
             </div>
@@ -30,7 +30,7 @@
                   :disabled="!selectedKbId"
                   @click="manageKbDialogOpen = true"
                 >
-                  管理当前资料库
+                  {{ UI_NAMING.kbSettings }}
                 </Button>
               </div>
 
@@ -48,12 +48,12 @@
                   :loading="busy.kb"
                   @click="createKb"
                 >
-                  {{ hasAnyKb ? '创建新资料库' : '创建资料库' }}
+                  新建资料库
                 </Button>
               </div>
             </div>
             <p v-if="selectedKbId" class="text-xs text-muted-foreground">
-              重命名和删除已移入“管理当前资料库”，避免误操作打断上传流程。
+              重命名和删除已移入“{{ UI_NAMING.kbSettings }}”，避免误操作打断上传流程。
             </p>
             <p class="text-xs text-muted-foreground">
               系统级文档识别能力与解析策略由管理员维护；问答与测验常用偏好可在
@@ -146,15 +146,52 @@
       </section>
 
       <!-- Documents List -->
-      <section class="bg-card border border-border rounded-2xl p-6 shadow-lg shadow-primary/5 flex flex-col h-[600px]">
-        <div class="flex items-center justify-between mb-6">
-          <div class="flex items-center gap-3">
-            <FileText class="w-6 h-6 text-primary" />
-            <h2 class="text-xl font-bold">我的文档</h2>
+      <section data-testid="upload-documents-card" class="bg-card border border-border rounded-2xl p-6 shadow-lg shadow-primary/5 flex flex-col h-[600px]">
+        <div class="mb-5 space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <FileText class="w-6 h-6 text-primary" />
+              <h2 class="text-xl font-bold">{{ UI_NAMING.currentKbDocs }}</h2>
+            </div>
+            <span class="text-xs font-bold bg-secondary px-2 py-1 rounded text-secondary-foreground">
+              {{ busy.init ? '加载中…' : `共 ${docsTotal} 个` }}
+            </span>
           </div>
-          <span class="text-xs font-bold bg-secondary px-2 py-1 rounded text-secondary-foreground">
-            {{ busy.init ? '加载中…' : `共 ${docsTotal} 个` }}
-          </span>
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded-full border text-xs font-semibold transition-colors"
+              :class="isDocStatusActive('') ? 'border-primary/30 bg-primary/10 text-primary' : 'border-border bg-background text-muted-foreground hover:bg-accent'"
+              @click="setDocStatusFilter('')"
+            >
+              全部
+            </button>
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded-full border text-xs font-semibold transition-colors"
+              :class="isDocStatusActive('processing') ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-border bg-background text-muted-foreground hover:bg-accent'"
+              @click="setDocStatusFilter('processing')"
+            >
+              处理中 {{ taskCenter.processing_count }}
+            </button>
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded-full border text-xs font-semibold transition-colors"
+              :class="isDocStatusActive('error') ? 'border-destructive/30 bg-destructive/10 text-destructive' : 'border-border bg-background text-muted-foreground hover:bg-accent'"
+              @click="setDocStatusFilter('error')"
+            >
+              失败 {{ taskCenter.error_count }}
+            </button>
+            <Button
+              v-if="taskCenter.error_count > 0"
+              size="sm"
+              variant="outline"
+              :loading="busy.retryFailed"
+              @click="retryFailedTasks()"
+            >
+              重试失败任务
+            </Button>
+          </div>
         </div>
 
         <div class="mb-4 grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -332,7 +369,7 @@
         </div>
       </div>
       <div v-if="!providerFeaturesReady" class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        继续前请先到设置中心完成模型接入配置。上传本身已完成，但摘要、问答和测验暂时不可用。
+        文档上传已完成；如需继续使用摘要、问答和测验，请先到设置中心完成模型接入配置。
       </div>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
         <button
@@ -383,71 +420,6 @@
       </div>
     </section>
 
-    <section class="bg-card border border-border rounded-2xl p-6 shadow-lg shadow-primary/5 space-y-4">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <RefreshCw class="w-5 h-5 text-primary" />
-          <h3 class="text-lg font-bold">解析任务中心</h3>
-        </div>
-        <div class="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>处理中 {{ taskCenter.processing_count }}</span>
-          <span>失败 {{ taskCenter.error_count }}</span>
-        </div>
-      </div>
-
-      <div v-if="taskCenter.processing_count === 0 && taskCenter.error_count === 0" class="text-sm text-muted-foreground">
-        当前没有解析中的任务或失败任务。
-      </div>
-
-      <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div class="space-y-2">
-          <div class="text-sm font-semibold">处理中</div>
-          <div v-if="taskCenter.processing.length === 0" class="text-xs text-muted-foreground">暂无</div>
-          <div
-            v-for="task in taskCenter.processing"
-            :key="`proc-${task.id}`"
-            class="text-xs p-3 bg-background border border-border rounded-lg flex items-center justify-between gap-3"
-          >
-            <div class="min-w-0">
-              <div class="truncate font-medium">{{ task.filename }}</div>
-              <div class="text-muted-foreground">自动刷新中</div>
-            </div>
-            <RefreshCw class="w-3 h-3 text-blue-500 animate-spin shrink-0" />
-          </div>
-        </div>
-
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <div class="text-sm font-semibold">失败</div>
-            <Button
-              size="sm"
-              variant="outline"
-              :disabled="taskCenter.error_count === 0"
-              :loading="busy.retryFailed"
-              @click="retryFailedTasks()"
-            >
-              一键重试
-            </Button>
-          </div>
-          <div v-if="taskCenter.error.length === 0" class="text-xs text-muted-foreground">暂无</div>
-          <div
-            v-for="task in taskCenter.error"
-            :key="`err-${task.id}`"
-            class="text-xs p-3 bg-background border border-destructive/30 rounded-lg flex items-center justify-between gap-3"
-          >
-            <div class="min-w-0">
-              <div class="truncate font-medium">{{ task.filename }}</div>
-              <div class="text-destructive truncate">{{ task.error_message || '解析失败' }}</div>
-              <div class="text-muted-foreground">重试次数 {{ task.retry_count || 0 }}</div>
-            </div>
-            <Button size="sm" variant="ghost" :loading="isDocBusy(task.id)" @click="retryFailedTasks([task.id])">
-              重试
-            </Button>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <teleport to="body">
       <div
         v-if="manageKbDialogOpen"
@@ -457,9 +429,9 @@
         <section class="w-full max-w-xl rounded-2xl border border-border bg-card shadow-xl overflow-hidden">
           <header class="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
             <div class="space-y-1">
-              <h3 class="text-lg font-bold">管理当前资料库</h3>
+              <h3 class="text-lg font-bold">{{ UI_NAMING.kbSettings }}</h3>
               <p class="text-sm text-muted-foreground">
-                当前资料库：{{ selectedKb?.name || '未选择' }}
+                {{ UI_NAMING.currentKb }}：{{ selectedKb?.name || '未选择' }}
               </p>
             </div>
             <button
@@ -526,6 +498,7 @@ import Button from '../components/ui/Button.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import KbSelector from '../components/context/KbSelector.vue'
+import { UI_NAMING } from '../constants/uiNaming'
 import { buildRouteContextQuery } from '../utils/routeContext'
 
 const router = useRouter()
@@ -593,9 +566,9 @@ const canUpload = computed(() => {
   return Boolean(String(kbNameInput.value || '').trim())
 })
 const uploadPrimaryLabel = computed(() => {
-  if (!hasAnyKb.value) return '创建资料库并上传'
+  if (!hasAnyKb.value) return '新建资料库并上传'
   if (!selectedKbId.value) return '先选择资料库'
-  return '上传到当前资料库'
+  return '上传文档'
 })
 const showUploadNextSteps = computed(() => (
   Boolean(lastUploadedDoc.value)
@@ -609,7 +582,7 @@ const providerFeaturesReady = computed(() => {
 })
 const uploadSuggestionDescription = computed(() => {
   if (!providerFeaturesReady.value) {
-    return '文档已经上传完成。继续摘要、问答或测验前，先到设置中心完成模型接入配置。'
+    return '文档已上传完成。继续使用摘要、问答或测验前，请先到设置中心完成模型接入配置。'
   }
   if (lastUploadedDoc.value?.status === 'processing') {
     return '文档已提交并进入解析流程。你可以先去摘要页或问答页，待状态就绪后继续深入学习。'
@@ -625,7 +598,7 @@ const isDocFilterActive = computed(() => {
 })
 const uploadDocsEmptyDescription = computed(() => {
   if (!hasAnyKb.value) {
-    return '先创建一个资料库，再上传 PDF/TXT/MD/DOCX/PPTX 文档进行解析。'
+    return '先新建一个资料库，再上传 PDF/TXT/MD/DOCX/PPTX 文档进行解析。'
   }
   if (isDocFilterActive.value) {
     return '当前筛选条件下没有匹配文档，可以清空筛选后查看全部结果。'
@@ -643,7 +616,7 @@ const uploadDocsEmptyHint = computed(() => {
 })
 const uploadDocsEmptyPrimaryAction = computed(() => {
   if (!hasAnyKb.value) {
-    return { label: '创建资料库' }
+    return { label: '新建资料库' }
   }
   if (isDocFilterActive.value) {
     return { label: '清空筛选', variant: 'secondary' }
@@ -669,7 +642,7 @@ const uploadProgressDetail = computed(() => {
     const total = uploadProgress.value.total > 0 ? formatFileSize(uploadProgress.value.total) : '未知大小'
     return `${loaded} / ${total}`
   }
-  return '文档已提交到后端，正在建立索引，可在右侧任务中心查看状态。'
+  return '文档已提交到后端，正在建立索引，可在当前资料库文档中查看状态。'
 })
 const uploadProgressWidth = computed(() => {
   if (uploadProgress.value.phase === 'processing') return '100%'
@@ -870,6 +843,14 @@ function buildDocsQueryParams(options = {}) {
 
 function toggleSortOrder() {
   docFilters.value.sortOrder = docFilters.value.sortOrder === 'desc' ? 'asc' : 'desc'
+}
+
+function isDocStatusActive(status) {
+  return docFilters.value.status === status
+}
+
+function setDocStatusFilter(status) {
+  docFilters.value.status = status
 }
 
 async function goToPrevDocsPage() {

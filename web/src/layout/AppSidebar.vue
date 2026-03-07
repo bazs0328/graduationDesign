@@ -5,16 +5,19 @@
     @click="closeMobileDrawer"
   ></div>
   <aside
-    class="bg-card border-r border-border flex flex-col h-screen transition-all duration-300 fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] shadow-2xl lg:static lg:translate-x-0 lg:w-64 lg:max-w-none lg:shadow-none"
+    class="flex flex-col h-screen transition-all duration-300 fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] shadow-2xl lg:static lg:translate-x-0 lg:w-64 lg:max-w-none lg:shadow-none bg-slate-50/92 dark:bg-slate-900/90 border-r border-border/80 backdrop-blur-xl"
     :class="[
       mobileOpen ? 'translate-x-0' : '-translate-x-full',
       collapsed ? 'lg:w-20' : 'lg:w-64'
     ]"
   >
-    <div class="p-4 lg:p-6 flex items-center gap-3 border-b border-border justify-between">
+    <div class="p-4 lg:p-5 flex items-center gap-3 border-b border-border/70 justify-between">
       <div class="flex items-center gap-3 min-w-0">
-        <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-primary-foreground font-bold shrink-0">G</div>
-        <h1 v-if="showExpandedLabels" class="text-xl font-bold tracking-tight truncate">GradTutor</h1>
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold shrink-0 shadow-lg shadow-blue-500/20">G</div>
+        <div v-if="showExpandedLabels" class="min-w-0">
+          <p class="text-[10px] font-bold uppercase tracking-[0.26em] text-slate-500 dark:text-slate-400">Workspace</p>
+          <h1 class="text-lg font-bold tracking-tight truncate">GradTutor</h1>
+        </div>
       </div>
       <button
         type="button"
@@ -27,15 +30,21 @@
     </div>
 
     <nav class="flex-1 p-3 lg:p-4 space-y-2 overflow-y-auto">
+      <p
+        v-if="showExpandedLabels"
+        class="px-3 pb-1 text-[10px] font-bold uppercase tracking-[0.24em] text-muted-foreground"
+      >
+        主流程
+      </p>
       <router-link
         v-for="item in navItems"
         :key="item.path"
         :to="item.path"
-        class="relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 hover:bg-primary/10 hover:text-primary group"
-        :class="{ 'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground shadow-md shadow-primary/20': $route.path === item.path }"
+        class="relative flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 hover:bg-white/80 hover:text-primary dark:hover:bg-slate-800/90 group"
+        :class="{ 'bg-white text-slate-950 hover:bg-white shadow-[0_16px_28px_-22px_rgba(15,23,42,0.35)] dark:bg-slate-800 dark:text-slate-100': $route.path === item.path }"
         @click="closeMobileDrawer"
       >
-        <component :is="item.icon" class="w-5 h-5 shrink-0" />
+        <component :is="item.icon" class="w-5 h-5 shrink-0" :class="$route.path === item.path ? 'text-primary' : 'text-muted-foreground'" />
         <span v-if="showExpandedLabels" class="font-semibold truncate">{{ item.name }}</span>
         <div
           v-if="collapsed && !mobileOpen"
@@ -46,9 +55,9 @@
       </router-link>
     </nav>
 
-    <div class="p-3 lg:p-4 border-t border-border space-y-3 lg:space-y-4">
-      <div v-if="showExpandedLabels" class="space-y-2">
-        <p class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">当前用户</p>
+    <div class="p-3 lg:p-4 border-t border-border/70 space-y-3 lg:space-y-4">
+      <div v-if="showExpandedLabels" class="workspace-card-soft p-3 space-y-2">
+        <p class="text-[10px] font-bold uppercase tracking-[0.24em] text-muted-foreground">当前用户</p>
         <p class="text-sm font-medium truncate" :title="displayName">{{ displayName }}</p>
         <button
           type="button"
@@ -59,7 +68,7 @@
         </button>
       </div>
       <button
-        class="hidden lg:flex w-full items-center justify-center p-2 rounded-md hover:bg-accent transition-colors"
+        class="hidden lg:flex w-full items-center justify-center p-2 rounded-xl hover:bg-white/80 dark:hover:bg-slate-800 transition-colors"
         @click="collapsed = !collapsed"
       >
         <component :is="collapsed ? ChevronRight : ChevronLeft" class="w-5 h-5" />

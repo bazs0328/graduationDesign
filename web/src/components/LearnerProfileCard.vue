@@ -310,7 +310,7 @@ function goToQA(concept) {
         </div>
         <p class="text-[10px] text-muted-foreground">
           跳转会自动携带当前知识点
-          <span v-if="props.kbId">与知识库上下文</span>
+          <span v-if="props.kbId">与资料库上下文</span>
         </p>
       </div>
       <p v-else class="text-sm text-muted-foreground">暂无薄弱知识点记录</p>

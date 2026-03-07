@@ -1,43 +1,69 @@
 <template>
-  <div class="space-y-6 md:space-y-8 max-w-6xl mx-auto">
-    <section class="relative overflow-hidden rounded-2xl border border-border bg-card p-5 sm:p-6 shadow-sm">
-      <div class="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.10),transparent_55%)]"></div>
-      <div class="relative flex flex-wrap items-start justify-between gap-4">
+  <div class="space-y-5 md:space-y-6 max-w-6xl mx-auto">
+    <section class="workspace-toolbar p-5 sm:p-6">
+      <div class="flex flex-wrap items-start justify-between gap-4">
         <div class="space-y-2">
           <div class="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
             <SlidersHorizontal class="w-3.5 h-3.5" />
-            设置中心
+            配置
           </div>
-          <h1 class="text-2xl font-black tracking-tight">学习偏好设置</h1>
-          <p class="text-sm text-muted-foreground max-w-3xl leading-relaxed">
-            常用学习偏好和模型接入配置都已前置；高级诊断区域只保留系统排查与运行参数。
+          <h1 class="text-2xl font-bold tracking-tight">{{ UI_NAMING.settings }}</h1>
+          <p class="workspace-copy max-w-3xl">
+            模型接入、学习偏好与诊断；日常使用时主要关注模型接入和学习偏好。
           </p>
         </div>
         <div class="grid grid-cols-2 gap-2 text-xs">
-          <div class="rounded-xl border border-border bg-background/70 px-3 py-2">
+          <div class="workspace-card-soft px-3 py-2">
             <div class="text-muted-foreground">当前资料库</div>
             <div class="font-semibold truncate max-w-[180px]">{{ selectedKbName || '未选择' }}</div>
           </div>
-          <div class="rounded-xl border border-border bg-background/70 px-3 py-2">
+          <div class="workspace-card-soft px-3 py-2">
             <div class="text-muted-foreground">状态</div>
             <div class="font-semibold" :class="settingsStore.error ? 'text-amber-600' : 'text-green-600'">
-              {{ settingsStore.error ? '回退默认配置' : '配置可用' }}
+              {{ settingsStore.error ? '已回退到默认配置' : '配置可用' }}
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="space-y-4">
-      <div class="rounded-3xl border border-border bg-card p-5 sm:p-6 shadow-sm space-y-5">
+    <div class="workspace-card-soft inline-flex w-full max-w-fit gap-1 p-1">
+      <button
+        type="button"
+        class="px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+        :class="settingsTab === 'provider' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent'"
+        @click="settingsTab = 'provider'"
+      >
+        模型接入
+      </button>
+      <button
+        type="button"
+        class="px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+        :class="settingsTab === 'preferences' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent'"
+        @click="settingsTab = 'preferences'"
+      >
+        学习偏好
+      </button>
+      <button
+        type="button"
+        class="px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+        :class="settingsTab === 'advanced' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent'"
+        @click="settingsTab = 'advanced'"
+      >
+        高级诊断
+      </button>
+    </div>
+
+    <section v-if="settingsTab === 'provider'" class="space-y-4">
+      <div class="workspace-card p-5 sm:p-6 space-y-5">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="space-y-2">
             <div class="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
               模型接入配置
             </div>
-            <h2 class="text-xl font-black tracking-tight">把 DeepSeek / Qwen / DashScope 配到前台来</h2>
+            <h2 class="text-xl font-black tracking-tight">模型服务配置</h2>
             <p class="text-sm text-muted-foreground max-w-3xl leading-relaxed">
-              API Key 仍由后端本地保存，页面只负责填写、更新和显示掩码。配置完成后，摘要、问答和测验会自动恢复可用。
+              密钥会安全保存，页面仅用于填写、更新和显示掩码。完成配置后即可使用摘要、问答和测验。
             </p>
           </div>
           <div class="rounded-2xl border border-border bg-background/70 px-4 py-3 text-sm space-y-1 min-w-[220px]">
@@ -46,7 +72,7 @@
               {{ providerFeaturesReady ? '模型接入已就绪' : '仍需完成基础配置' }}
             </div>
             <div class="text-xs text-muted-foreground">
-              对话：{{ providerSetup?.current_llm_provider || 'unconfigured' }} · 向量：{{ providerSetup?.current_embedding_provider || 'unconfigured' }}
+              对话：{{ providerSetup?.current_llm_provider || '未配置' }} · 向量：{{ providerSetup?.current_embedding_provider || '未配置' }}
             </div>
           </div>
         </div>
@@ -55,25 +81,25 @@
           v-if="providerConfig.readOnlyReason"
           class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900 space-y-2"
         >
-          <p class="font-semibold">当前环境使用的是 OpenAI / Gemini 配置</p>
+          <p class="font-semibold">当前使用的是 OpenAI / Gemini 配置</p>
           <p class="leading-relaxed">
             {{ providerConfig.readOnlyReason }}
           </p>
           <div class="flex flex-wrap gap-2 text-xs">
             <span class="px-2 py-1 rounded-full border border-amber-300 bg-white">
-              当前对话 provider：{{ providerSetup?.current_llm_provider || '—' }}
+              当前对话服务：{{ providerSetup?.current_llm_provider || '—' }}
             </span>
             <span class="px-2 py-1 rounded-full border border-amber-300 bg-white">
-              当前向量 provider：{{ providerSetup?.current_embedding_provider || '—' }}
+              当前向量服务：{{ providerSetup?.current_embedding_provider || '—' }}
             </span>
           </div>
         </div>
 
         <template v-else>
           <div v-if="!providerFeaturesReady" class="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-4 space-y-2">
-            <p class="text-sm font-semibold text-amber-900">继续使用前，先把模型接入补齐</p>
+            <p class="text-sm font-semibold text-amber-900">继续使用前，请先完成模型接入配置</p>
             <p class="text-sm text-amber-900/80 leading-relaxed">
-              当前还缺少部分基础配置。完成后，摘要生成、问答发送和测验生成会自动恢复可用。
+              当前仍缺少部分基础配置。完成后，摘要、问答和测验功能会自动恢复可用。
             </p>
             <p v-if="providerMissingSummary" class="text-xs text-amber-800">
               缺少项：{{ providerMissingSummary }}
@@ -114,14 +140,14 @@
                 <div class="flex items-center justify-between gap-2">
                   <h3 class="text-base font-bold tracking-tight">DeepSeek</h3>
                   <span class="text-[10px] font-semibold px-2 py-1 rounded-full border" :class="providerBadgeClass(providerDraft.llm_provider === 'deepseek' || providerDraft.embedding_provider === 'deepseek')">
-                    {{ providerDraft.llm_provider === 'deepseek' || providerDraft.embedding_provider === 'deepseek' ? '已启用' : '可选' }}
+                    {{ providerDraft.llm_provider === 'deepseek' || providerDraft.embedding_provider === 'deepseek' ? '当前使用' : '可配置' }}
                   </span>
                 </div>
-                <p class="text-xs text-muted-foreground">适合把对话模型和向量模型都放在同一供应商侧维护。</p>
+                <p class="text-xs text-muted-foreground">适合作为统一的对话与向量服务。</p>
               </div>
 
               <div class="space-y-2">
-                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">API Key</label>
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">API 密钥</label>
                 <div v-if="providerDraft.deepseek.api_key_configured && !providerDraft.deepseek.editing_api_key && !providerDraft.deepseek.clear_api_key" class="rounded-xl border border-border bg-card px-3 py-3 space-y-3">
                   <p class="text-sm font-medium">已保存 {{ providerDraft.deepseek.api_key_masked || '••••' }}</p>
                   <div class="flex flex-wrap gap-2">
@@ -133,17 +159,17 @@
                   v-else
                   type="password"
                   :value="providerDraft.deepseek.api_key_input"
-                  placeholder="输入 DeepSeek API Key"
+                  placeholder="输入 DeepSeek API 密钥"
                   class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
                   @input="updateProviderSection('deepseek', { api_key_input: $event.target.value, clear_api_key: false })"
                 />
                 <p v-if="providerDraft.deepseek.clear_api_key" class="text-xs text-amber-700">
-                  保存后会清除当前 DeepSeek API Key。
+                  保存后将清除当前 DeepSeek API 密钥。
                 </p>
               </div>
 
               <div class="space-y-2">
-                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Base URL</label>
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">服务地址</label>
                 <input
                   type="text"
                   :value="providerDraft.deepseek.base_url"
@@ -179,14 +205,14 @@
                 <div class="flex items-center justify-between gap-2">
                   <h3 class="text-base font-bold tracking-tight">Qwen</h3>
                   <span class="text-[10px] font-semibold px-2 py-1 rounded-full border" :class="providerBadgeClass(providerDraft.llm_provider === 'qwen' || providerDraft.embedding_provider === 'qwen')">
-                    {{ providerDraft.llm_provider === 'qwen' || providerDraft.embedding_provider === 'qwen' ? '已启用' : '可选' }}
+                    {{ providerDraft.llm_provider === 'qwen' || providerDraft.embedding_provider === 'qwen' ? '当前使用' : '可配置' }}
                   </span>
                 </div>
-                <p class="text-xs text-muted-foreground">适合 Qwen 对话能力；DashScope 向量模型也会复用这里的 API Key。</p>
+                <p class="text-xs text-muted-foreground">适合作为对话模型服务；DashScope 向量服务会复用这里的 API 密钥。</p>
               </div>
 
               <div class="space-y-2">
-                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">API Key</label>
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">API 密钥</label>
                 <div v-if="providerDraft.qwen.api_key_configured && !providerDraft.qwen.editing_api_key && !providerDraft.qwen.clear_api_key" class="rounded-xl border border-border bg-card px-3 py-3 space-y-3">
                   <p class="text-sm font-medium">已保存 {{ providerDraft.qwen.api_key_masked || '••••' }}</p>
                   <div class="flex flex-wrap gap-2">
@@ -198,12 +224,12 @@
                   v-else
                   type="password"
                   :value="providerDraft.qwen.api_key_input"
-                  placeholder="输入 Qwen / DashScope API Key"
+                  placeholder="输入 Qwen / DashScope API 密钥"
                   class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
                   @input="updateProviderSection('qwen', { api_key_input: $event.target.value, clear_api_key: false })"
                 />
                 <p v-if="providerDraft.qwen.clear_api_key" class="text-xs text-amber-700">
-                  保存后会清除当前 Qwen / DashScope API Key。
+                  保存后将清除当前 Qwen / DashScope API 密钥。
                 </p>
               </div>
 
@@ -232,7 +258,7 @@
               </div>
 
               <div class="space-y-2">
-                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Base URL</label>
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">服务地址</label>
                 <input
                   type="text"
                   :value="providerDraft.qwen.base_url"
@@ -258,14 +284,14 @@
                 <div class="flex items-center justify-between gap-2">
                   <h3 class="text-base font-bold tracking-tight">DashScope</h3>
                   <span class="text-[10px] font-semibold px-2 py-1 rounded-full border" :class="providerBadgeClass(providerDraft.embedding_provider === 'dashscope')">
-                    {{ providerDraft.embedding_provider === 'dashscope' ? '已启用' : '可选' }}
+                    {{ providerDraft.embedding_provider === 'dashscope' ? '当前使用' : '可配置' }}
                   </span>
                 </div>
-                <p class="text-xs text-muted-foreground">只负责向量能力，复用 Qwen 区块里的 API Key。</p>
+                <p class="text-xs text-muted-foreground">仅提供向量服务，复用 Qwen 区域中的 API 密钥。</p>
               </div>
 
               <div class="rounded-xl border border-border bg-card px-3 py-3 text-sm text-muted-foreground">
-                当前不单独填写密钥。DashScope 会复用上方 Qwen 配置里的 API Key。
+                DashScope 不单独填写 API 密钥，将复用上方 Qwen 配置中的密钥。
               </div>
 
               <div class="space-y-2">
@@ -282,7 +308,7 @@
               </div>
 
               <div class="space-y-2">
-                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Base URL</label>
+                <label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">服务地址</label>
                 <input
                   type="text"
                   :value="providerDraft.dashscope.base_url"
@@ -308,7 +334,7 @@
             <div class="space-y-1">
               <p class="text-sm font-semibold">保存后立即生效</p>
               <p class="text-xs text-muted-foreground">
-                配置会持久化到后端本地文件；页面只显示掩码，不会回显 API Key 明文。
+                配置会保存到系统设置中，页面仅显示掩码，不会回显 API 密钥明文。
               </p>
               <p v-if="providerTestResult" class="text-xs" :class="providerTestResult.ok ? 'text-green-700' : 'text-destructive'">
                 {{ providerTestResult.message }}
@@ -343,8 +369,10 @@
           </div>
         </template>
       </div>
+    </section>
 
-      <div class="rounded-2xl border border-border bg-card p-4 sm:p-5 shadow-sm">
+    <section v-if="settingsTab === 'advanced'" class="space-y-4">
+      <div class="workspace-card p-4 sm:p-5">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="space-y-1">
             <h2 class="text-lg font-bold tracking-tight flex items-center gap-2">
@@ -392,7 +420,7 @@
               </span>
             </div>
             <div class="text-[11px] text-muted-foreground">
-              配置值：{{ systemStatus?.llm_provider_configured || '—' }} · 来源：{{ providerSourceLabel(systemStatus?.llm_provider_source) }}
+              设定值：{{ systemStatus?.llm_provider_configured || '—' }} · 来源：{{ providerSourceLabel(systemStatus?.llm_provider_source) }}
             </div>
             <div class="flex items-center justify-between gap-2">
               <span class="text-sm text-muted-foreground">{{ UX_TEXT.vectorModelLabel }}</span>
@@ -401,7 +429,7 @@
               </span>
             </div>
             <div class="text-[11px] text-muted-foreground">
-              配置值：{{ systemStatus?.embedding_provider_configured || '—' }} · 来源：{{ providerSourceLabel(systemStatus?.embedding_provider_source) }}
+              设定值：{{ systemStatus?.embedding_provider_configured || '—' }} · 来源：{{ providerSourceLabel(systemStatus?.embedding_provider_source) }}
             </div>
           </div>
         </div>
@@ -471,7 +499,7 @@
           <div>
             <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground">系统高级参数（可编辑）</h3>
             <p class="mt-1 text-xs text-muted-foreground">
-              这里的值会覆盖后端默认参数并持久化保存，适合减少 `.env` 维护负担。
+              这里的值会覆盖系统默认参数并持久化保存，适合在页面内集中维护常用设置。
             </p>
           </div>
           <div class="text-xs text-muted-foreground space-y-1">
@@ -481,7 +509,7 @@
         </div>
 
         <div v-if="systemSchemaGroups.length === 0" class="rounded-xl border border-dashed border-border bg-background/40 p-4 text-sm text-muted-foreground">
-          未获取到系统参数 schema，请稍后刷新重试。
+          暂时未获取到系统参数说明，请稍后刷新重试。
         </div>
 
         <div v-else class="space-y-4">
@@ -600,6 +628,7 @@
     </section>
 
     <SettingsPanel
+      v-if="settingsTab === 'preferences'"
       title="用户默认设置"
       description="这组设置会作为你在所有学习资料库中的默认体验参数。"
       :dirty="settingsStore.userDirty"
@@ -761,7 +790,7 @@
     </SettingsPanel>
 
     <SettingsPanel
-      v-if="selectedKbId && advancedDiagnosticsOpen"
+      v-if="settingsTab === 'preferences' && selectedKbId"
       title="当前资料库覆盖设置"
       description="只覆盖当前资料库的问答与测验偏好；留空表示跟随用户默认设置。"
       :dirty="settingsStore.kbDirty"
@@ -894,13 +923,13 @@
     </SettingsPanel>
 
     <div
-      v-else-if="!selectedKbId"
+      v-else-if="settingsTab === 'preferences' && !selectedKbId"
       class="rounded-2xl border border-dashed border-border bg-card p-6 text-sm text-muted-foreground"
     >
       当前未选择资料库。先在侧边栏或上传页选择一个资料库后，即可配置该资料库覆盖设置。
     </div>
 
-    <div v-else class="rounded-2xl border border-dashed border-border bg-card p-6 text-sm text-muted-foreground">
+    <div v-else-if="settingsTab === 'preferences'" class="rounded-2xl border border-dashed border-border bg-card p-6 text-sm text-muted-foreground">
       资料库单独设置已隐藏。展开“高级设置与诊断”后可按资料库微调。
     </div>
   </div>
@@ -913,6 +942,7 @@ import { useToast } from '../composables/useToast'
 import { useAppKnowledgeScope } from '../composables/useAppKnowledgeScope'
 import { useSettingsStore } from '../stores/settings'
 import { UX_TEXT } from '../constants/uxText'
+import { UI_NAMING } from '../constants/uiNaming'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import KbSelector from '../components/context/KbSelector.vue'
 import SettingsPanel from '../components/settings/SettingsPanel.vue'
@@ -924,6 +954,7 @@ const settingsStore = useSettingsStore()
 const userAdvancedOpen = ref(false)
 const kbAdvancedOpen = ref(false)
 const advancedDiagnosticsOpen = ref(false)
+const settingsTab = ref('provider')
 const lastUserActionError = ref('')
 const lastKbActionError = ref('')
 const systemOverridesError = ref('')
@@ -1032,18 +1063,18 @@ function providerOptionLabel(value) {
 
 function providerMissingLabel(value) {
   const labels = {
-    'deepseek.api_key': 'DeepSeek API Key',
-    'deepseek.base_url': 'DeepSeek Base URL',
+    'deepseek.api_key': 'DeepSeek API 密钥',
+    'deepseek.base_url': 'DeepSeek 服务地址',
     'deepseek.model': 'DeepSeek 对话模型',
     'deepseek.embedding_model': 'DeepSeek 向量模型',
-    'qwen.api_key': 'Qwen API Key',
-    'qwen.base_url': 'Qwen Base URL',
+    'qwen.api_key': 'Qwen API 密钥',
+    'qwen.base_url': 'Qwen 服务地址',
     'qwen.model': 'Qwen 对话模型',
     'qwen.embedding_model': 'Qwen 向量模型',
-    'dashscope.base_url': 'DashScope Base URL',
+    'dashscope.base_url': 'DashScope 服务地址',
     'dashscope.embedding_model': 'DashScope 向量模型',
-    'openai.api_key': 'OpenAI API Key',
-    'gemini.api_key': 'Gemini API Key',
+    'openai.api_key': 'OpenAI API 密钥',
+    'gemini.api_key': 'Gemini API 密钥',
   }
   return labels[value] || value
 }
@@ -1143,7 +1174,7 @@ async function saveKbOverrides() {
   lastKbActionError.value = ''
   try {
     await settingsStore.saveKb(selectedKbId.value, resolvedUserId.value)
-    showToast('知识库覆盖设置已保存', 'success')
+    showToast('资料库覆盖设置已保存', 'success')
   } catch (err) {
     lastKbActionError.value = err?.message || '保存失败'
   }
@@ -1164,7 +1195,7 @@ async function resetKbOverrides() {
   lastKbActionError.value = ''
   try {
     await settingsStore.reset('kb', { userId: resolvedUserId.value, kbId: selectedKbId.value })
-    showToast('知识库覆盖设置已重置', 'success')
+    showToast('资料库覆盖设置已重置', 'success')
   } catch (err) {
     lastKbActionError.value = err?.message || '重置失败'
   }

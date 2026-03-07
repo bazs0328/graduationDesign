@@ -2,9 +2,9 @@
   <div class="flex h-screen bg-background text-foreground overflow-hidden">
     <AppSidebar />
     <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
-      <header class="border-b border-border px-4 py-3 md:px-6 lg:px-8 bg-card/50 backdrop-blur-sm">
-        <div class="flex items-start justify-between gap-4">
-          <div class="min-w-0 flex-1 space-y-3">
+      <header class="border-b border-border/70 bg-background/72 backdrop-blur-xl">
+        <div class="flex items-center justify-between gap-4 px-4 py-3 md:px-6 lg:px-8">
+          <div class="min-w-0 flex items-center gap-3">
             <div class="flex items-center gap-2 min-w-0">
               <button
                 type="button"
@@ -15,16 +15,10 @@
                 <PanelLeft class="w-5 h-5" />
               </button>
               <div class="min-w-0">
-                <p class="text-[10px] font-bold uppercase tracking-[0.24em] text-muted-foreground">GradTutor</p>
+                <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-muted-foreground">GradTutor Workspace</p>
                 <h2 class="text-base md:text-lg font-semibold truncate">{{ currentRouteName }}</h2>
               </div>
             </div>
-            <ContextSummaryBar
-              v-if="showHeaderContextBar"
-              :kb-name="selectedKbName"
-              :doc-name="selectedDocName"
-              subtitle="当前资料范围会在问答、摘要和测验中自动沿用"
-            />
           </div>
           <div class="flex items-center gap-2 md:gap-4 flex-shrink-0">
             <button
@@ -36,14 +30,15 @@
             <component :is="isDark ? Sun : Moon" class="w-5 h-5" />
             <span class="hidden md:inline font-medium">{{ isDark ? '浅色' : '深色' }}</span>
           </button>
-            <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-accent rounded-full text-sm font-medium">
+            <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-card/80 border border-border rounded-full text-sm font-medium shadow-sm">
               <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
               {{ displayName }}
             </div>
           </div>
         </div>
       </header>
-      <div class="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
+      <div class="flex-1 overflow-y-auto">
+        <div class="px-4 py-5 md:px-6 md:py-6 lg:px-8 lg:py-8">
         <ProviderSetupNotice
           v-if="showProviderSetupBanner"
           class="mb-6"
@@ -59,13 +54,14 @@
             </keep-alive>
           </transition>
         </router-view>
+        </div>
       </div>
     </main>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Sun, Moon, PanelLeft } from 'lucide-vue-next'
 import AppSidebar from './AppSidebar.vue'
@@ -74,8 +70,6 @@ import { hasAccessToken } from '../composables/useAuthSession'
 import { useTheme } from '../composables/useTheme'
 import { useAppContextStore } from '../stores/appContext'
 import { useSettingsStore } from '../stores/settings'
-import { useKbDocuments } from '../composables/useKbDocuments'
-import ContextSummaryBar from '../components/context/ContextSummaryBar.vue'
 import ProviderSetupNotice from '../components/settings/ProviderSetupNotice.vue'
 
 const route = useRoute()
@@ -83,10 +77,6 @@ const { isDark, toggleTheme } = useTheme()
 const appContext = useAppContextStore()
 const settingsStore = useSettingsStore()
 appContext.hydrate()
-const kbDocs = useKbDocuments({
-  userId: computed(() => appContext.resolvedUserId || 'default'),
-  kbId: computed(() => appContext.selectedKbId || ''),
-})
 
 const displayName = computed(() => {
   const user = getCurrentUser()
@@ -97,19 +87,8 @@ const currentRouteName = computed(() => {
   return route.meta?.title || route.name || '控制台'
 })
 
-const selectedKbName = computed(() => {
-  const currentKb = appContext.kbs.find((item) => item.id === appContext.selectedKbId)
-  return currentKb?.name || ''
-})
-
-const selectedDocName = computed(() => {
-  const currentDoc = kbDocs.docs.value.find((item) => item.id === appContext.selectedDocId)
-  return currentDoc?.filename || ''
-})
-
 const providerSetup = computed(() => settingsStore.providerSetup)
 const providerSetupMissing = computed(() => providerSetup.value?.missing || [])
-const showHeaderContextBar = computed(() => route.meta?.showHeaderContextBar !== false)
 const showProviderSetupBanner = computed(() => {
   if (route.path === '/settings') return false
   const setup = providerSetup.value
@@ -137,33 +116,7 @@ onMounted(async () => {
   } catch {
     // ignore layout-level settings load failures
   }
-  if (appContext.selectedKbId) {
-    try {
-      await kbDocs.refresh()
-    } catch {
-      // ignore header-only context load failures
-    }
-  }
 })
-
-watch(
-  () => appContext.selectedKbId,
-  async (nextKbId) => {
-    if (!hasAccessToken()) {
-      kbDocs.reset()
-      return
-    }
-    if (!nextKbId) {
-      kbDocs.reset()
-      return
-    }
-    try {
-      await kbDocs.refresh()
-    } catch {
-      // ignore header-only context load failures
-    }
-  }
-)
 
 </script>
 

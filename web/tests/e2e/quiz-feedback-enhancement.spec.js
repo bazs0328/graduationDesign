@@ -41,7 +41,7 @@ async function ensureAuthUser(request, username = 'e2e_quiz_feedback_user') {
 }
 
 async function waitForDocReady(page, filename) {
-  const docsCard = page.getByRole('heading', { name: '我的文档' }).locator('..').locator('..').locator('..')
+  const docsCard = page.getByTestId('upload-documents-card')
   const refreshButton = page.getByRole('button', { name: '刷新列表' })
   const item = docsCard.locator('div').filter({ hasText: filename }).first()
 
@@ -132,20 +132,20 @@ test.describe('Quiz Feedback Enhancement', () => {
       ),
       page.getByRole('link', { name: '上传' }).click()
     ])
-    await expect(page.getByRole('heading', { name: '上传文档' })).toBeVisible()
+    const uploadCard = page.getByTestId('upload-current-kb-card')
+    await expect(uploadCard).toBeVisible()
 
-    const uploadCard = page.getByRole('heading', { name: '上传文档' }).locator('../..')
     const kbSelect = uploadCard.locator('select').first()
     await kbSelect.selectOption({ label: kbName }, { timeout: 15000 })
 
     await uploadCard.locator('input[type="file"]').setInputFiles(fixturePath)
-    await uploadCard.getByRole('button', { name: '上传到知识库' }).click()
+    await uploadCard.getByRole('button', { name: '上传文档' }).click()
 
     await expect(page.getByText(fixtureName).first()).toBeVisible({ timeout: 60000 })
     await waitForDocReady(page, fixtureName)
 
     await page.getByRole('link', { name: '测验' }).click()
-    const quizCard = page.getByRole('heading', { name: '测验生成' }).locator('../..')
+    const quizCard = page.getByTestId('quiz-setup-card')
     await quizCard.locator('select').first().selectOption({ label: kbName })
     await quizCard.locator('input[type="number"]').fill(quizCount.toString())
 
@@ -154,7 +154,7 @@ test.describe('Quiz Feedback Enhancement', () => {
       { timeout: 120000 }
     )
 
-    await quizCard.getByRole('button', { name: '生成新测验' }).click()
+    await quizCard.getByRole('button', { name: '生成测验' }).click()
     await generateResponsePromise
     await waitForQuizGenerated(page)
 

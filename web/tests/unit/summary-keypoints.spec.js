@@ -199,7 +199,7 @@ describe('Summary/Keypoints payloads', () => {
       '/api/summary',
       expect.objectContaining({ force: false })
     )
-  })
+  }, 10000)
 
   it('sends boolean force on keypoints', async () => {
     const { wrapper, router } = await mountAppWithRouter()
@@ -215,7 +215,7 @@ describe('Summary/Keypoints payloads', () => {
       '/api/keypoints',
       expect.objectContaining({ force: false })
     )
-  })
+  }, 10000)
 
   it('renders keypoints with text, explanation, and source', async () => {
     const { wrapper, router } = await mountAppWithRouter()

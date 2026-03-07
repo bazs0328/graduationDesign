@@ -1,5 +1,5 @@
 <template>
-  <section class="bg-card border border-border rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
+  <section class="workspace-card p-5 sm:p-6 space-y-4">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="space-y-1">
         <h3 class="text-base sm:text-lg font-bold tracking-tight">{{ title }}</h3>
@@ -21,10 +21,10 @@
 
     <div class="space-y-4">
       <slot />
-      <div v-if="hasAdvanced && advancedOpen" class="rounded-xl border border-border/70 bg-background/40 p-4 space-y-3">
-        <div class="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">高级设置</div>
-        <slot name="advanced" />
-      </div>
+        <div v-if="hasAdvanced && advancedOpen" class="workspace-card-soft p-4 space-y-3">
+          <div class="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">高级设置</div>
+          <slot name="advanced" />
+        </div>
     </div>
 
     <p v-if="error" class="text-sm text-destructive">{{ error }}</p>

@@ -29,7 +29,7 @@ async function ensureAuthUser(request, username = 'e2e_context_sync_user') {
 }
 
 async function ensureKbSelected(page) {
-  const uploadCard = page.getByRole('heading', { name: '上传文档' }).locator('../..')
+  const uploadCard = page.getByTestId('upload-current-kb-card')
   const kbSelect = uploadCard.locator('select').first()
   await expect(kbSelect).toBeVisible({ timeout: 30000 })
 
@@ -41,8 +41,8 @@ async function ensureKbSelected(page) {
 
   if (!selectable.length) {
     const kbName = `ctx-sync-${Date.now()}`
-    await uploadCard.getByPlaceholder('新知识库名称').fill(kbName)
-    await uploadCard.getByRole('button', { name: '创建' }).click()
+    await uploadCard.locator('input[type="text"]').first().fill(kbName)
+    await uploadCard.getByRole('button', { name: '新建资料库' }).click()
 
     await expect
       .poll(async () => {
@@ -82,24 +82,24 @@ test.describe('App context sync', () => {
     }, auth)
 
     await page.goto('/upload')
-    await expect(page.getByRole('heading', { name: '上传文档' })).toBeVisible()
+    await expect(page.getByTestId('upload-current-kb-card')).toBeVisible()
 
     const selectedKbValue = await ensureKbSelected(page)
 
     await page.getByRole('link', { name: '问答' }).click()
-    const qaCard = page.getByRole('heading', { name: '上下文' }).locator('../..')
+    const qaCard = page.getByTestId('qa-scope-card')
     await expect(qaCard.locator('select').first()).toHaveValue(selectedKbValue)
 
     await page.getByRole('link', { name: '测验' }).click()
-    const quizCard = page.getByRole('heading', { name: '测验生成' }).locator('../..')
+    const quizCard = page.getByTestId('quiz-setup-card')
     await expect(quizCard.locator('select').first()).toHaveValue(selectedKbValue)
 
     await page.getByRole('link', { name: '进度' }).click()
-    const progressSection = page.getByRole('heading', { name: '知识库统计' }).locator('../..')
+    const progressSection = page.getByTestId('progress-kb-stats-card')
     await expect(progressSection.locator('select')).toHaveValue(selectedKbValue)
 
     await page.reload()
-    await expect(page.getByRole('heading', { name: '知识库统计' })).toBeVisible()
+    await expect(page.getByTestId('progress-kb-stats-card')).toBeVisible()
     await expect(progressSection.locator('select')).toHaveValue(selectedKbValue)
   })
 })
