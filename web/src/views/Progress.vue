@@ -628,7 +628,7 @@ const STAGE_COLOR_MAP = {
   advanced: '#f59e0b',
   application: '#ef4444',
 }
-const PROGRESS_CACHE_SCHEMA_VERSION = 1
+const PROGRESS_CACHE_SCHEMA_VERSION = 2
 const PROGRESS_CACHE_SOFT_TTL_MS = 30 * 60 * 1000
 const PROGRESS_CACHE_HARD_TTL_MS = 7 * 24 * 60 * 60 * 1000
 const PROGRESS_REC_CACHE_PREFIX = 'gradtutor_progress_rec_v3:'
@@ -1687,7 +1687,8 @@ const pathChartOption = computed(() => {
       tooltip: {
         formatter: () => {
           const prereqs = prereqLabels.length ? `<br/><span style="color:#f59e0b">缺少前置：${prereqLabels.join('、')}</span>` : ''
-          return `<b>#${item.step || ''} ${item.text}</b><br/>状态：${learningPathItemStateLabel(item)}<br/>阶段：${stageLabel(stageId)}<br/>先修层级：${pathLevel}<br/>模块：${item.module || '—'}<br/>掌握度：${masteryPercent(item.mastery_level)}%<br/>难度：${Math.round((item.difficulty || 0) * 100)}<br/>重要性：${Math.round((item.importance || 0) * 100)}<br/>预计时长：${item.estimated_time || 0} 分钟${prereqs}`
+          const moduleLabel = moduleNameMap.value[item.module] || item.module || '—'
+          return `<b>#${item.step || ''} ${item.text}</b><br/>状态：${learningPathItemStateLabel(item)}<br/>阶段：${stageLabel(stageId)}<br/>先修层级：${pathLevel}<br/>模块：${moduleLabel}<br/>掌握度：${masteryPercent(item.mastery_level)}%<br/>难度：${Math.round((item.difficulty || 0) * 100)}<br/>重要性：${Math.round((item.importance || 0) * 100)}<br/>预计时长：${item.estimated_time || 0} 分钟${prereqs}`
         },
       },
     }

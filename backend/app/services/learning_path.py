@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 DEPENDENCY_GRAPH_VERSION = "v2"
 DEPENDENCY_RELATION = f"prerequisite:{DEPENDENCY_GRAPH_VERSION}"
-_LEARNING_PATH_CACHE_SCHEMA_VERSION = "lpv2"
+_LEARNING_PATH_CACHE_SCHEMA_VERSION = "lpv3"
 
 _LEARNING_PATH_RESULT_CACHE_TTL_SECONDS = 180
 _LEARNING_PATH_RESULT_CACHE_MAX_ENTRIES = 64
@@ -57,6 +57,7 @@ STAGE_META = {
 }
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]")
+_CJK_CHAR_RE = re.compile(r"[\u4e00-\u9fff]")
 _NUMERIC_PREFIX_RE = re.compile(r"^\s*(?:第\s*(\d+)\s*[章节篇条]|(\d+)\s*[\.、)\-:])")
 _CJK_NUM_PREFIX_RE = re.compile(r"^\s*([一二三四五六七八九十百零两]+)\s*[、\.]")
 _BASIC_HINT_RE = re.compile(r"(定义|概念|基础|术语|简介|入门|原理)")
@@ -277,14 +278,16 @@ STAGE_PROMPT = ChatPromptTemplate.from_messages(
 )
 
 MODULE_SYSTEM = (
-    "You are a learning-module planner.\n"
-    "Group keypoints into coherent modules (topic-based, practical study chunks).\n"
-    "Output JSON object only with key modules.\n"
-    "Each module item must include keys: module_id, name, description, keypoint_ids.\n"
-    "Rules:\n"
-    "- Each keypoint ID can appear in at most one module.\n"
-    "- Prefer 3~8 keypoints per module when possible.\n"
-    "- module_id must be unique."
+    "你是一名学习路径模块规划助手。\n"
+    "请把知识点分组为连贯的学习模块（按主题或实践学习块划分）。\n"
+    "仅输出 JSON object，顶层键为 modules。\n"
+    "每个模块项必须包含：module_id, name, description, keypoint_ids。\n"
+    "规则：\n"
+    "- 每个 keypoint ID 最多只能出现在一个模块中。\n"
+    "- 尽量每个模块包含 3~8 个知识点。\n"
+    "- module_id 必须唯一。\n"
+    "- name 和 description 必须使用简体中文。\n"
+    "- name 要简洁明确，description 用 1 句话概括学习重点。"
 )
 
 MODULE_PROMPT = ChatPromptTemplate.from_messages(
@@ -292,10 +295,10 @@ MODULE_PROMPT = ChatPromptTemplate.from_messages(
         ("system", MODULE_SYSTEM),
         (
             "human",
-            "Learner ability: {ability_level}\n\n"
-            "Keypoints:\n{points_text}\n\n"
-            "Edges:\n{edges_text}\n\n"
-            "Return JSON only.",
+            "学习者能力：{ability_level}\n\n"
+            "知识点：\n{points_text}\n\n"
+            "依赖边：\n{edges_text}\n\n"
+            "只返回 JSON。",
         ),
     ]
 )
@@ -389,6 +392,10 @@ def _token_overlap_count(a: str, b: str) -> int:
     return len(tokens_a.intersection(tokens_b))
 
 
+def _contains_cjk(text: str) -> bool:
+    return bool(_CJK_CHAR_RE.search(text or ""))
+
+
 def _looks_basic(text: str) -> bool:
     return bool(_BASIC_HINT_RE.search(text or ""))
 
@@ -437,6 +444,92 @@ def _extract_order_number(text: str) -> Optional[int]:
     if match:
         return _cjk_numeral_to_int(match.group(1))
     return None
+
+
+def _strip_order_prefix(text: str) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    match = _NUMERIC_PREFIX_RE.match(value)
+    if match:
+        return value[match.end() :].strip()
+    match = _CJK_NUM_PREFIX_RE.match(value)
+    if match:
+        return value[match.end() :].strip()
+    return value
+
+
+def _shorten_module_topic(text: str, max_len: int = 12) -> str:
+    value = _strip_order_prefix(text).replace("\n", " ").strip()
+    if len(value) > max_len:
+        return f"{value[:max_len]}…"
+    return value
+
+
+def _module_fallback_topic(
+    keypoint_ids: list[str],
+    item_map: dict[str, LearningPathItem],
+) -> str:
+    for kp_id in keypoint_ids:
+        item = item_map.get(kp_id)
+        if not item:
+            continue
+        text = _shorten_module_topic(str(item.text or ""))
+        if text and _contains_cjk(text):
+            return text
+    for kp_id in keypoint_ids:
+        item = item_map.get(kp_id)
+        if not item:
+            continue
+        doc_name = _shorten_module_topic(str(item.doc_name or ""))
+        if doc_name and _contains_cjk(doc_name):
+            return doc_name
+    for kp_id in keypoint_ids:
+        item = item_map.get(kp_id)
+        if not item:
+            continue
+        text = _shorten_module_topic(str(item.text or ""))
+        if text:
+            return text
+    for kp_id in keypoint_ids:
+        item = item_map.get(kp_id)
+        if not item:
+            continue
+        doc_name = _shorten_module_topic(str(item.doc_name or ""))
+        if doc_name:
+            return doc_name
+    return ""
+
+
+def _normalize_module_name(
+    raw_name: Any,
+    idx: int,
+    keypoint_ids: list[str],
+    item_map: dict[str, LearningPathItem],
+) -> str:
+    name = str(raw_name or "").strip()
+    if name and _contains_cjk(name):
+        return name
+    topic = _module_fallback_topic(keypoint_ids, item_map)
+    if topic:
+        return f"学习模块 {idx}（{topic}）"
+    if name:
+        return f"学习模块 {idx}（{_shorten_module_topic(name)}）"
+    return f"学习模块 {idx}"
+
+
+def _normalize_module_description(
+    raw_description: Any,
+    keypoint_ids: list[str],
+    item_map: dict[str, LearningPathItem],
+) -> str:
+    description = str(raw_description or "").strip()
+    if description and _contains_cjk(description):
+        return description
+    topic = _module_fallback_topic(keypoint_ids, item_map)
+    if topic:
+        return f"围绕“{topic}”组织的学习模块。"
+    return "按主题组织的知识点集合。"
 
 
 def _keypoint_local_sort_tuple(keypoint: Keypoint) -> tuple[Any, ...]:
@@ -1373,8 +1466,12 @@ def _infer_modules(
             module_id = f"{module_id}-{idx}"
         module_name_seen.add(module_id)
 
-        name = str(raw.get("name") or "").strip() or f"学习模块 {idx}"
-        description = str(raw.get("description") or "").strip() or "按主题组织的知识点集合。"
+        name = _normalize_module_name(raw.get("name"), idx, filtered_ids, item_map)
+        description = _normalize_module_description(
+            raw.get("description"),
+            filtered_ids,
+            item_map,
+        )
         modules.append(
             LearningPathModule(
                 module_id=module_id,

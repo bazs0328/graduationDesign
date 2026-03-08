@@ -183,7 +183,7 @@ function buildLearningPathPayload(text = '矩阵定义', options = {}) {
 
 function buildCacheEntry(payload, savedAt = Date.now()) {
   return JSON.stringify({
-    version: 1,
+    version: 2,
     saved_at: savedAt,
     payload,
   })

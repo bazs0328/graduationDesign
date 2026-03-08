@@ -15,6 +15,7 @@ from app.services.learning_path import (
     generate_learning_path,
     invalidate_learning_path_result_cache,
 )
+from app.schemas import LearningPathItem
 from app.utils.time import utc_now
 
 
@@ -615,3 +616,75 @@ def test_bounded_local_insert_order_allows_shift_override_for_dependency_conflic
     assert order.index("nx") < order.index("o1")
     shifts = {old_id: order.index(old_id) - idx for idx, old_id in enumerate(["o1", "o2", "o3"])}
     assert max(shifts.values()) > 2
+
+
+def test_infer_modules_normalizes_non_chinese_llm_copy():
+    items = [
+        LearningPathItem(
+            keypoint_id="kp-1",
+            text="1. 矩阵定义",
+            doc_id="doc-1",
+            doc_name="线性代数讲义",
+            mastery_level=0.1,
+            priority="high",
+            step=1,
+            stage="foundation",
+        ),
+        LearningPathItem(
+            keypoint_id="kp-2",
+            text="矩阵运算",
+            doc_id="doc-1",
+            doc_name="线性代数讲义",
+            mastery_level=0.2,
+            priority="high",
+            step=2,
+            stage="foundation",
+        ),
+        LearningPathItem(
+            keypoint_id="kp-3",
+            text="特征值定义",
+            doc_id="doc-1",
+            doc_name="线性代数讲义",
+            mastery_level=0.3,
+            priority="medium",
+            step=3,
+            stage="intermediate",
+        ),
+        LearningPathItem(
+            keypoint_id="kp-4",
+            text="特征向量求解",
+            doc_id="doc-1",
+            doc_name="线性代数讲义",
+            mastery_level=0.4,
+            priority="medium",
+            step=4,
+            stage="intermediate",
+        ),
+    ]
+    payload = {
+        "modules": [
+            {
+                "module_id": "linear-algebra-basics",
+                "name": "Linear Algebra Basics",
+                "description": "Core concepts and terminology for matrices.",
+                "keypoint_ids": ["kp-1", "kp-2", "kp-3", "kp-4"],
+            }
+        ]
+    }
+
+    with patch("app.services.learning_path._invoke_prompt_json", return_value=payload):
+        modules, kp_to_module = learning_path_service._infer_modules(
+            items,
+            [("kp-1", "kp-2"), ("kp-2", "kp-3"), ("kp-3", "kp-4")],
+            "beginner",
+        )
+
+    assert len(modules) == 1
+    assert modules[0].name == "学习模块 1（矩阵定义）"
+    assert modules[0].description == "围绕“矩阵定义”组织的学习模块。"
+    assert kp_to_module == {
+        "kp-1": "linear-algebra-basics",
+        "kp-2": "linear-algebra-basics",
+        "kp-3": "linear-algebra-basics",
+        "kp-4": "linear-algebra-basics",
+    }
