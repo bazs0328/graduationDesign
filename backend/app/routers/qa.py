@@ -2,7 +2,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Iterator, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,6 +11,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.llm import get_llm
+from app.core.runtime_user_config import get_runtime_settings, reset_runtime_settings, set_runtime_settings
 from app.core.users import ensure_user
 from app.core.knowledge_bases import ensure_kb
 from app.core.vectorstore import get_vectorstore
@@ -345,6 +346,26 @@ def _sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+class _RuntimeScopedStreamIterator:
+    def __init__(self, iterator: Iterator[str], runtime_holder: dict[str, dict[str, Any] | None]):
+        self._iterator = iterator
+        self._runtime_holder = runtime_holder
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> str:
+        runtime_settings = self._runtime_holder.get("settings")
+        token = None
+        if runtime_settings is not None:
+            token = set_runtime_settings(runtime_settings)
+        try:
+            return next(self._iterator)
+        finally:
+            if token is not None:
+                reset_runtime_settings(token)
+
+
 def _http_error_event(exc: HTTPException, stage: str) -> tuple[dict, dict]:
     detail = str(exc.detail)
     code = "validation_error"
@@ -367,6 +388,8 @@ def _http_error_event(exc: HTTPException, stage: str) -> tuple[dict, dict]:
 
 
 def _qa_stream_response(payload: QARequest, db: Session) -> StreamingResponse:
+    runtime_holder: dict[str, dict[str, Any] | None] = {"settings": None}
+
     def event_iter():
         total_started = time.perf_counter()
         retrieve_started = total_started
@@ -380,6 +403,7 @@ def _qa_stream_response(payload: QARequest, db: Session) -> StreamingResponse:
                 {"stage": "retrieving", "message": "正在检索相关片段..."},
             )
             ctx = _resolve_qa_request_context(payload, db)
+            runtime_holder["settings"] = get_runtime_settings()
             prepared = prepare_qa_answer(
                 user_id=ctx.resolved_user_id,
                 question=payload.question,
@@ -544,7 +568,7 @@ def _qa_stream_response(payload: QARequest, db: Session) -> StreamingResponse:
             )
 
     return StreamingResponse(
-        event_iter(),
+        _RuntimeScopedStreamIterator(event_iter(), runtime_holder),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

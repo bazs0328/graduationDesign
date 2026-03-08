@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+from app.core.config import settings
 from app.models import ChatMessage, Document, Keypoint, KeypointDependency, KnowledgeBase, User
 from app.routers.qa import QA_HISTORY_TOTAL_CHAR_BUDGET, _update_mastery_from_qa
 from app.services.learning_path import DEPENDENCY_RELATION
@@ -429,6 +430,54 @@ def test_qa_stream_generation_error_emits_retryable_error(client, seeded_session
     error_payload = [payload for name, payload in events if name == "error"][-1]
     assert error_payload["retryable"] is True
     assert error_payload["code"] == "generation_failed"
+
+
+def test_qa_stream_preserves_user_provider_runtime_settings_between_yields(
+    client,
+    seeded_session,
+    db_session,
+    monkeypatch,
+):
+    user = db_session.query(User).filter(User.id == seeded_session["user_id"]).first()
+    user.provider_config_json = json.dumps(
+        {
+            "llm_provider": "qwen",
+            "embedding_provider": "dashscope",
+            "qwen": {"api_key": "user-runtime-qwen"},
+        }
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(settings, "llm_provider", "auto")
+    monkeypatch.setattr(settings, "embedding_provider", "auto")
+    monkeypatch.setattr(settings, "qwen_api_key", None)
+    monkeypatch.setattr(settings, "deepseek_api_key", None)
+
+    def fake_get_llm(temperature=0.2):
+        if settings.qwen_api_key != "user-runtime-qwen":
+            raise ValueError("runtime provider config missing in stream")
+        return object()
+
+    with (
+        patch("app.routers.qa.prepare_qa_answer", side_effect=_mock_prepare),
+        patch("app.routers.qa.get_llm", side_effect=fake_get_llm),
+        patch("app.routers.qa.stream_qa_answer", return_value=iter(["mock ", "answer"])),
+        patch("app.routers.qa._update_mastery_from_qa"),
+    ):
+        resp, events = _read_sse(
+            client,
+            "POST",
+            "/api/qa/stream",
+            json={
+                "kb_id": seeded_session["kb_id"],
+                "user_id": seeded_session["user_id"],
+                "question": "What is a matrix?",
+            },
+        )
+
+    assert resp.status_code == 200
+    assert [name for name, _ in events][-1] == "done"
+    assert not [payload for name, payload in events if name == "error"]
 
 
 def test_update_mastery_from_qa_kb_vector_hits_collapse_to_representative(db_session):
