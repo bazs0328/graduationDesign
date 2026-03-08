@@ -47,15 +47,15 @@ def test_get_settings_returns_defaults_and_system_status_without_secret_values(c
     assert resp.status_code == 200
 
     data = resp.json()
-    assert data["system_status"]["llm_provider"] == "qwen"
-    assert data["system_status"]["embedding_provider"] == "dashscope"
-    assert data["system_status"]["llm_provider_configured"] == "qwen"
-    assert data["system_status"]["embedding_provider_configured"] == "dashscope"
-    assert data["system_status"]["llm_provider_source"] == "manual"
-    assert data["system_status"]["embedding_provider_source"] == "manual"
+    assert data["system_status"]["llm_provider"] == "unconfigured"
+    assert data["system_status"]["embedding_provider"] == "unconfigured"
+    assert data["system_status"]["llm_provider_configured"] == "auto"
+    assert data["system_status"]["embedding_provider_configured"] == "auto"
+    assert data["system_status"]["llm_provider_source"] == "auto"
+    assert data["system_status"]["embedding_provider_source"] == "auto"
     assert isinstance(data["system_status"]["secrets_configured"], dict)
-    assert data["system_status"]["secrets_configured"]["qwen_api_key"] is True
-    assert data["system_status"]["secrets_configured"]["auth_secret_key_configured"] is True
+    assert data["system_status"]["secrets_configured"]["qwen_api_key"] is False
+    assert "auth_secret_key_configured" not in data["system_status"]["secrets_configured"]
     assert data["system_status"]["qa_defaults"]["qa_dynamic_window_enabled"] is True
     assert data["system_status"]["notices"] == []
 
@@ -234,15 +234,19 @@ def test_settings_route_requires_auth_when_legacy_user_id_disabled(client):
         settings.auth_allow_legacy_user_id = old_allow_legacy
 
 
-def test_system_settings_patch_and_reset_runtime_overrides(client):
-    user = _register_or_login(client, "settings_system_patch_user")
+def test_advanced_settings_patch_and_reset_are_user_scoped(client):
+    user = _register_or_login(client, "settings_advanced_patch_user")
+    other_user = _register_or_login(client, "settings_adv_patch_other")
     headers = _auth_headers(user)
+    other_headers = _auth_headers(other_user)
 
-    initial = client.get("/api/settings/system", headers=headers)
+    initial = client.get("/api/settings/advanced", headers=headers)
     assert initial.status_code == 200
     initial_data = initial.json()
     assert "rag_mode" in initial_data["editable_keys"]
     assert "qa_dynamic_window_enabled" in initial_data["editable_keys"]
+    assert "auth_require_login" not in initial_data["editable_keys"]
+    assert "lexical_stopwords_global_path" not in initial_data["editable_keys"]
     assert isinstance(initial_data.get("schema"), dict)
     assert isinstance(initial_data["schema"].get("groups"), list)
     assert isinstance(initial_data["schema"].get("fields"), list)
@@ -250,7 +254,7 @@ def test_system_settings_patch_and_reset_runtime_overrides(client):
     assert any(item.get("key") == "qa_dynamic_window_enabled" for item in initial_data["schema"]["fields"])
 
     patched = client.patch(
-        "/api/settings/system",
+        "/api/settings/advanced",
         json={"values": {"rag_mode": "dense", "qa_top_k": 9, "qa_fetch_k": 18, "qa_dynamic_window_enabled": False}},
         headers=headers,
     )
@@ -268,29 +272,37 @@ def test_system_settings_patch_and_reset_runtime_overrides(client):
     assert status_data["system_status"]["qa_defaults"]["qa_top_k"] == 9
     assert status_data["system_status"]["qa_defaults"]["qa_dynamic_window_enabled"] is False
 
-    reset = client.post("/api/settings/system/reset", json={"keys": ["rag_mode", "qa_top_k", "qa_fetch_k", "qa_dynamic_window_enabled"]}, headers=headers)
+    other_status = client.get("/api/settings", headers=other_headers)
+    assert other_status.status_code == 200
+    other_status_data = other_status.json()
+    assert other_status_data["system_status"]["qa_defaults"]["rag_mode"] == "hybrid"
+    assert other_status_data["system_status"]["qa_defaults"]["qa_top_k"] == 4
+
+    reset = client.post("/api/settings/advanced/reset", json={"keys": ["rag_mode", "qa_top_k", "qa_fetch_k", "qa_dynamic_window_enabled"]}, headers=headers)
     assert reset.status_code == 200
     assert "rag_mode" not in reset.json()["overrides"]
 
 
-def test_system_settings_patch_rejects_unknown_key(client):
-    user = _register_or_login(client, "settings_system_bad_key_user")
+def test_advanced_settings_patch_rejects_unknown_key(client):
+    user = _register_or_login(client, "settings_advanced_bad_key_user")
     headers = _auth_headers(user)
     resp = client.patch(
-        "/api/settings/system",
+        "/api/settings/advanced",
         json={"values": {"not_a_real_setting": 1}},
         headers=headers,
     )
     assert resp.status_code == 400
-    assert "Unsupported system setting key" in resp.json()["detail"]
+    assert "Unsupported advanced setting key" in resp.json()["detail"]
 
 
-def test_provider_settings_patch_masks_keys_and_updates_setup(client, isolated_provider_data_dir):
+def test_provider_settings_patch_masks_keys_and_updates_setup(client, db_session):
     user = _register_or_login(client, "settings_provider_patch_user")
+    other_user = _register_or_login(client, "settings_provider_other")
     headers = _auth_headers(user)
+    other_headers = _auth_headers(other_user)
 
     patched = client.patch(
-        "/api/settings/system/providers",
+        "/api/settings/provider",
         json={
             "values": {
                 "llm_provider": "qwen",
@@ -318,17 +330,24 @@ def test_provider_settings_patch_masks_keys_and_updates_setup(client, isolated_p
     assert patched_data["setup"]["llm_ready"] is True
     assert patched_data["setup"]["embedding_ready"] is True
 
-    stored_path = isolated_provider_data_dir / "system_provider_config.json"
-    stored_raw = json.loads(stored_path.read_text(encoding="utf-8"))
+    stored_user = db_session.query(User).filter(User.id == user["user_id"]).first()
+    assert stored_user is not None
+    stored_raw = json.loads(stored_user.provider_config_json)
     assert stored_raw["qwen"]["api_key"] == "draft-secret-5678"
     assert stored_raw["qwen"]["base_url"] == provider_config.QWEN_REGION_PRESETS["international"]["base_url"]
     assert stored_raw["dashscope"]["base_url"] == provider_config.DASHSCOPE_REGION_PRESETS["international"]["base_url"]
 
-    get_resp = client.get("/api/settings/system/providers", headers=headers)
+    get_resp = client.get("/api/settings/provider", headers=headers)
     assert get_resp.status_code == 200
     get_data = get_resp.json()
     assert get_data["effective"]["qwen"]["api_key_masked"] == "••••5678"
     assert "api_key" not in get_data["effective"]["qwen"]
+
+    other_get_resp = client.get("/api/settings/provider", headers=other_headers)
+    assert other_get_resp.status_code == 200
+    other_get_data = other_get_resp.json()
+    assert other_get_data["effective"]["qwen"]["api_key_configured"] is False
+    assert other_get_data["effective"]["llm_provider"] == "auto"
 
     settings_resp = client.get("/api/settings", headers=headers)
     assert settings_resp.status_code == 200
@@ -339,7 +358,7 @@ def test_provider_settings_patch_masks_keys_and_updates_setup(client, isolated_p
     assert setup["current_embedding_provider"] == "dashscope"
 
     cleared = client.patch(
-        "/api/settings/system/providers",
+        "/api/settings/provider",
         json={
             "values": {
                 "qwen": {"clear_api_key": True},
@@ -360,17 +379,22 @@ def test_provider_settings_patch_masks_keys_and_updates_setup(client, isolated_p
     assert "qwen.api_key" in cleared_setup["missing"]
 
 
-def test_provider_settings_get_uses_legacy_overrides_fallback(client, isolated_provider_data_dir):
-    legacy_overrides_path = isolated_provider_data_dir / "system_overrides.json"
-    legacy_overrides_path.write_text(
+def test_provider_settings_detect_legacy_global_config_without_inheriting_secrets(client, isolated_provider_data_dir):
+    legacy_provider_path = isolated_provider_data_dir / "system_provider_config.json"
+    legacy_provider_path.write_text(
         json.dumps(
             {
                 "llm_provider": "qwen",
                 "embedding_provider": "dashscope",
-                "qwen_base_url": "https://legacy.example.com/compatible-mode/v1",
-                "qwen_model": "legacy-qwen",
-                "dashscope_base_url": "https://legacy.example.com/api/v1",
-                "dashscope_embedding_model": "legacy-embed",
+                "qwen": {
+                    "api_key": "legacy-shared-key",
+                    "base_url": "https://legacy.example.com/compatible-mode/v1",
+                    "model": "legacy-qwen",
+                },
+                "dashscope": {
+                    "base_url": "https://legacy.example.com/api/v1",
+                    "embedding_model": "legacy-embed",
+                },
             },
             ensure_ascii=False,
             indent=2,
@@ -383,16 +407,17 @@ def test_provider_settings_get_uses_legacy_overrides_fallback(client, isolated_p
     user = _register_or_login(client, "settings_provider_legacy_user")
     headers = _auth_headers(user)
 
-    resp = client.get("/api/settings/system/providers", headers=headers)
+    resp = client.get("/api/settings/provider", headers=headers)
     assert resp.status_code == 200
     data = resp.json()
-    assert data["effective"]["llm_provider"] == "qwen"
-    assert data["effective"]["embedding_provider"] == "dashscope"
-    assert data["effective"]["qwen"]["base_url"] == "https://legacy.example.com/compatible-mode/v1"
-    assert data["effective"]["qwen"]["model"] == "legacy-qwen"
-    assert data["effective"]["dashscope"]["base_url"] == "https://legacy.example.com/api/v1"
-    assert data["effective"]["dashscope"]["embedding_model"] == "legacy-embed"
-    assert data["effective"]["qwen"]["api_key_configured"] is True
+    assert data["effective"]["llm_provider"] == "auto"
+    assert data["effective"]["embedding_provider"] == "auto"
+    assert data["effective"]["qwen"]["api_key_configured"] is False
+
+    settings_resp = client.get("/api/settings", headers=headers)
+    assert settings_resp.status_code == 200
+    notices = settings_resp.json()["system_status"]["notices"]
+    assert any("历史全局 provider 配置文件" in notice for notice in notices)
 
 
 def test_provider_settings_test_endpoint_uses_draft_without_persisting(
@@ -402,9 +427,11 @@ def test_provider_settings_test_endpoint_uses_draft_without_persisting(
 ):
     calls = {}
 
-    def fake_test_provider_connection(values, target="auto"):
+    def fake_test_provider_connection(current_config, values, target="auto", advanced_config=None):
+        calls["current_config"] = current_config
         calls["values"] = values
         calls["target"] = target
+        calls["advanced_config"] = advanced_config
         return {
             "ok": True,
             "provider": "deepseek",
@@ -417,7 +444,7 @@ def test_provider_settings_test_endpoint_uses_draft_without_persisting(
     user = _register_or_login(client, "settings_provider_test_user")
     headers = _auth_headers(user)
     resp = client.post(
-        "/api/settings/system/providers/test",
+        "/api/settings/provider/test",
         json={
             "target": "llm",
             "values": {
@@ -435,11 +462,13 @@ def test_provider_settings_test_endpoint_uses_draft_without_persisting(
     assert resp.json()["ok"] is True
     assert calls["target"] == "llm"
     assert calls["values"]["deepseek"]["api_key"] == "preview-only-key"
+    assert calls["current_config"] == {}
+    assert calls["advanced_config"] == {}
 
     stored_path = isolated_provider_data_dir / "system_provider_config.json"
     assert not stored_path.exists()
 
-    get_resp = client.get("/api/settings/system/providers", headers=headers)
+    get_resp = client.get("/api/settings/provider", headers=headers)
     assert get_resp.status_code == 200
     get_data = get_resp.json()
     assert get_data["effective"]["deepseek"]["api_key_configured"] is False
@@ -458,7 +487,7 @@ def test_startup_generates_bootstrap_auth_secret(isolated_provider_data_dir, mon
     assert stored["auth_secret_key"] != "gradtutor-dev-secret"
 
 
-def test_startup_migrates_env_values_to_provider_and_override_files(isolated_provider_data_dir, monkeypatch):
+def test_startup_migrates_env_values_only_to_override_file(isolated_provider_data_dir, monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "qwen")
     monkeypatch.setattr(settings, "embedding_provider", "dashscope")
     monkeypatch.setattr(settings, "qwen_api_key", "migrated-qwen-key")
@@ -471,17 +500,11 @@ def test_startup_migrates_env_values_to_provider_and_override_files(isolated_pro
 
     provider_path = isolated_provider_data_dir / "system_provider_config.json"
     overrides_path = isolated_provider_data_dir / "system_overrides.json"
-    assert provider_path.exists()
+    assert not provider_path.exists()
     assert overrides_path.exists()
 
-    provider_data = json.loads(provider_path.read_text(encoding="utf-8"))
     overrides_data = json.loads(overrides_path.read_text(encoding="utf-8"))
 
-    assert result["provider_config"]["qwen"]["api_key"] == "migrated-qwen-key"
-    assert provider_data["llm_provider"] == "qwen"
-    assert provider_data["embedding_provider"] == "dashscope"
-    assert provider_data["qwen"]["api_key"] == "migrated-qwen-key"
-    assert provider_data["qwen"]["base_url"] == "https://migrate.example.com/compatible-mode/v1"
-    assert provider_data["dashscope"]["base_url"] == "https://migrate.example.com/api/v1"
+    assert result["provider_config"] == {}
     assert overrides_data["qa_top_k"] == 9
     assert overrides_data["rag_mode"] == "dense"

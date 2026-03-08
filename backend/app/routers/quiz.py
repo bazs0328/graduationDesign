@@ -812,12 +812,21 @@ def _match_keypoints_by_free_text(
     if not query_text:
         return []
     if doc_id:
-        matched = match_keypoints_by_concepts(
-            user_id,
-            doc_id,
-            [query_text],
-            top_k=1,
-        )
+        try:
+            matched = match_keypoints_by_concepts(
+                user_id,
+                doc_id,
+                [query_text],
+                top_k=1,
+            )
+        except Exception:
+            logger.debug(
+                "quiz.keypoint_match.free_text_doc_failed user_id=%s doc_id=%s",
+                user_id,
+                doc_id,
+                exc_info=True,
+            )
+            return []
         if kb_id and matched:
             return _collapse_kb_keypoint_ids(
                 db,
@@ -828,12 +837,21 @@ def _match_keypoints_by_free_text(
             )
         return matched
     if kb_id:
-        matched = match_keypoints_by_kb(
-            user_id,
-            kb_id,
-            [query_text],
-            top_k=1,
-        )
+        try:
+            matched = match_keypoints_by_kb(
+                user_id,
+                kb_id,
+                [query_text],
+                top_k=1,
+            )
+        except Exception:
+            logger.debug(
+                "quiz.keypoint_match.free_text_kb_failed user_id=%s kb_id=%s",
+                user_id,
+                kb_id,
+                exc_info=True,
+            )
+            return []
         return _collapse_kb_keypoint_ids(
             db,
             user_id,
@@ -1362,7 +1380,16 @@ def _resolve_keypoints_for_question(
     if not isinstance(concepts, list):
         concepts = []
     if doc_id:
-        matched = match_keypoints_by_concepts(user_id, doc_id, concepts) if concepts else []
+        try:
+            matched = match_keypoints_by_concepts(user_id, doc_id, concepts) if concepts else []
+        except Exception:
+            logger.debug(
+                "quiz.keypoint_match.doc_scope_failed user_id=%s doc_id=%s",
+                user_id,
+                doc_id,
+                exc_info=True,
+            )
+            matched = []
         if matched:
             if kb_id:
                 return _collapse_kb_keypoint_ids(
@@ -1374,7 +1401,16 @@ def _resolve_keypoints_for_question(
                 )
             return matched
     if kb_id:
-        matched = match_keypoints_by_kb(user_id, kb_id, concepts) if concepts else []
+        try:
+            matched = match_keypoints_by_kb(user_id, kb_id, concepts) if concepts else []
+        except Exception:
+            logger.debug(
+                "quiz.keypoint_match.kb_scope_failed user_id=%s kb_id=%s",
+                user_id,
+                kb_id,
+                exc_info=True,
+            )
+            matched = []
         if matched:
             return _collapse_kb_keypoint_ids(
                 db,

@@ -83,6 +83,19 @@ class Settings(BaseSettings):
     rag_dense_weight: float = 0.7
     rag_bm25_weight: float = 0.3
 
+    def __getattribute__(self, name: str):
+        if not name.startswith("__"):
+            try:
+                from app.core.runtime_user_config import RUNTIME_VALUE_MISSING, get_runtime_setting
+
+                runtime_value = get_runtime_setting(name)
+                if runtime_value is not RUNTIME_VALUE_MISSING:
+                    return runtime_value
+            except Exception:
+                # Runtime user config is best-effort and must never block base settings access.
+                pass
+        return super().__getattribute__(name)
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

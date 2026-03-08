@@ -184,4 +184,35 @@ describe('Upload pagination', () => {
     expect(wrapper.text()).toContain('第二页文档.pdf')
     expect(wrapper.text()).toContain('第 2 / 2 页')
   })
+
+  it('blocks uploading when provider setup is incomplete for indexing', async () => {
+    const missingSetup = buildProviderConfigResponse({
+      setup: {
+        llm_ready: false,
+        embedding_ready: false,
+        missing: ['qwen.api_key'],
+        current_llm_provider: 'unconfigured',
+        current_embedding_provider: 'unconfigured',
+      },
+    })
+    getSettings.mockResolvedValue(buildSettingsResponse({
+      system_status: {
+        provider_setup: missingSetup.setup,
+      },
+    }))
+    getSystemProviderSettings.mockResolvedValue(missingSetup)
+
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await router.push('/upload')
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('上传与解析前，请先到设置中心完成当前账号的模型接入配置。')
+    const uploadButton = wrapper.findAll('button').find((btn) => btn.text().includes('先完成模型接入'))
+    expect(uploadButton).toBeTruthy()
+    expect(uploadButton.element.disabled).toBe(true)
+  })
 })

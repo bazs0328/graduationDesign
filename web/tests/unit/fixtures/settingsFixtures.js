@@ -42,7 +42,7 @@ export function buildSettingsResponse(overrides = {}) {
       ocr_enabled: true,
       pdf_parser_mode: 'auto',
       auth_require_login: true,
-      secrets_configured: { qwen_api_key: true, auth_secret_key_configured: true },
+      secrets_configured: { qwen_api_key: true },
       notices: [],
       version_info: { app_name: 'StudyCompass' },
       provider_setup: buildProviderSetup(),

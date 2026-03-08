@@ -91,6 +91,12 @@ def ensure_schema():
         if "preferences_json" not in cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN preferences_json TEXT"))
             conn.commit()
+        if "provider_config_json" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN provider_config_json TEXT"))
+            conn.commit()
+        if "advanced_config_json" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN advanced_config_json TEXT"))
+            conn.commit()
         result = conn.execute(text("PRAGMA table_info(users)"))
         cols = {row[1] for row in result}
         if "username" in cols and "password_hash" in cols:

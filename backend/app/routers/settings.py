@@ -11,14 +11,20 @@ from app.core.llm import embedding_provider_status, llm_provider_status
 from app.core.provider_config import (
     get_provider_compatibility_notices,
     get_provider_config_payload,
-    patch_provider_config,
+    merge_provider_config,
     provider_setup_status,
     test_provider_connection,
 )
+from app.core.runtime_user_config import (
+    activate_runtime_settings_for_user,
+    dumps_runtime_json,
+    parse_user_advanced_config,
+    parse_user_provider_config,
+)
 from app.core.runtime_overrides import (
-    get_system_settings_payload,
-    patch_system_overrides,
-    reset_system_overrides,
+    get_advanced_settings_payload,
+    merge_advanced_overrides,
+    normalize_advanced_overrides,
 )
 from app.core.settings_preferences import (
     normalize_settings_payload_for_read,
@@ -152,7 +158,6 @@ def _system_status() -> SettingsSystemStatus:
     secrets_configured = {
         "deepseek_api_key": bool(settings.deepseek_api_key),
         "qwen_api_key": bool(settings.qwen_api_key),
-        "auth_secret_key_configured": bool(settings.auth_secret_key),
     }
     return SettingsSystemStatus(
         llm_provider=llm_status["resolved"],
@@ -299,52 +304,134 @@ def reset_settings(payload: SettingsResetRequest, db: Session = Depends(get_db))
     return _build_response(db, resolved_user_id=resolved_user_id, kb_id=kb.id)
 
 
-@router.get("/system", response_model=SystemSettingsResponse)
-def get_system_settings():
-    return SystemSettingsResponse.model_validate(get_system_settings_payload())
+def _advanced_settings_response_for_user(user: User) -> SystemSettingsResponse:
+    return SystemSettingsResponse.model_validate(
+        get_advanced_settings_payload(parse_user_advanced_config(user.advanced_config_json))
+    )
 
 
-@router.get("/system/providers", response_model=ProviderConfigResponse)
-def get_system_provider_settings():
+def _provider_settings_response_for_user(user: User) -> ProviderConfigResponse:
     return ProviderConfigResponse.model_validate(get_provider_config_payload())
 
 
-@router.patch("/system", response_model=SystemSettingsResponse)
-def patch_system_settings(payload: SystemSettingsPatchRequest):
+@router.get("/advanced", response_model=SystemSettingsResponse)
+def get_advanced_settings(user_id: str | None = None, db: Session = Depends(get_db)):
+    resolved_user_id = ensure_user(db, user_id)
+    user = _get_user(db, resolved_user_id)
+    return _advanced_settings_response_for_user(user)
+
+
+@router.patch("/advanced", response_model=SystemSettingsResponse)
+def patch_advanced_settings(payload: SystemSettingsPatchRequest, db: Session = Depends(get_db)):
+    resolved_user_id = ensure_user(db, None)
+    user = _get_user(db, resolved_user_id)
     try:
-        patch_system_overrides(payload.values)
+        merged = merge_advanced_overrides(
+            parse_user_advanced_config(user.advanced_config_json),
+            payload.values,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return SystemSettingsResponse.model_validate(get_system_settings_payload())
+    user.advanced_config_json = dumps_runtime_json(merged) if merged else None
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    activate_runtime_settings_for_user(user)
+    return _advanced_settings_response_for_user(user)
 
 
-@router.post("/system/reset", response_model=SystemSettingsResponse)
-def reset_system_settings(payload: SystemSettingsResetRequest):
+@router.post("/advanced/reset", response_model=SystemSettingsResponse)
+def reset_advanced_settings(payload: SystemSettingsResetRequest, db: Session = Depends(get_db)):
+    resolved_user_id = ensure_user(db, None)
+    user = _get_user(db, resolved_user_id)
     try:
-        reset_system_overrides(payload.keys)
+        current = parse_user_advanced_config(user.advanced_config_json)
+        keys = payload.keys or list(current.keys())
+        patch = {key: None for key in keys}
+        merged = merge_advanced_overrides(current, patch)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return SystemSettingsResponse.model_validate(get_system_settings_payload())
+    user.advanced_config_json = dumps_runtime_json(merged) if merged else None
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    activate_runtime_settings_for_user(user)
+    return _advanced_settings_response_for_user(user)
 
 
-@router.patch("/system/providers", response_model=ProviderConfigResponse)
-def patch_system_provider_settings(payload: ProviderConfigPatchRequest):
+@router.get("/provider", response_model=ProviderConfigResponse)
+def get_provider_settings(user_id: str | None = None, db: Session = Depends(get_db)):
+    resolved_user_id = ensure_user(db, user_id)
+    user = _get_user(db, resolved_user_id)
+    return _provider_settings_response_for_user(user)
+
+
+@router.patch("/provider", response_model=ProviderConfigResponse)
+def patch_provider_settings(payload: ProviderConfigPatchRequest, db: Session = Depends(get_db)):
+    resolved_user_id = ensure_user(db, None)
+    user = _get_user(db, resolved_user_id)
     try:
-        patch_provider_config(payload.values.model_dump(exclude_unset=True))
+        merged = merge_provider_config(
+            parse_user_provider_config(user.provider_config_json),
+            payload.values.model_dump(exclude_unset=True),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return ProviderConfigResponse.model_validate(get_provider_config_payload())
+    user.provider_config_json = dumps_runtime_json(merged) if merged else None
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    activate_runtime_settings_for_user(user)
+    return _provider_settings_response_for_user(user)
 
 
-@router.post("/system/providers/test", response_model=ProviderConfigTestResponse)
-def test_system_provider_settings(payload: ProviderConfigTestRequest):
+@router.post("/provider/test", response_model=ProviderConfigTestResponse)
+def test_provider_settings(payload: ProviderConfigTestRequest, db: Session = Depends(get_db)):
+    resolved_user_id = ensure_user(db, None)
+    user = _get_user(db, resolved_user_id)
     try:
         result = test_provider_connection(
+            parse_user_provider_config(user.provider_config_json),
             payload.values.model_dump(exclude_unset=True),
             target=payload.target,
+            advanced_config=parse_user_advanced_config(user.advanced_config_json),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return ProviderConfigTestResponse.model_validate(result)
+
+
+@router.get("/system", response_model=SystemSettingsResponse)
+def get_system_settings(user_id: str | None = None, db: Session = Depends(get_db)):
+    resolved_user_id = ensure_user(db, user_id)
+    user = _get_user(db, resolved_user_id)
+    return _advanced_settings_response_for_user(user)
+
+
+@router.get("/system/providers", response_model=ProviderConfigResponse)
+def get_system_provider_settings(user_id: str | None = None, db: Session = Depends(get_db)):
+    resolved_user_id = ensure_user(db, user_id)
+    user = _get_user(db, resolved_user_id)
+    return _provider_settings_response_for_user(user)
+
+
+@router.patch("/system", response_model=SystemSettingsResponse)
+def patch_system_settings(payload: SystemSettingsPatchRequest, db: Session = Depends(get_db)):
+    return patch_advanced_settings(payload, db)
+
+
+@router.post("/system/reset", response_model=SystemSettingsResponse)
+def reset_system_settings(payload: SystemSettingsResetRequest, db: Session = Depends(get_db)):
+    return reset_advanced_settings(payload, db)
+
+
+@router.patch("/system/providers", response_model=ProviderConfigResponse)
+def patch_system_provider_settings(payload: ProviderConfigPatchRequest, db: Session = Depends(get_db)):
+    return patch_provider_settings(payload, db)
+
+
+@router.post("/system/providers/test", response_model=ProviderConfigTestResponse)
+def test_system_provider_settings(payload: ProviderConfigTestRequest, db: Session = Depends(get_db)):
+    return test_provider_settings(payload, db)

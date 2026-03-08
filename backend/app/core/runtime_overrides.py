@@ -60,6 +60,50 @@ EDITABLE_SYSTEM_KEYS: tuple[str, ...] = (
     "rag_bm25_weight",
 )
 
+USER_ADVANCED_KEYS: tuple[str, ...] = (
+    "chunk_size",
+    "chunk_overlap",
+    "index_text_cleanup_enabled",
+    "index_text_cleanup_mode",
+    "index_text_cleanup_non_pdf_mode",
+    "noise_filter_level",
+    "noise_drop_low_quality_hits",
+    "lexical_stopwords_enabled",
+    "lexical_tokenizer_version",
+    "ocr_enabled",
+    "ocr_engine",
+    "ocr_fallback_engines",
+    "ocr_language",
+    "ocr_tesseract_language",
+    "ocr_min_text_length",
+    "ocr_render_dpi",
+    "ocr_check_pages",
+    "ocr_preprocess_enabled",
+    "ocr_deskew_enabled",
+    "ocr_low_confidence_threshold",
+    "pdf_parser_mode",
+    "pdf_garbled_ocr_enabled",
+    "pdf_garbled_ocr_force",
+    "pdf_garbled_ocr_min_len_ratio",
+    "pdf_garbled_single_char_line_ratio",
+    "pdf_garbled_short_line_ratio",
+    "quiz_context_reconstruct_enabled",
+    "quiz_context_seed_k_multiplier",
+    "quiz_context_neighbor_window",
+    "quiz_context_passage_target_chars",
+    "quiz_context_fragment_filter_enabled",
+    "qa_top_k",
+    "qa_fetch_k",
+    "qa_bm25_k",
+    "qa_dynamic_window_enabled",
+    "qa_summary_auto_expand_enabled",
+    "qa_summary_top_k",
+    "qa_summary_fetch_k",
+    "rag_mode",
+    "rag_dense_weight",
+    "rag_bm25_weight",
+)
+
 _GROUP_ORDER = (
     "providers",
     "auth",
@@ -409,11 +453,11 @@ def _resolve_input_type(key: str, kind: str) -> str:
     return "text"
 
 
-def _build_system_settings_schema() -> dict[str, Any]:
+def _build_settings_schema(keys: tuple[str, ...]) -> dict[str, Any]:
     groups_used: list[str] = []
     fields: list[dict[str, Any]] = []
 
-    for key in EDITABLE_SYSTEM_KEYS:
+    for key in keys:
         kind, nullable = _annotation_kind(key)
         group = _group_for_key(key)
         if group not in groups_used:
@@ -455,7 +499,8 @@ def _build_system_settings_schema() -> dict[str, Any]:
     return {"groups": groups, "fields": fields}
 
 
-_SYSTEM_SETTINGS_SCHEMA: dict[str, Any] = _build_system_settings_schema()
+_SYSTEM_SETTINGS_SCHEMA: dict[str, Any] = _build_settings_schema(EDITABLE_SYSTEM_KEYS)
+_USER_ADVANCED_SCHEMA: dict[str, Any] = _build_settings_schema(USER_ADVANCED_KEYS)
 
 
 def load_system_overrides() -> dict[str, Any]:
@@ -526,4 +571,39 @@ def get_system_settings_payload() -> dict[str, Any]:
         "overrides": overrides,
         "effective": effective,
         "schema": _SYSTEM_SETTINGS_SCHEMA,
+    }
+
+
+def normalize_advanced_overrides(raw: dict[str, Any] | None) -> dict[str, Any]:
+    data = raw if isinstance(raw, dict) else {}
+    normalized: dict[str, Any] = {}
+    for key, value in data.items():
+        if key not in USER_ADVANCED_KEYS:
+            continue
+        normalized[key] = _coerce_value(key, value)
+    return normalized
+
+
+def merge_advanced_overrides(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(patch, dict):
+        raise ValueError("values must be a JSON object")
+    merged = normalize_advanced_overrides(current)
+    for key, value in patch.items():
+        if key not in USER_ADVANCED_KEYS:
+            raise ValueError(f"Unsupported advanced setting key: {key}")
+        if value is None:
+            merged.pop(key, None)
+            continue
+        merged[key] = _coerce_value(key, value)
+    return merged
+
+
+def get_advanced_settings_payload(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_overrides = normalize_advanced_overrides(overrides)
+    effective = {key: getattr(settings, key) for key in USER_ADVANCED_KEYS}
+    return {
+        "editable_keys": list(USER_ADVANCED_KEYS),
+        "overrides": normalized_overrides,
+        "effective": effective,
+        "schema": _USER_ADVANCED_SCHEMA,
     }

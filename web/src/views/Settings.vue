@@ -59,11 +59,11 @@
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="space-y-2">
             <div class="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-              模型接入配置
+              当前账号模型接入
             </div>
             <h2 class="text-xl font-black tracking-tight">模型服务配置</h2>
             <p class="text-sm text-muted-foreground max-w-3xl leading-relaxed">
-              配置会安全保存在本地持久化文件中，无需手动修改 `.env`。完成配置后即可使用摘要、问答和测验。
+              配置会按当前账号单独保存，无需手动修改 `.env`。完成配置后即可使用摘要、问答和测验。
             </p>
           </div>
           <div class="rounded-2xl border border-border bg-background/70 px-4 py-3 text-sm space-y-1 min-w-[220px]">
@@ -81,7 +81,7 @@
           v-if="Array.isArray(systemStatus?.notices) && systemStatus.notices.length > 0"
           class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900 space-y-2"
         >
-          <p class="font-semibold">检测到旧配置，系统已自动兼容处理</p>
+          <p class="font-semibold">检测到旧的全局配置，已改为兼容提示模式</p>
           <ul class="list-disc pl-5 space-y-1">
             <li v-for="notice in systemStatus.notices" :key="notice">
               {{ notice }}
@@ -318,7 +318,7 @@
             <div class="space-y-1">
               <p class="text-sm font-semibold">保存后立即生效</p>
               <p class="text-xs text-muted-foreground">
-                配置会保存到本地持久化文件中，页面仅显示掩码，不会回显 API 密钥明文。
+                配置只对当前账号生效，页面仅显示掩码，不会回显 API 密钥明文。
               </p>
               <p v-if="providerTestResult" class="text-xs" :class="providerTestResult.ok ? 'text-green-700' : 'text-destructive'">
                 {{ providerTestResult.message }}
@@ -361,7 +361,7 @@
           <div class="space-y-1">
             <h2 class="text-lg font-bold tracking-tight flex items-center gap-2">
               <ShieldCheck class="w-5 h-5 text-primary" />
-              高级设置与诊断
+              当前账号高级参数与诊断
             </h2>
             <p class="text-xs text-muted-foreground">
               日常学习无需调整本区域；仅在排查模型或系统问题时展开。
@@ -437,7 +437,7 @@
         </div>
 
         <div class="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-sm">
-          <div class="text-xs font-bold uppercase tracking-widest text-muted-foreground">能力与密钥状态（高级）</div>
+          <div class="text-xs font-bold uppercase tracking-widest text-muted-foreground">部署与账号状态（只读）</div>
           <div class="space-y-2 text-sm">
             <div class="flex items-center justify-between gap-2">
               <span class="text-muted-foreground">文档识别能力</span>
@@ -463,7 +463,7 @@
             </div>
           </div>
           <div class="pt-1 border-t border-border/60">
-            <div class="text-xs font-semibold text-muted-foreground mb-2">密钥状态（仅状态，不显示明文）</div>
+            <div class="text-xs font-semibold text-muted-foreground mb-2">当前账号密钥状态（仅状态，不显示明文）</div>
             <div class="flex flex-wrap gap-2">
               <span
                 v-for="(ok, key) in (systemStatus?.secrets_configured || {})"
@@ -481,9 +481,9 @@
       <div v-if="advancedDiagnosticsOpen" class="rounded-2xl border border-border bg-card p-4 sm:p-5 shadow-sm space-y-3">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground">系统高级参数（可编辑）</h3>
+            <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground">当前账号高级参数（可编辑）</h3>
             <p class="mt-1 text-xs text-muted-foreground">
-              这里的值会在系统默认值之上应用本地覆盖并持久化保存，适合在页面内集中维护常用设置。
+              这里的值会在部署默认值之上应用当前账号覆盖并持久化保存，适合在页面内集中维护常用设置。
             </p>
           </div>
           <div class="text-xs text-muted-foreground space-y-1">
@@ -493,7 +493,7 @@
         </div>
 
         <div v-if="systemSchemaGroups.length === 0" class="rounded-xl border border-dashed border-border bg-background/40 p-4 text-sm text-muted-foreground">
-          暂时未获取到系统参数说明，请稍后刷新重试。
+          暂时未获取到当前账号高级参数说明，请稍后刷新重试。
         </div>
 
         <div v-else class="space-y-4">
@@ -587,24 +587,24 @@
 
         <div class="flex flex-wrap items-center justify-between gap-3">
           <p class="text-xs text-muted-foreground">
-            系统参数会优先采用“覆盖值”；清除覆盖后自动回退到默认值。
+            当前账号参数会优先采用“覆盖值”；清除覆盖后自动回退到部署默认值。
           </p>
           <div class="flex items-center gap-2">
             <button
               type="button"
               class="px-3 py-2 rounded-lg border border-input text-sm font-semibold hover:bg-accent disabled:opacity-50"
               :disabled="settingsStore.savingSystem || Object.keys(systemAdvanced.overrides || {}).length === 0"
-              @click="resetSystemAdvancedSettings"
+              @click="resetAdvancedSettings"
             >
-              恢复系统默认
+              恢复账号默认
             </button>
             <button
               type="button"
               class="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-50"
               :disabled="settingsStore.savingSystem || !settingsStore.systemAdvancedDirty"
-              @click="saveSystemAdvancedSettings"
+              @click="saveAdvancedSettings"
             >
-              {{ settingsStore.savingSystem ? '保存中…' : '保存系统参数' }}
+              {{ settingsStore.savingSystem ? '保存中…' : '保存当前账号参数' }}
             </button>
           </div>
         </div>
@@ -1064,7 +1064,6 @@ function secretStatusLabel(value) {
   const labels = {
     deepseek_api_key: 'DeepSeek API 密钥',
     qwen_api_key: 'Qwen API 密钥',
-    auth_secret_key_configured: '系统认证密钥',
   }
   return labels[value] || value
 }
@@ -1118,7 +1117,7 @@ const providerTestTarget = computed(() => {
 
 async function saveProviderSettings() {
   try {
-    await settingsStore.saveProviderConfig()
+    await settingsStore.saveProviderSettings()
     showToast('模型接入配置已保存', 'success')
   } catch {
     // global error toast handled by api layer
@@ -1127,7 +1126,7 @@ async function saveProviderSettings() {
 
 async function runProviderConnectionTest() {
   try {
-    const result = await settingsStore.testProviderConfig({ target: providerTestTarget.value })
+    const result = await settingsStore.testProviderSettings({ target: providerTestTarget.value })
     showToast(result?.message || '连接测试成功', 'success')
   } catch {
     // global error toast handled by api layer
@@ -1303,25 +1302,25 @@ function formatSystemValue(value, field) {
   return String(value)
 }
 
-async function saveSystemAdvancedSettings() {
+async function saveAdvancedSettings() {
   systemOverridesError.value = ''
   try {
     const patch = buildSystemOverridesPatch(
       systemAdvanced.value?.overrides || {},
       systemAdvancedDraft.value || {},
     )
-    await settingsStore.saveSystemAdvanced(patch)
-    showToast('系统高级参数已保存', 'success')
+    await settingsStore.saveAdvancedSettings(patch)
+    showToast('当前账号高级参数已保存', 'success')
   } catch (err) {
     systemOverridesError.value = err?.message || '保存失败'
   }
 }
 
-async function resetSystemAdvancedSettings() {
+async function resetAdvancedSettings() {
   systemOverridesError.value = ''
   try {
-    await settingsStore.resetSystemAdvanced()
-    showToast('系统高级参数已恢复默认', 'success')
+    await settingsStore.resetAdvancedSettings()
+    showToast('当前账号高级参数已恢复默认', 'success')
   } catch (err) {
     systemOverridesError.value = err?.message || '重置失败'
   }

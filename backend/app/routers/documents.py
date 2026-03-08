@@ -19,6 +19,7 @@ from app.core.kb_metadata import (
     transfer_file_hash,
 )
 from app.core.paths import ensure_kb_dirs, ensure_user_dirs, kb_base_dir, user_base_dir
+from app.core.provider_config import provider_setup_status
 from app.core.users import ensure_user
 from app.core.vectorstore import (
     delete_doc_vectors,
@@ -62,6 +63,16 @@ from app.utils.pagination import normalize_page_args
 from app.utils.time import utc_now
 
 router = APIRouter()
+
+
+def _ensure_embedding_provider_ready() -> None:
+    setup = provider_setup_status()
+    if setup.get("embedding_ready"):
+        return
+    raise HTTPException(
+        status_code=400,
+        detail="当前账号尚未完成向量模型配置，请先到设置中心完成模型接入后再上传或重试解析。",
+    )
 
 
 def _doc_layout_sidecar_path(user_id: str, kb_id: str | None, doc_id: str) -> str | None:
@@ -602,6 +613,7 @@ def reprocess_doc(
     db: Session = Depends(get_db),
 ):
     resolved_user_id = ensure_user(db, user_id)
+    _ensure_embedding_provider_ready()
     doc = _get_doc_or_404(db, resolved_user_id, doc_id)
     ok, err = _queue_doc_reprocess(db, background_tasks, doc, resolved_user_id)
     if not ok:
@@ -686,6 +698,7 @@ def retry_failed_docs(
     db: Session = Depends(get_db),
 ):
     resolved_user_id = ensure_user(db, payload.user_id)
+    _ensure_embedding_provider_ready()
     query = db.query(Document).filter(
         Document.user_id == resolved_user_id,
         Document.status == "error",
@@ -721,6 +734,7 @@ def upload_doc(
         raise HTTPException(status_code=400, detail="Missing filename")
 
     resolved_user_id = ensure_user(db, user_id)
+    _ensure_embedding_provider_ready()
     try:
         kb = ensure_kb(db, resolved_user_id, kb_id)
     except ValueError as exc:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.core.kb_metadata import record_file_hash
+from app.core.runtime_user_config import activate_runtime_settings_for_user_id, clear_runtime_settings
 from app.db import SessionLocal
 from app.models import Document
 from app.services.ingest import ingest_document
@@ -19,6 +20,7 @@ def process_document_task(
 ) -> None:
     db: Session = SessionLocal()
     try:
+        activate_runtime_settings_for_user_id(db, user_id)
         doc = db.query(Document).filter(Document.id == doc_id).first()
         if not doc:
             return
@@ -44,4 +46,5 @@ def process_document_task(
             doc.processed_at = utc_now()
             db.commit()
     finally:
+        clear_runtime_settings()
         db.close()

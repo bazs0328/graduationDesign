@@ -12,6 +12,8 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     name = Column(String, nullable=True)
     preferences_json = Column(Text, nullable=True)  # User-level UX/behavior preferences
+    provider_config_json = Column(Text, nullable=True)  # User-scoped model/provider config
+    advanced_config_json = Column(Text, nullable=True)  # User-scoped advanced runtime overrides
     created_at = Column(DateTime, default=utc_now)
 
 

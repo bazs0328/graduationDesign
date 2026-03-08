@@ -34,7 +34,7 @@ function buildSettingsResponse() {
       ocr_enabled: true,
       pdf_parser_mode: 'auto',
       auth_require_login: true,
-      secrets_configured: { qwen_api_key: true, auth_secret_key_configured: true },
+      secrets_configured: { qwen_api_key: true },
       notices: [],
       version_info: { app_name: 'StudyCompass' },
     },
@@ -174,7 +174,7 @@ describe('settings view simplification', () => {
 
     const expandedText = wrapper.text()
     expect(expandedText).toContain('模型状态（高级）')
-    expect(expandedText).toContain('系统高级参数（可编辑）')
+    expect(expandedText).toContain('当前账号高级参数（可编辑）')
     expect(wrapper.find('textarea').exists()).toBe(false)
     expect(wrapper.findAll('input[type="number"]').length).toBeGreaterThan(0)
     expect(wrapper.findAll('select').length).toBeGreaterThan(0)

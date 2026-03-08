@@ -18,6 +18,7 @@ from app.core.llm import (
     resolve_embedding_provider,
     resolve_llm_provider,
 )
+from app.core.runtime_user_config import runtime_settings_scope
 
 SUPPORTED_LLM_PROVIDERS: tuple[str, ...] = ("auto", "deepseek", "qwen")
 SUPPORTED_EMBEDDING_PROVIDERS: tuple[str, ...] = ("auto", "qwen", "dashscope")
@@ -78,7 +79,7 @@ LEGACY_PROVIDER_FALLBACK_KEYS: tuple[str, ...] = (
     "dashscope_embedding_model",
 )
 
-_BASE_PROVIDER_VALUES: dict[str, Any] = {key: getattr(settings, key) for key in PROVIDER_RUNTIME_KEYS}
+_BASE_PROVIDER_VALUES: dict[str, Any] = {key: object.__getattribute__(settings, key) for key in PROVIDER_RUNTIME_KEYS}
 _LOCK = threading.Lock()
 
 
@@ -170,7 +171,7 @@ def _resolve_preset_base_url(preset_map: dict[str, dict[str, str | None]], regio
     return _normalize_text(current)
 
 
-def _normalize_persisted_config(raw: dict[str, Any] | None) -> dict[str, Any]:
+def normalize_provider_config(raw: dict[str, Any] | None) -> dict[str, Any]:
     data = raw if isinstance(raw, dict) else {}
     deepseek = data.get("deepseek") if isinstance(data.get("deepseek"), dict) else {}
     qwen = data.get("qwen") if isinstance(data.get("qwen"), dict) else {}
@@ -240,7 +241,7 @@ def _normalize_persisted_config(raw: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _load_persisted_provider_config() -> dict[str, Any]:
-    return _normalize_persisted_config(_load_json_file(_provider_file_path()))
+    return normalize_provider_config(_load_json_file(_provider_file_path()))
 
 
 def _load_legacy_provider_fallbacks() -> dict[str, Any]:
@@ -301,9 +302,7 @@ def _apply_provider_values(config: dict[str, Any]) -> None:
 
 def load_provider_config() -> dict[str, Any]:
     with _LOCK:
-        config = _load_persisted_provider_config()
-        _apply_provider_values(config)
-        return deepcopy(config)
+        return deepcopy(_load_persisted_provider_config())
 
 
 def _seed_provider_block_from_runtime(current: dict[str, Any], runtime_values: dict[str, Any], *, allow_region: bool = False) -> dict[str, Any]:
@@ -332,104 +331,9 @@ def _model_default(key: str) -> Any:
 
 
 def backfill_provider_config_from_runtime() -> dict[str, Any]:
+    # Provider secrets are no longer migrated into a shared global file.
     with _LOCK:
-        current = _load_persisted_provider_config()
-        merged = deepcopy(current)
-        changed = False
-
-        llm_provider = _normalize_llm_provider_choice(settings.llm_provider)
-        if (
-            "llm_provider" not in merged
-            and llm_provider in SUPPORTED_LLM_PROVIDERS
-            and llm_provider != _normalize_llm_provider_choice(_model_default("llm_provider"))
-        ):
-            merged["llm_provider"] = llm_provider
-            changed = True
-
-        embedding_provider = _normalize_embedding_provider_choice(settings.embedding_provider)
-        if (
-            "embedding_provider" not in merged
-            and embedding_provider in SUPPORTED_EMBEDDING_PROVIDERS
-            and embedding_provider != _normalize_embedding_provider_choice(_model_default("embedding_provider"))
-        ):
-            merged["embedding_provider"] = embedding_provider
-            changed = True
-
-        deepseek_block = _seed_provider_block_from_runtime(
-            merged.get("deepseek", {}),
-            {
-                "api_key": _normalize_text(settings.deepseek_api_key),
-                "base_url": (
-                    settings.deepseek_base_url
-                    if _normalize_text(settings.deepseek_base_url) != _normalize_text(_model_default("deepseek_base_url"))
-                    else None
-                ),
-                "model": settings.deepseek_model if _normalize_text(settings.deepseek_model) != _normalize_text(_model_default("deepseek_model")) else None,
-            },
-        )
-        if deepseek_block and deepseek_block != merged.get("deepseek", {}):
-            merged["deepseek"] = deepseek_block
-            changed = True
-
-        qwen_block = _seed_provider_block_from_runtime(
-            merged.get("qwen", {}),
-            {
-                "api_key": _normalize_text(settings.qwen_api_key),
-                "base_url": (
-                    settings.qwen_base_url
-                    if _normalize_text(settings.qwen_base_url) != _normalize_text(_model_default("qwen_base_url"))
-                    else None
-                ),
-                "model": settings.qwen_model if _normalize_text(settings.qwen_model) != _normalize_text(_model_default("qwen_model")) else None,
-                "embedding_model": (
-                    settings.qwen_embedding_model
-                    if _normalize_text(settings.qwen_embedding_model) != _normalize_text(_model_default("qwen_embedding_model"))
-                    else None
-                ),
-                "region": (
-                    _resolve_qwen_region(settings.qwen_base_url)
-                    if _normalize_text(settings.qwen_base_url) != _normalize_text(_model_default("qwen_base_url"))
-                    else None
-                ),
-            },
-            allow_region=True,
-        )
-        if qwen_block and qwen_block != merged.get("qwen", {}):
-            merged["qwen"] = qwen_block
-            changed = True
-
-        dashscope_base_url = _normalize_text(settings.dashscope_base_url) or str(
-            DASHSCOPE_REGION_PRESETS["china"]["base_url"] or ""
-        )
-        dashscope_block = _seed_provider_block_from_runtime(
-            merged.get("dashscope", {}),
-            {
-                "base_url": (
-                    dashscope_base_url
-                    if _normalize_text(settings.dashscope_base_url) != _normalize_text(_model_default("dashscope_base_url"))
-                    else None
-                ),
-                "embedding_model": (
-                    settings.dashscope_embedding_model
-                    if _normalize_text(settings.dashscope_embedding_model) != _normalize_text(_model_default("dashscope_embedding_model"))
-                    else None
-                ),
-                "region": (
-                    _resolve_dashscope_region(dashscope_base_url)
-                    if _normalize_text(settings.dashscope_base_url) != _normalize_text(_model_default("dashscope_base_url"))
-                    else None
-                ),
-            },
-            allow_region=True,
-        )
-        if dashscope_block and dashscope_block != merged.get("dashscope", {}):
-            merged["dashscope"] = dashscope_block
-            changed = True
-
-        normalized = _normalize_persisted_config(merged)
-        if changed and normalized != current:
-            _persist_json_file(_provider_file_path(), normalized)
-        return deepcopy(normalized)
+        return deepcopy(_load_persisted_provider_config())
 
 
 def _provider_missing_fields(provider: str, *, target: str) -> list[str]:
@@ -500,23 +404,23 @@ def provider_setup_status() -> dict[str, Any]:
 
 def get_provider_compatibility_notices() -> list[str]:
     notices: list[str] = []
-    current_llm_provider = _normalize_text(settings.llm_provider)
-    current_embedding_provider = _normalize_text(settings.embedding_provider)
-    base_llm_provider = _normalize_text(_BASE_PROVIDER_VALUES.get("llm_provider"))
-    base_embedding_provider = _normalize_text(_BASE_PROVIDER_VALUES.get("embedding_provider"))
-    raw_llm_provider = current_llm_provider if current_llm_provider in {"openai", "gemini"} else base_llm_provider
-    raw_embedding_provider = (
-        current_embedding_provider if current_embedding_provider in {"openai", "gemini"} else base_embedding_provider
+    legacy_file = _load_persisted_provider_config()
+    legacy_overrides = _load_legacy_provider_fallbacks()
+    raw_llm_provider = _normalize_text(legacy_file.get("llm_provider") or legacy_overrides.get("llm_provider"))
+    raw_embedding_provider = _normalize_text(
+        legacy_file.get("embedding_provider") or legacy_overrides.get("embedding_provider")
     )
 
     if raw_llm_provider in {"openai", "gemini"}:
         notices.append(
-            f"检测到旧的对话 provider 配置 {raw_llm_provider}，学生设置页已不再提供该选项，系统已自动降级为 auto。"
+            f"检测到旧的对话 provider 配置 {raw_llm_provider}，当前账号配置已不再提供该选项，会回退为 auto。"
         )
     if raw_embedding_provider in {"openai", "gemini"}:
         notices.append(
-            f"检测到旧的向量 provider 配置 {raw_embedding_provider}，学生设置页已不再提供该选项，系统已自动降级为 auto。"
+            f"检测到旧的向量 provider 配置 {raw_embedding_provider}，当前账号配置已不再提供该选项，会回退为 auto。"
         )
+    if legacy_file:
+        notices.append("检测到历史全局 provider 配置文件；其密钥不会自动继承到当前账号。")
     return notices
 
 
@@ -615,30 +519,65 @@ def _merge_provider_config(current: dict[str, Any], values: dict[str, Any]) -> d
             allow_region=True,
         )
 
-    return _normalize_persisted_config(merged)
+    return normalize_provider_config(merged)
+
+
+def merge_provider_config(current: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
+    return _merge_provider_config(current, values)
+
+
+def provider_runtime_values_from_config(config: dict[str, Any] | None) -> dict[str, Any]:
+    normalized = normalize_provider_config(config)
+    runtime: dict[str, Any] = {}
+
+    if "llm_provider" in normalized:
+        runtime["llm_provider"] = normalized["llm_provider"]
+    if "embedding_provider" in normalized:
+        runtime["embedding_provider"] = normalized["embedding_provider"]
+
+    deepseek = normalized.get("deepseek") if isinstance(normalized.get("deepseek"), dict) else {}
+    if "api_key" in deepseek:
+        runtime["deepseek_api_key"] = deepseek.get("api_key")
+    if "base_url" in deepseek:
+        runtime["deepseek_base_url"] = deepseek.get("base_url")
+    if "model" in deepseek:
+        runtime["deepseek_model"] = deepseek.get("model")
+
+    qwen = normalized.get("qwen") if isinstance(normalized.get("qwen"), dict) else {}
+    if "api_key" in qwen:
+        runtime["qwen_api_key"] = qwen.get("api_key")
+    if "base_url" in qwen:
+        runtime["qwen_base_url"] = qwen.get("base_url")
+    if "model" in qwen:
+        runtime["qwen_model"] = qwen.get("model")
+    if "embedding_model" in qwen:
+        runtime["qwen_embedding_model"] = qwen.get("embedding_model")
+
+    dashscope = normalized.get("dashscope") if isinstance(normalized.get("dashscope"), dict) else {}
+    if "base_url" in dashscope:
+        runtime["dashscope_base_url"] = dashscope.get("base_url")
+    if "embedding_model" in dashscope:
+        runtime["dashscope_embedding_model"] = dashscope.get("embedding_model")
+
+    return runtime
 
 
 def patch_provider_config(values: dict[str, Any]) -> dict[str, Any]:
     with _LOCK:
         current = _load_persisted_provider_config()
-        merged = _merge_provider_config(current, values)
-        _persist_json_file(_provider_file_path(), merged)
-        _apply_provider_values(merged)
-        return deepcopy(merged)
+        return deepcopy(_merge_provider_config(current, values))
 
 
 @contextmanager
-def preview_provider_config(values: dict[str, Any]) -> Iterator[dict[str, Any]]:
-    with _LOCK:
-        snapshot = {key: getattr(settings, key) for key in PROVIDER_RUNTIME_KEYS}
-        current = _load_persisted_provider_config()
-        preview = _merge_provider_config(current, values)
-        _apply_provider_values(preview)
-        try:
-            yield deepcopy(preview)
-        finally:
-            for key, value in snapshot.items():
-                setattr(settings, key, value)
+def preview_provider_config(
+    current_config: dict[str, Any],
+    values: dict[str, Any],
+    *,
+    advanced_config: dict[str, Any] | None = None,
+) -> Iterator[dict[str, Any]]:
+    preview = _merge_provider_config(current_config, values)
+    with runtime_settings_scope(provider_config=preview, advanced_config=advanced_config):
+        yield deepcopy(preview)
 
 
 def _test_openai_compatible_llm(api_key: str | None, base_url: str | None, model: str | None) -> None:
@@ -655,8 +594,14 @@ def _test_openai_compatible_llm(api_key: str | None, base_url: str | None, model
     )
 
 
-def test_provider_connection(values: dict[str, Any], target: str = "auto") -> dict[str, Any]:
-    with preview_provider_config(values):
+def test_provider_connection(
+    current_config: dict[str, Any],
+    values: dict[str, Any],
+    target: str = "auto",
+    *,
+    advanced_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    with preview_provider_config(current_config, values, advanced_config=advanced_config):
         llm_status = llm_provider_status()
         resolved_target = target
         if resolved_target == "auto":

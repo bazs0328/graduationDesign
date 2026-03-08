@@ -1,6 +1,7 @@
 <template>
   <section
     v-if="items.length || $slots.default"
+    data-testid="context-summary-bar"
     class="border px-4 py-3 sm:px-5"
     :class="[containerClass, compact ? 'rounded-[1.05rem]' : 'rounded-[1.25rem]']"
   >

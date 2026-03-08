@@ -12,6 +12,7 @@ from app.core.bootstrap_config import ensure_bootstrap_config, run_startup_migra
 from app.core.config import settings
 from app.core.paths import ensure_data_dirs
 from app.core.provider_config import load_provider_config
+from app.core.runtime_user_config import clear_runtime_settings
 from app.core.runtime_overrides import load_system_overrides
 from app.db import Base, engine, ensure_schema
 from app.routers import (
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
         try:
             return await call_next(request)
         finally:
+            clear_runtime_settings()
             reset_request_user_id(token_ctx)
 
     app.include_router(health.router, prefix="/api")

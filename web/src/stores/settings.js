@@ -1,15 +1,15 @@
 import { defineStore } from 'pinia'
 import {
+  getSystemProviderSettings as apiGetProviderSettings,
   getSettings,
-  getSystemProviderSettings,
-  getSystemSettings,
+  getSystemSettings as apiGetAdvancedSettings,
   patchKbSettings,
-  patchSystemProviderSettings,
-  patchSystemSettings,
+  patchSystemProviderSettings as apiPatchProviderSettings,
+  patchSystemSettings as apiPatchAdvancedSettings,
   patchUserSettings,
   resetSettings,
-  resetSystemSettings,
-  testSystemProviderSettings,
+  resetSystemSettings as apiResetAdvancedSettings,
+  testSystemProviderSettings as apiTestProviderSettings,
 } from '../api'
 
 function deepClone(value) {
@@ -435,8 +435,8 @@ export const useSettingsStore = defineStore('settings', {
       try {
         const [response, systemResponse, providerResponse] = await Promise.all([
           getSettings({ userId: userId || undefined, kbId: kbId || undefined }),
-          getSystemSettings(),
-          getSystemProviderSettings(),
+          apiGetAdvancedSettings(),
+          apiGetProviderSettings(),
         ])
         this._applyResponse(response, { userId, kbId })
         this._applySystemSettingsResponse(systemResponse)
@@ -508,48 +508,48 @@ export const useSettingsStore = defineStore('settings', {
       }
     },
 
-    async saveSystemAdvanced(values = null) {
+    async saveAdvancedSettings(values = null) {
       this.savingSystem = true
       this.error = ''
       try {
         const payloadValues = values && typeof values === 'object'
           ? deepClone(values)
           : deepClone(this.systemAdvancedDraft)
-        const response = await patchSystemSettings({ values: payloadValues || {} })
+        const response = await apiPatchAdvancedSettings({ values: payloadValues || {} })
         this._applySystemSettingsResponse(response)
         return response
       } catch (err) {
-        this.error = err?.message || '保存系统高级设置失败'
+        this.error = err?.message || '保存当前账号高级设置失败'
         throw err
       } finally {
         this.savingSystem = false
       }
     },
 
-    async resetSystemAdvanced(keys = null) {
+    async resetAdvancedSettings(keys = null) {
       this.savingSystem = true
       this.error = ''
       try {
         const payload = keys && Array.isArray(keys) ? { keys } : {}
-        const response = await resetSystemSettings(payload)
+        const response = await apiResetAdvancedSettings(payload)
         this._applySystemSettingsResponse(response)
         return response
       } catch (err) {
-        this.error = err?.message || '重置系统高级设置失败'
+        this.error = err?.message || '重置当前账号高级设置失败'
         throw err
       } finally {
         this.savingSystem = false
       }
     },
 
-    async saveProviderConfig(values = null) {
+    async saveProviderSettings(values = null) {
       this.providerSaving = true
       this.error = ''
       try {
         const nextDraft = values && typeof values === 'object'
           ? deepClone(values)
           : deepClone(this.providerDraft)
-        const response = await patchSystemProviderSettings({
+        const response = await apiPatchProviderSettings({
           values: buildProviderPatchPayload(nextDraft || {}),
         })
         const settingsResponse = await getSettings({
@@ -567,14 +567,14 @@ export const useSettingsStore = defineStore('settings', {
       }
     },
 
-    async testProviderConfig(options = {}) {
+    async testProviderSettings(options = {}) {
       this.providerTesting = true
       this.error = ''
       try {
         const nextDraft = options.values && typeof options.values === 'object'
           ? deepClone(options.values)
           : deepClone(this.providerDraft)
-        const response = await testSystemProviderSettings({
+        const response = await apiTestProviderSettings({
           values: buildProviderPatchPayload(nextDraft || {}),
           target: options.target || 'auto',
         })
@@ -586,6 +586,22 @@ export const useSettingsStore = defineStore('settings', {
       } finally {
         this.providerTesting = false
       }
+    },
+
+    async saveSystemAdvanced(values = null) {
+      return this.saveAdvancedSettings(values)
+    },
+
+    async resetSystemAdvanced(keys = null) {
+      return this.resetAdvancedSettings(keys)
+    },
+
+    async saveProviderConfig(values = null) {
+      return this.saveProviderSettings(values)
+    },
+
+    async testProviderConfig(options = {}) {
+      return this.testProviderSettings(options)
     },
   },
 })

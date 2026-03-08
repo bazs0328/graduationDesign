@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import DEFAULT_AUTH_SECRET_KEY, Settings, settings
-from app.core.provider_config import backfill_provider_config_from_runtime
 from app.core.runtime_overrides import backfill_system_overrides_from_runtime
 
 
@@ -85,11 +84,10 @@ def _field_default_value(key: str) -> Any:
 
 
 def run_startup_migrations() -> dict[str, Any]:
-    migrated_provider = backfill_provider_config_from_runtime()
     migrated_overrides = backfill_system_overrides_from_runtime(
         default_values={key: _field_default_value(key) for key in Settings.model_fields},
     )
     return {
-        "provider_config": migrated_provider,
+        "provider_config": {},
         "system_overrides": migrated_overrides,
     }

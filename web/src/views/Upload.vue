@@ -65,6 +65,12 @@
           <div class="space-y-2">
             <label class="text-sm font-medium text-muted-foreground uppercase tracking-wider">选择文件</label>
             <div
+              v-if="!uploadBackendReady"
+              class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+            >
+              上传与解析前，请先到设置中心完成当前账号的模型接入配置。
+            </div>
+            <div
               class="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-primary/50 transition-colors cursor-pointer"
               @click="triggerFilePicker"
               @dragover.prevent="dragActive = true"
@@ -561,11 +567,13 @@ let uploadProgressResetTimer = null
 const selectedKb = computed(() => kbs.value.find((item) => item.id === selectedKbId.value) || null)
 const hasAnyKb = computed(() => kbs.value.length > 0)
 const canUpload = computed(() => {
+  if (!uploadBackendReady.value) return false
   if (!uploadFile.value) return false
   if (selectedKbId.value) return true
   return Boolean(String(kbNameInput.value || '').trim())
 })
 const uploadPrimaryLabel = computed(() => {
+  if (!uploadBackendReady.value) return '先完成模型接入'
   if (!hasAnyKb.value) return '新建资料库并上传'
   if (!selectedKbId.value) return '先选择资料库'
   return '上传文档'
@@ -575,6 +583,11 @@ const showUploadNextSteps = computed(() => (
   && settingsStore.effectiveSettings?.upload?.post_upload_suggestions !== false
 ))
 const providerSetup = computed(() => settingsStore.providerSetup)
+const uploadBackendReady = computed(() => {
+  const setup = providerSetup.value
+  if (!setup) return true
+  return Boolean(setup.embedding_ready)
+})
 const providerFeaturesReady = computed(() => {
   const setup = providerSetup.value
   if (!setup) return true
@@ -600,6 +613,9 @@ const uploadDocsEmptyDescription = computed(() => {
   if (!hasAnyKb.value) {
     return '先新建一个资料库，再上传 PDF/TXT/MD/DOCX/PPTX 文档进行解析。'
   }
+  if (!uploadBackendReady.value) {
+    return '先到设置中心完成当前账号的模型接入配置，再上传资料并建立索引。'
+  }
   if (isDocFilterActive.value) {
     return '当前筛选条件下没有匹配文档，可以清空筛选后查看全部结果。'
   }
@@ -608,6 +624,9 @@ const uploadDocsEmptyDescription = computed(() => {
 const uploadDocsEmptyHint = computed(() => {
   if (!hasAnyKb.value) {
     return '创建完成后即可在左侧选择文件并上传。'
+  }
+  if (!uploadBackendReady.value) {
+    return '当前上传解析依赖向量模型配置，完成后即可继续。'
   }
   if (isDocFilterActive.value) {
     return '清空筛选不会影响已上传文档。'
@@ -906,6 +925,11 @@ async function refreshDocs(options = {}) {
 }
 
 async function uploadDoc() {
+  if (!uploadBackendReady.value) {
+    showToast('先完成模型接入配置，再上传资料', 'error')
+    router.push('/settings')
+    return
+  }
   if (!uploadFile.value) return
   const file = uploadFile.value
   busy.value.upload = true

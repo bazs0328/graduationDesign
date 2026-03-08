@@ -62,7 +62,23 @@ async function ensureKbSelected(page) {
   const target = selectable[0]
   await kbSelect.selectOption(target.value)
   await expect(kbSelect).toHaveValue(target.value)
-  return target.value
+  return target
+}
+
+async function assertProgressKbContext(page, selectedKb) {
+  const summaryBar = page.getByTestId('context-summary-bar').first()
+  await expect(summaryBar).toBeVisible()
+  await expect(summaryBar).toContainText('当前资料范围')
+  await expect(summaryBar).toContainText('资料库')
+  await expect(summaryBar).toContainText(selectedKb.label)
+
+  const progressSection = page.getByTestId('progress-kb-stats-card')
+  if (await progressSection.count()) {
+    await expect(progressSection.locator('select')).toHaveValue(selectedKb.value)
+    return
+  }
+
+  await expect(page.getByText('先完成第一轮学习动作，再回来查看进度')).toBeVisible()
 }
 
 test.describe('App context sync', () => {
@@ -84,22 +100,20 @@ test.describe('App context sync', () => {
     await page.goto('/upload')
     await expect(page.getByTestId('upload-current-kb-card')).toBeVisible()
 
-    const selectedKbValue = await ensureKbSelected(page)
+    const selectedKb = await ensureKbSelected(page)
 
     await page.getByRole('link', { name: '问答' }).click()
     const qaCard = page.getByTestId('qa-scope-card')
-    await expect(qaCard.locator('select').first()).toHaveValue(selectedKbValue)
+    await expect(qaCard.locator('select').first()).toHaveValue(selectedKb.value)
 
     await page.getByRole('link', { name: '测验' }).click()
     const quizCard = page.getByTestId('quiz-setup-card')
-    await expect(quizCard.locator('select').first()).toHaveValue(selectedKbValue)
+    await expect(quizCard.locator('select').first()).toHaveValue(selectedKb.value)
 
     await page.getByRole('link', { name: '进度' }).click()
-    const progressSection = page.getByTestId('progress-kb-stats-card')
-    await expect(progressSection.locator('select')).toHaveValue(selectedKbValue)
+    await assertProgressKbContext(page, selectedKb)
 
     await page.reload()
-    await expect(page.getByTestId('progress-kb-stats-card')).toBeVisible()
-    await expect(progressSection.locator('select')).toHaveValue(selectedKbValue)
+    await assertProgressKbContext(page, selectedKb)
   })
 })

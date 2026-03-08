@@ -124,7 +124,7 @@ test('wrong answer can jump to QA explain mode and auto-send', async ({ page }) 
       )
     }
 
-    if (pathname === '/api/settings/system' && method === 'GET') {
+    if ((pathname === '/api/settings/system' || pathname === '/api/settings/advanced') && method === 'GET') {
       return route.fulfill(
         jsonResponse({
           editable_keys: [],
@@ -135,7 +135,7 @@ test('wrong answer can jump to QA explain mode and auto-send', async ({ page }) 
       )
     }
 
-    if (pathname === '/api/settings/system/providers' && method === 'GET') {
+    if ((pathname === '/api/settings/system/providers' || pathname === '/api/settings/provider') && method === 'GET') {
       return route.fulfill(
         jsonResponse({
           supported_llm_providers: ['auto', 'deepseek', 'qwen'],

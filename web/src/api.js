@@ -416,26 +416,33 @@ export async function resetSettings(payload) {
   return apiPost('/api/settings/reset', payload)
 }
 
-export async function getSystemSettings() {
-  return apiGet('/api/settings/system')
+export async function getAdvancedSettings() {
+  return apiGet('/api/settings/advanced')
 }
 
-export async function getSystemProviderSettings() {
-  return apiGet('/api/settings/system/providers')
+export async function getProviderSettings() {
+  return apiGet('/api/settings/provider')
 }
 
-export async function patchSystemSettings(payload) {
-  return apiPatch('/api/settings/system', payload)
+export async function patchAdvancedSettings(payload) {
+  return apiPatch('/api/settings/advanced', payload)
 }
 
-export async function patchSystemProviderSettings(payload) {
-  return apiPatch('/api/settings/system/providers', payload)
+export async function patchProviderSettings(payload) {
+  return apiPatch('/api/settings/provider', payload)
 }
 
-export async function resetSystemSettings(payload = {}) {
-  return apiPost('/api/settings/system/reset', payload)
+export async function resetAdvancedSettings(payload = {}) {
+  return apiPost('/api/settings/advanced/reset', payload)
 }
 
-export async function testSystemProviderSettings(payload) {
-  return apiPost('/api/settings/system/providers/test', payload)
+export async function testProviderSettings(payload) {
+  return apiPost('/api/settings/provider/test', payload)
 }
+
+export const getSystemSettings = getAdvancedSettings
+export const getSystemProviderSettings = getProviderSettings
+export const patchSystemSettings = patchAdvancedSettings
+export const patchSystemProviderSettings = patchProviderSettings
+export const resetSystemSettings = resetAdvancedSettings
+export const testSystemProviderSettings = testProviderSettings

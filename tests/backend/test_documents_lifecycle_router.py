@@ -52,6 +52,16 @@ def _seed_user_kbs_doc(db_session, *, user_id: str, kb_id: str, doc_id: str):
     return doc
 
 
+def _provider_ready_status():
+    return {
+        "llm_ready": False,
+        "embedding_ready": True,
+        "missing": [],
+        "current_llm_provider": "unconfigured",
+        "current_embedding_provider": "dashscope",
+    }
+
+
 def test_patch_doc_supports_rename_and_move(client, db_session):
     user_id = "doc_lifecycle_user_1"
     old_kb = "doc_kb_old"
@@ -161,6 +171,7 @@ def test_reprocess_doc_changes_status_and_triggers_task(client, db_session):
         patch("app.routers.documents.delete_doc_vectors", return_value=1),
         patch("app.routers.documents.remove_doc_chunks", return_value=1),
         patch("app.routers.documents.process_document_task") as task_mock,
+        patch("app.routers.documents.provider_setup_status", return_value=_provider_ready_status()),
     ):
         resp = client.post(
             f"/api/docs/{doc_id}/reprocess",
@@ -354,6 +365,7 @@ def test_doc_task_center_and_retry_failed(client, db_session):
         patch("app.routers.documents.delete_doc_vectors", return_value=1),
         patch("app.routers.documents.remove_doc_chunks", return_value=1),
         patch("app.routers.documents.process_document_task"),
+        patch("app.routers.documents.provider_setup_status", return_value=_provider_ready_status()),
     ):
         retry_resp = client.post(
             "/api/docs/retry-failed",
@@ -762,7 +774,10 @@ def test_upload_doc_accepts_docx_and_pptx(client):
     ]
 
     for idx, (filename, mime, expected_type) in enumerate(cases, start=1):
-        with patch("app.routers.documents.process_document_task") as task_mock:
+        with (
+            patch("app.routers.documents.process_document_task") as task_mock,
+            patch("app.routers.documents.provider_setup_status", return_value=_provider_ready_status()),
+        ):
             resp = client.post(
                 "/api/docs/upload",
                 data={"user_id": f"{user_id}_{idx}"},
@@ -778,11 +793,23 @@ def test_upload_doc_accepts_docx_and_pptx(client):
 
 
 def test_upload_doc_rejects_unsupported_legacy_office_format(client):
-    resp = client.post(
-        "/api/docs/upload",
-        data={"user_id": "doc_upload_legacy_office_user"},
-        files={"file": ("legacy.doc", io.BytesIO(b"legacy"), "application/msword")},
-    )
+    with patch("app.routers.documents.provider_setup_status", return_value=_provider_ready_status()):
+        resp = client.post(
+            "/api/docs/upload",
+            data={"user_id": "doc_upload_legacy_office_user"},
+            files={"file": ("legacy.doc", io.BytesIO(b"legacy"), "application/msword")},
+        )
 
     assert resp.status_code == 400
     assert "Unsupported file type" in resp.json()["detail"]
+
+
+def test_upload_doc_rejects_when_embedding_provider_not_ready(client):
+    resp = client.post(
+        "/api/docs/upload",
+        data={"user_id": "doc_upload_missing_provider_user"},
+        files={"file": ("notes.txt", io.BytesIO(b"matrix"), "text/plain")},
+    )
+
+    assert resp.status_code == 400
+    assert "向量模型配置" in resp.json()["detail"]

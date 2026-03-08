@@ -3,6 +3,7 @@ from fastapi import HTTPException
 
 from app.core.auth import get_request_user_id
 from app.core.config import settings
+from app.core.runtime_user_config import activate_runtime_settings_for_user
 from app.models import User
 
 DEFAULT_USER_ID = "default"
@@ -33,6 +34,12 @@ def ensure_user(db: Session, user_id: str | None) -> str:
         )
         db.add(user)
         db.commit()
+        db.refresh(user)
+    else:
+        db.refresh(user)
+
+    activate_runtime_settings_for_user(user)
+
     # Ensure a default knowledge base exists for the user
     from app.core.knowledge_bases import ensure_default_kb
 
