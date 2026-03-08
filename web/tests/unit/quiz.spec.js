@@ -459,6 +459,71 @@ describe('Quiz wrong-answer explain link', () => {
     const afterPlanCalls = getDifficultyPlan.mock.calls.length
     expect(afterPlanCalls).toBeGreaterThan(beforePlanCalls)
   })
+
+  it('marks missed correct options separately for multiple choice questions', async () => {
+    apiPost.mockImplementation((path) => {
+      if (path === '/api/quiz/generate') {
+        return Promise.resolve({
+          quiz_id: 'quiz-1',
+          questions: [
+            {
+              type: 'multiple_choice',
+              question: '哪些结论成立？',
+              options: ['条件一', '条件二', '条件三', '条件四'],
+              answer_indexes: [0, 2],
+              explanation: '条件一和条件三同时成立。',
+              concepts: ['命题判断'],
+            },
+          ],
+        })
+      }
+      if (path === '/api/quiz/submit') {
+        return Promise.resolve({
+          score: 0,
+          correct: 0,
+          total: 1,
+          results: [false],
+          explanations: ['你少选了一个正确项。'],
+          feedback: null,
+          next_quiz_recommendation: null,
+          profile_delta: null,
+          wrong_questions_by_concept: [{ concept: '命题判断', question_indices: [1] }],
+          mastery_updates: [],
+        })
+      }
+      return Promise.resolve({})
+    })
+
+    const { wrapper, router } = await mountAppWithRouter()
+
+    await openQuizAndSelectKb(wrapper, router)
+
+    const generateButton = wrapper.findAll('button').find((btn) => btn.text().includes('生成测验'))
+    expect(generateButton).toBeTruthy()
+    await generateButton.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const selectedCheckbox = wrapper.find('input[type="checkbox"][name="q-0"][value="0"]')
+    expect(selectedCheckbox.exists()).toBe(true)
+    await selectedCheckbox.setValue(true)
+    await nextTick()
+
+    const submitButton = wrapper.findAll('button').find((btn) => btn.text().includes('提交全部答案'))
+    expect(submitButton).toBeTruthy()
+    await submitButton.trigger('click')
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    await nextTick()
+
+    const optionLabels = wrapper.findAll('label')
+    const selectedCorrectLabel = optionLabels.find((node) => node.text().includes('条件一'))
+    const missedCorrectLabel = optionLabels.find((node) => node.text().includes('条件三'))
+
+    expect(selectedCorrectLabel?.text()).not.toContain('漏选')
+    expect(missedCorrectLabel?.text()).toContain('漏选')
+  })
 })
 
 describe('Quiz focus concept scoping', () => {

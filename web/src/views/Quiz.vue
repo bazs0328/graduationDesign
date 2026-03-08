@@ -482,8 +482,25 @@
                       class="quiz-option-markdown min-w-0 flex-1"
                       v-html="renderMarkdownInline(opt)"
                     ></span>
-                    <CheckCircle2 v-if="quizResult && isChoiceOptionCorrect(q, optIdx)" class="w-5 h-5 text-green-500 ml-auto" />
-                    <XCircle v-if="quizResult && isChoiceOptionWrongSelection(q, idx, optIdx)" class="w-5 h-5 text-destructive ml-auto" />
+                    <div
+                      v-if="quizResult && choiceOptionFeedbackVisible(q, idx, optIdx)"
+                      class="ml-auto flex items-center gap-2"
+                    >
+                      <span
+                        v-if="isChoiceOptionMissedCorrect(q, idx, optIdx)"
+                        class="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
+                      >
+                        漏选
+                      </span>
+                      <CheckCircle2
+                        v-else-if="isChoiceOptionCorrectIndicatorVisible(q, idx, optIdx)"
+                        class="w-5 h-5 text-green-500"
+                      />
+                      <XCircle
+                        v-else-if="isChoiceOptionWrongSelection(q, idx, optIdx)"
+                        class="w-5 h-5 text-destructive"
+                      />
+                    </div>
                   </label>
                 </div>
 
@@ -1106,8 +1123,26 @@ function isChoiceOptionCorrect(question, optionIndex) {
   return correctOptionIndexes(question).includes(optionIndex)
 }
 
+function isChoiceOptionMissedCorrect(question, questionIndex, optionIndex) {
+  return resolveQuestionType(question) === 'multiple_choice'
+    && isChoiceOptionCorrect(question, optionIndex)
+    && !isChoiceOptionSelected(question, questionIndex, optionIndex)
+}
+
+function isChoiceOptionCorrectIndicatorVisible(question, questionIndex, optionIndex) {
+  if (!isChoiceOptionCorrect(question, optionIndex)) return false
+  if (resolveQuestionType(question) !== 'multiple_choice') return true
+  return isChoiceOptionSelected(question, questionIndex, optionIndex)
+}
+
 function isChoiceOptionWrongSelection(question, questionIndex, optionIndex) {
   return isChoiceOptionSelected(question, questionIndex, optionIndex) && !isChoiceOptionCorrect(question, optionIndex)
+}
+
+function choiceOptionFeedbackVisible(question, questionIndex, optionIndex) {
+  return isChoiceOptionMissedCorrect(question, questionIndex, optionIndex)
+    || isChoiceOptionCorrectIndicatorVisible(question, questionIndex, optionIndex)
+    || isChoiceOptionWrongSelection(question, questionIndex, optionIndex)
 }
 
 function isTrueFalseOptionCorrect(question, optionIndex) {
@@ -1124,8 +1159,12 @@ function choiceOptionClass(question, questionIndex, optionIndex) {
   if (!quizResult.value) {
     return selected ? 'bg-primary/10 border-primary/30' : ''
   }
-  if (correct) return 'bg-green-500/10 border-green-500/30'
+  if (selected && correct) return 'bg-green-500/10 border-green-500/30'
   if (selected && !correct) return 'bg-destructive/10 border-destructive/30'
+  if (isChoiceOptionMissedCorrect(question, questionIndex, optionIndex)) {
+    return 'bg-amber-500/10 border-amber-500/40 border-dashed'
+  }
+  if (correct) return 'bg-green-500/10 border-green-500/30'
   return 'opacity-50 grayscale-[0.5]'
 }
 
