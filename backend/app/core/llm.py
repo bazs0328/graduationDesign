@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import dashscope
 from langchain_core.embeddings import Embeddings
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
 from openai import OpenAI
 
 from app.core.config import settings
 
-LLM_PROVIDERS = {"openai", "gemini", "deepseek", "qwen"}
-EMBEDDING_PROVIDERS = {"openai", "gemini", "qwen", "dashscope"}
-LLM_AUTO_PRIORITY = ("qwen", "openai", "deepseek", "gemini")
-EMBEDDING_AUTO_FALLBACK_PRIORITY = ("openai", "qwen", "dashscope", "gemini")
+LLM_PROVIDERS = {"deepseek", "qwen"}
+EMBEDDING_PROVIDERS = {"qwen", "dashscope"}
+LLM_AUTO_PRIORITY = ("qwen", "deepseek")
+EMBEDDING_AUTO_FALLBACK_PRIORITY = ("qwen", "dashscope")
+LEGACY_LLM_PROVIDERS = {"openai", "gemini"}
+LEGACY_EMBEDDING_PROVIDERS = {"openai", "gemini", "deepseek"}
 _UNCONFIGURED_PROVIDER = "unconfigured"
 
 
@@ -91,7 +92,9 @@ def _normalize_provider(value: str | None, *, kind: str) -> str:
     normalized = str(value or "").strip().lower() or "auto"
     if kind == "embedding" and normalized in {"qwen_vl", "qwen3_vl"}:
         return "dashscope"
-    if kind == "embedding" and normalized == "deepseek":
+    if kind == "llm" and normalized in LEGACY_LLM_PROVIDERS:
+        return "auto"
+    if kind == "embedding" and normalized in LEGACY_EMBEDDING_PROVIDERS:
         return "auto"
     return normalized
 
@@ -101,29 +104,21 @@ def _is_configured(text: str | None) -> bool:
 
 
 def _llm_provider_ready(provider: str) -> bool:
-    if provider == "openai":
-        return _is_configured(settings.openai_api_key)
     if provider == "deepseek":
         return _is_configured(settings.deepseek_api_key)
-    if provider == "gemini":
-        return _is_configured(settings.google_api_key)
     if provider == "qwen":
         return _is_configured(settings.qwen_api_key)
     return False
 
 
 def _embedding_provider_ready(provider: str) -> bool:
-    if provider == "openai":
-        return _is_configured(settings.openai_api_key)
     if provider in {"qwen", "dashscope"}:
         return _is_configured(settings.qwen_api_key)
-    if provider == "gemini":
-        return _is_configured(settings.google_api_key)
     return False
 
 
 def _embedding_provider_following_llm(provider: str | None) -> str | None:
-    if provider in {"openai", "qwen", "gemini"}:
+    if provider == "qwen":
         return provider
     return None
 
@@ -135,21 +130,14 @@ def resolve_llm_provider(*, strict: bool = True) -> tuple[str, str, str]:
             if _llm_provider_ready(provider):
                 return provider, configured, "auto"
         if strict:
-            raise ValueError(
-                "No LLM provider is available. Configure one of "
-                "QWEN_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY / GOOGLE_API_KEY."
-            )
+            raise ValueError("No LLM provider is available. Configure QWEN_API_KEY or DEEPSEEK_API_KEY.")
         return _UNCONFIGURED_PROVIDER, configured, "auto"
 
     if configured not in LLM_PROVIDERS:
         raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
     if strict and not _llm_provider_ready(configured):
-        if configured == "openai":
-            raise ValueError("OPENAI_API_KEY is not set")
         if configured == "deepseek":
             raise ValueError("DEEPSEEK_API_KEY is not set")
-        if configured == "gemini":
-            raise ValueError("GOOGLE_API_KEY is not set")
         if configured == "qwen":
             raise ValueError("QWEN_API_KEY is not set")
     return configured, configured, "manual"
@@ -173,22 +161,15 @@ def resolve_embedding_provider(*, strict: bool = True, resolved_llm_provider: st
                 return provider, configured, "auto"
 
         if strict:
-            raise ValueError(
-                "No embedding provider is available. Configure one of "
-                "OPENAI_API_KEY / QWEN_API_KEY / GOOGLE_API_KEY."
-            )
+            raise ValueError("No embedding provider is available. Configure QWEN_API_KEY.")
         return _UNCONFIGURED_PROVIDER, configured, "auto"
 
     if configured not in EMBEDDING_PROVIDERS:
         raise ValueError(f"Unsupported embedding provider: {settings.embedding_provider}")
 
     if strict and not _embedding_provider_ready(configured):
-        if configured == "openai":
-            raise ValueError("OPENAI_API_KEY is not set")
         if configured in {"qwen", "dashscope"}:
             raise ValueError("QWEN_API_KEY is not set")
-        if configured == "gemini":
-            raise ValueError("GOOGLE_API_KEY is not set")
     return configured, configured, "manual"
 
 
@@ -215,23 +196,11 @@ def embedding_provider_status(*, resolved_llm_provider: str | None = None) -> di
 
 def get_llm(temperature: float = 0.2):
     provider, _, _ = resolve_llm_provider(strict=True)
-    if provider == "openai":
-        return ChatOpenAI(
-            api_key=settings.openai_api_key,
-            model=settings.openai_model,
-            temperature=temperature,
-        )
     if provider == "deepseek":
         return ChatOpenAI(
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
             model=settings.deepseek_model,
-            temperature=temperature,
-        )
-    if provider == "gemini":
-        return ChatGoogleGenerativeAI(
-            google_api_key=settings.google_api_key,
-            model=settings.gemini_model,
             temperature=temperature,
         )
     if provider == "qwen":
@@ -252,11 +221,6 @@ def get_embeddings():
         strict=True,
         resolved_llm_provider=llm_provider,
     )
-    if provider == "openai":
-        return OpenAIEmbeddings(
-            api_key=settings.openai_api_key,
-            model=settings.openai_embedding_model,
-        )
     if provider == "qwen":
         return QwenEmbeddings(
             api_key=settings.qwen_api_key,
@@ -264,15 +228,9 @@ def get_embeddings():
             model=settings.qwen_embedding_model,
         )
     if provider == "dashscope":
-        # Use international endpoint if configured, otherwise use default (China region)
         return DashScopeVLEmbeddings(
             api_key=settings.qwen_api_key,
             model=settings.dashscope_embedding_model,
             base_url=settings.dashscope_base_url,
-        )
-    if provider == "gemini":
-        return GoogleGenerativeAIEmbeddings(
-            google_api_key=settings.google_api_key,
-            model=settings.gemini_embedding_model,
         )
     raise ValueError(f"Unsupported embedding provider: {provider}")

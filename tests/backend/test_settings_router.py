@@ -2,6 +2,7 @@
 
 import json
 
+from app.core import bootstrap_config
 from app.core.config import settings
 from app.core import provider_config
 from app.models import KnowledgeBase, User
@@ -52,9 +53,11 @@ def test_get_settings_returns_defaults_and_system_status_without_secret_values(c
     assert data["system_status"]["embedding_provider_configured"] == "dashscope"
     assert data["system_status"]["llm_provider_source"] == "manual"
     assert data["system_status"]["embedding_provider_source"] == "manual"
-    assert "openai_api_key" not in data["system_status"]
     assert isinstance(data["system_status"]["secrets_configured"], dict)
-    assert data["system_status"]["qa_defaults_from_env"]["qa_dynamic_window_enabled"] is True
+    assert data["system_status"]["secrets_configured"]["qwen_api_key"] is True
+    assert data["system_status"]["secrets_configured"]["auth_secret_key_configured"] is True
+    assert data["system_status"]["qa_defaults"]["qa_dynamic_window_enabled"] is True
+    assert data["system_status"]["notices"] == []
 
     effective = data["effective"]
     assert effective["qa"]["retrieval_preset"] == "balanced"
@@ -261,9 +264,9 @@ def test_system_settings_patch_and_reset_runtime_overrides(client):
     status = client.get("/api/settings", headers=headers)
     assert status.status_code == 200
     status_data = status.json()
-    assert status_data["system_status"]["qa_defaults_from_env"]["rag_mode"] == "dense"
-    assert status_data["system_status"]["qa_defaults_from_env"]["qa_top_k"] == 9
-    assert status_data["system_status"]["qa_defaults_from_env"]["qa_dynamic_window_enabled"] is False
+    assert status_data["system_status"]["qa_defaults"]["rag_mode"] == "dense"
+    assert status_data["system_status"]["qa_defaults"]["qa_top_k"] == 9
+    assert status_data["system_status"]["qa_defaults"]["qa_dynamic_window_enabled"] is False
 
     reset = client.post("/api/settings/system/reset", json={"keys": ["rag_mode", "qa_top_k", "qa_fetch_k", "qa_dynamic_window_enabled"]}, headers=headers)
     assert reset.status_code == 200
@@ -433,9 +436,52 @@ def test_provider_settings_test_endpoint_uses_draft_without_persisting(
     assert calls["target"] == "llm"
     assert calls["values"]["deepseek"]["api_key"] == "preview-only-key"
 
-    assert not (isolated_provider_data_dir / "system_provider_config.json").exists()
+    stored_path = isolated_provider_data_dir / "system_provider_config.json"
+    assert not stored_path.exists()
 
     get_resp = client.get("/api/settings/system/providers", headers=headers)
     assert get_resp.status_code == 200
     get_data = get_resp.json()
     assert get_data["effective"]["deepseek"]["api_key_configured"] is False
+
+
+def test_startup_generates_bootstrap_auth_secret(isolated_provider_data_dir, monkeypatch):
+    monkeypatch.setattr(settings, "auth_secret_key", "gradtutor-dev-secret")
+
+    state = bootstrap_config.ensure_bootstrap_config()
+
+    bootstrap_path = isolated_provider_data_dir / "system_bootstrap.json"
+    assert bootstrap_path.exists()
+    stored = json.loads(bootstrap_path.read_text(encoding="utf-8"))
+    assert stored["auth_secret_key"] == state["auth_secret_key"]
+    assert stored["auth_secret_key"] == settings.auth_secret_key
+    assert stored["auth_secret_key"] != "gradtutor-dev-secret"
+
+
+def test_startup_migrates_env_values_to_provider_and_override_files(isolated_provider_data_dir, monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "qwen")
+    monkeypatch.setattr(settings, "embedding_provider", "dashscope")
+    monkeypatch.setattr(settings, "qwen_api_key", "migrated-qwen-key")
+    monkeypatch.setattr(settings, "qwen_base_url", "https://migrate.example.com/compatible-mode/v1")
+    monkeypatch.setattr(settings, "dashscope_base_url", "https://migrate.example.com/api/v1")
+    monkeypatch.setattr(settings, "qa_top_k", 9)
+    monkeypatch.setattr(settings, "rag_mode", "dense")
+
+    result = bootstrap_config.run_startup_migrations()
+
+    provider_path = isolated_provider_data_dir / "system_provider_config.json"
+    overrides_path = isolated_provider_data_dir / "system_overrides.json"
+    assert provider_path.exists()
+    assert overrides_path.exists()
+
+    provider_data = json.loads(provider_path.read_text(encoding="utf-8"))
+    overrides_data = json.loads(overrides_path.read_text(encoding="utf-8"))
+
+    assert result["provider_config"]["qwen"]["api_key"] == "migrated-qwen-key"
+    assert provider_data["llm_provider"] == "qwen"
+    assert provider_data["embedding_provider"] == "dashscope"
+    assert provider_data["qwen"]["api_key"] == "migrated-qwen-key"
+    assert provider_data["qwen"]["base_url"] == "https://migrate.example.com/compatible-mode/v1"
+    assert provider_data["dashscope"]["base_url"] == "https://migrate.example.com/api/v1"
+    assert overrides_data["qa_top_k"] == 9
+    assert overrides_data["rag_mode"] == "dense"

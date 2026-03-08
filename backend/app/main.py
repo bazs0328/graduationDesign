@@ -8,6 +8,7 @@ from app.core.auth import (
     set_request_user_id,
     verify_access_token,
 )
+from app.core.bootstrap_config import ensure_bootstrap_config, run_startup_migrations
 from app.core.config import settings
 from app.core.paths import ensure_data_dirs
 from app.core.provider_config import load_provider_config
@@ -34,6 +35,8 @@ from app.routers import (
 
 def create_app() -> FastAPI:
     ensure_data_dirs()
+    ensure_bootstrap_config()
+    run_startup_migrations()
     load_system_overrides()
     load_provider_config()
     Base.metadata.create_all(bind=engine)

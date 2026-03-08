@@ -12,14 +12,13 @@ This project implements a personalized learning assistant inspired by the DeepTu
 ## Tech Stack
 - Backend: FastAPI + SQLite + LangChain + Chroma
 - Frontend: Vue 3 (Vite)
-- LLM: OpenAI or Gemini (configurable)
+- LLM: DeepSeek / Qwen / DashScope（学生路径通过设置页配置）
 
 ## Quick Start
 
 ### Backend (Docker, recommended)
 ```bash
 cp backend/.env.example backend/.env
-# edit backend/.env with your API key
 # first-time start / Dockerfile changed / system deps changed
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 # normal daily start (no image rebuild)
@@ -59,18 +58,19 @@ npm install <package-name>
 Open the UI at http://localhost:5173
 
 ## Configuration
-Backend settings are in `backend/.env`.
 
-### Minimal setup (recommended)
-1) Copy `backend/.env.example` to `backend/.env`.
-2) Keep `LLM_PROVIDER=auto` and `EMBEDDING_PROVIDER=auto`.
-3) Fill at least one key: `OPENAI_API_KEY` / `QWEN_API_KEY` / `GOOGLE_API_KEY` / `DEEPSEEK_API_KEY`.
+### Student path (recommended)
+1. `cp backend/.env.example backend/.env` is optional.
+2. Start backend and frontend directly.
+3. Open `设置中心 -> 模型接入`.
+4. Fill DeepSeek / Qwen / DashScope related settings there.
 
-### Advanced setup
-- Prefer frontend configuration: `设置中心 -> 高级设置与诊断 -> 系统高级参数（可编辑）`.
-- Most advanced runtime tuning can now be done in frontend form controls (switch/number/select/text).
-- `backend/.env.advanced.example` remains only as a fallback template for headless/server-only deployments.
-- Existing `.env` files remain compatible (no mandatory migration).
+Students no longer need to keep API keys or common runtime tuning inside `.env`. These values are persisted locally after saving in the settings page.
+
+### Deployer path (optional)
+- Use `backend/.env` only when you need deploy-level overrides such as `DATA_DIR`, `AUTH_SECRET_KEY`, or `AUTH_TOKEN_TTL_HOURS`.
+- Additional deploy-level switches such as `APP_NAME`, `AUTH_REQUIRE_LOGIN`, and `AUTH_ALLOW_LEGACY_USER_ID` are also listed in `backend/.env.example`.
+- Existing old `.env` files remain startup-compatible; supported DeepSeek / Qwen / DashScope values are migrated into local persistent config on startup.
 
 ## OCR Dependencies (Local Development)
 
@@ -144,7 +144,8 @@ python3 /app/tests/qa_regression.py \
 ```
 5) 配置规范
 - 只保留 `backend/.env`，根目录不再放 `.env`
-- LLM/Embedding 配置统一在 `backend/.env`
+- 普通学生路径下，LLM/Embedding 配置统一在设置页本地持久化
+- `backend/.env` 只保留部署级可选覆盖项
 
 ## API (Quiz)
 - **POST /api/quiz/generate**: Generates quiz paper. Requires at least one of:

@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import threading
 import types
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, get_args, get_origin
 
 from app.core.config import Settings, settings
 
-# Keep secrets and storage paths in env only; expose non-secret system tuning knobs.
+# Student-facing runtime tuning belongs in persisted overrides, not `.env`.
 EDITABLE_SYSTEM_KEYS: tuple[str, ...] = (
     "auth_require_login",
     "auth_allow_legacy_user_id",
@@ -82,8 +83,8 @@ _GROUP_LABELS: dict[str, str] = {
 }
 
 _ENUM_OPTIONS: dict[str, tuple[Any, ...]] = {
-    "llm_provider": ("auto", "openai", "gemini", "deepseek", "qwen"),
-    "embedding_provider": ("auto", "openai", "gemini", "qwen", "dashscope"),
+    "llm_provider": ("auto", "deepseek", "qwen"),
+    "embedding_provider": ("auto", "qwen", "dashscope"),
     "index_text_cleanup_mode": ("balanced", "conservative", "aggressive", "structure_preserving"),
     "index_text_cleanup_non_pdf_mode": ("balanced", "conservative", "aggressive", "structure_preserving"),
     "noise_filter_level": ("balanced", "conservative", "aggressive", "structure_preserving"),
@@ -95,15 +96,11 @@ _ENUM_OPTIONS: dict[str, tuple[Any, ...]] = {
 _OPTION_LABELS: dict[str, dict[Any, str]] = {
     "llm_provider": {
         "auto": "自动选择",
-        "openai": "OpenAI",
-        "gemini": "Gemini",
         "deepseek": "DeepSeek",
         "qwen": "Qwen",
     },
     "embedding_provider": {
         "auto": "自动选择",
-        "openai": "OpenAI",
-        "gemini": "Gemini",
         "qwen": "Qwen",
         "dashscope": "DashScope",
     },
@@ -166,10 +163,6 @@ _NUMBER_CONSTRAINTS: dict[str, dict[str, float]] = {
 _SETTING_LABELS: dict[str, str] = {
     "llm_provider": "对话模型提供商",
     "embedding_provider": "向量模型提供商",
-    "openai_model": "OpenAI 对话模型",
-    "openai_embedding_model": "OpenAI 向量模型",
-    "gemini_model": "Gemini 对话模型",
-    "gemini_embedding_model": "Gemini 向量模型",
     "deepseek_base_url": "DeepSeek 基础地址",
     "deepseek_model": "DeepSeek 对话模型",
     "qwen_base_url": "Qwen 基础地址",
@@ -335,7 +328,7 @@ def _coerce_value(key: str, value: Any) -> Any:
 
 
 def _apply_overrides(overrides: dict[str, Any]) -> None:
-    # Always start from env-derived baseline; then apply runtime overrides.
+    # Always start from env/bootstrap baseline; then apply persisted runtime overrides.
     for key, base in _BASE_VALUES.items():
         setattr(settings, key, base)
     for key, value in overrides.items():
@@ -395,7 +388,7 @@ def _group_for_key(key: str) -> str:
         return "quiz_context"
     if key in {"llm_provider", "embedding_provider"}:
         return "providers"
-    if key.startswith(("openai_", "gemini_", "deepseek_", "qwen_", "dashscope_")):
+    if key.startswith(("deepseek_", "qwen_", "dashscope_")):
         return "providers"
     if key.startswith(("chunk_", "index_", "noise_", "qa_", "rag_")):
         return "retrieval"
@@ -470,6 +463,26 @@ def load_system_overrides() -> dict[str, Any]:
         overrides = _load_file_overrides()
         _apply_overrides(overrides)
         return dict(overrides)
+
+
+def backfill_system_overrides_from_runtime(default_values: dict[str, Any] | None = None) -> dict[str, Any]:
+    with _LOCK:
+        current = _load_file_overrides()
+        changed = False
+        defaults = default_values or {}
+
+        for key in EDITABLE_SYSTEM_KEYS:
+            if key in current:
+                continue
+            runtime_value = getattr(settings, key)
+            default_value = defaults.get(key, Settings.model_fields[key].default)
+            if runtime_value != default_value:
+                current[key] = deepcopy(runtime_value)
+                changed = True
+
+        if changed:
+            _persist_overrides(current)
+        return dict(current)
 
 
 def patch_system_overrides(patch: dict[str, Any]) -> dict[str, Any]:

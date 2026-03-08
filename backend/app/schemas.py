@@ -96,12 +96,13 @@ class SettingsSystemStatus(BaseModel):
     embedding_provider_configured: Optional[str] = None
     llm_provider_source: Optional[Literal["auto", "manual"]] = None
     embedding_provider_source: Optional[Literal["auto", "manual"]] = None
-    qa_defaults_from_env: Dict[str, Any] = {}
+    qa_defaults: Dict[str, Any] = {}
     ocr_enabled: bool
     pdf_parser_mode: str
     auth_require_login: bool
     secrets_configured: Dict[str, bool] = {}
     provider_setup: Optional["ProviderSetupStatus"] = None
+    notices: List[str] = []
     version_info: Dict[str, Any] = {}
 
 

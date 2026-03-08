@@ -9,7 +9,7 @@ from typing import Any, Iterator
 
 from openai import OpenAI
 
-from app.core.config import settings
+from app.core.config import Settings, settings
 from app.core.llm import (
     _UNCONFIGURED_PROVIDER,
     embedding_provider_status,
@@ -55,14 +55,9 @@ DASHSCOPE_REGION_PRESETS: dict[str, dict[str, str | None]] = {
 PROVIDER_RUNTIME_KEYS: tuple[str, ...] = (
     "llm_provider",
     "embedding_provider",
-    "openai_model",
-    "openai_embedding_model",
-    "gemini_model",
-    "gemini_embedding_model",
     "deepseek_api_key",
     "deepseek_base_url",
     "deepseek_model",
-    "deepseek_embedding_model",
     "qwen_api_key",
     "qwen_base_url",
     "qwen_model",
@@ -74,13 +69,8 @@ PROVIDER_RUNTIME_KEYS: tuple[str, ...] = (
 LEGACY_PROVIDER_FALLBACK_KEYS: tuple[str, ...] = (
     "llm_provider",
     "embedding_provider",
-    "openai_model",
-    "openai_embedding_model",
-    "gemini_model",
-    "gemini_embedding_model",
     "deepseek_base_url",
     "deepseek_model",
-    "deepseek_embedding_model",
     "qwen_base_url",
     "qwen_model",
     "qwen_embedding_model",
@@ -136,7 +126,14 @@ def _normalize_region(value: Any) -> str | None:
 
 def _normalize_embedding_provider_choice(value: Any) -> str | None:
     text = _normalize_text(value)
-    if text == "deepseek":
+    if text in {"deepseek", "openai", "gemini"}:
+        return "auto"
+    return text
+
+
+def _normalize_llm_provider_choice(value: Any) -> str | None:
+    text = _normalize_text(value)
+    if text in {"openai", "gemini"}:
         return "auto"
     return text
 
@@ -181,7 +178,7 @@ def _normalize_persisted_config(raw: dict[str, Any] | None) -> dict[str, Any]:
 
     normalized: dict[str, Any] = {}
 
-    llm_provider = _normalize_text(data.get("llm_provider"))
+    llm_provider = _normalize_llm_provider_choice(data.get("llm_provider"))
     if llm_provider in SUPPORTED_LLM_PROVIDERS:
         normalized["llm_provider"] = llm_provider
 
@@ -196,8 +193,6 @@ def _normalize_persisted_config(raw: dict[str, Any] | None) -> dict[str, Any]:
         deepseek_block["base_url"] = _normalize_text(deepseek.get("base_url"))
     if "model" in deepseek:
         deepseek_block["model"] = _normalize_text(deepseek.get("model"))
-    if "embedding_model" in deepseek:
-        deepseek_block["embedding_model"] = _normalize_text(deepseek.get("embedding_model"))
     if deepseek_block:
         normalized["deepseek"] = deepseek_block
 
@@ -253,13 +248,23 @@ def _load_legacy_provider_fallbacks() -> dict[str, Any]:
     fallback: dict[str, Any] = {}
     for key in LEGACY_PROVIDER_FALLBACK_KEYS:
         if key in raw:
-            fallback[key] = raw[key]
+            if key == "llm_provider":
+                fallback[key] = _normalize_llm_provider_choice(raw[key])
+            elif key == "embedding_provider":
+                fallback[key] = _normalize_embedding_provider_choice(raw[key])
+            else:
+                fallback[key] = raw[key]
     return fallback
 
 
 def _apply_provider_values(config: dict[str, Any]) -> None:
     for key, value in _BASE_PROVIDER_VALUES.items():
-        setattr(settings, key, value)
+        if key == "llm_provider":
+            setattr(settings, key, _normalize_llm_provider_choice(value) or "auto")
+        elif key == "embedding_provider":
+            setattr(settings, key, _normalize_embedding_provider_choice(value) or "auto")
+        else:
+            setattr(settings, key, value)
 
     for key, value in _load_legacy_provider_fallbacks().items():
         setattr(settings, key, value)
@@ -276,8 +281,6 @@ def _apply_provider_values(config: dict[str, Any]) -> None:
         settings.deepseek_base_url = deepseek.get("base_url")
     if "model" in deepseek and deepseek.get("model") is not None:
         settings.deepseek_model = deepseek.get("model")
-    if "embedding_model" in deepseek:
-        settings.deepseek_embedding_model = deepseek.get("embedding_model")
 
     qwen = config.get("qwen") if isinstance(config.get("qwen"), dict) else {}
     if "api_key" in qwen:
@@ -303,6 +306,132 @@ def load_provider_config() -> dict[str, Any]:
         return deepcopy(config)
 
 
+def _seed_provider_block_from_runtime(current: dict[str, Any], runtime_values: dict[str, Any], *, allow_region: bool = False) -> dict[str, Any]:
+    next_block = deepcopy(current or {})
+
+    for key in ("api_key", "base_url", "model", "embedding_model"):
+        if key in next_block:
+            continue
+        runtime_value = _normalize_text(runtime_values.get(key))
+        if runtime_value is not None:
+            next_block[key] = runtime_value
+
+    if allow_region and "region" not in next_block:
+        runtime_region = _normalize_region(runtime_values.get("region"))
+        if runtime_region is not None:
+            next_block["region"] = runtime_region
+
+    return next_block
+
+
+def _model_default(key: str) -> Any:
+    field = Settings.model_fields[key]
+    if field.default_factory is not None:
+        return field.default_factory()
+    return deepcopy(field.default)
+
+
+def backfill_provider_config_from_runtime() -> dict[str, Any]:
+    with _LOCK:
+        current = _load_persisted_provider_config()
+        merged = deepcopy(current)
+        changed = False
+
+        llm_provider = _normalize_llm_provider_choice(settings.llm_provider)
+        if (
+            "llm_provider" not in merged
+            and llm_provider in SUPPORTED_LLM_PROVIDERS
+            and llm_provider != _normalize_llm_provider_choice(_model_default("llm_provider"))
+        ):
+            merged["llm_provider"] = llm_provider
+            changed = True
+
+        embedding_provider = _normalize_embedding_provider_choice(settings.embedding_provider)
+        if (
+            "embedding_provider" not in merged
+            and embedding_provider in SUPPORTED_EMBEDDING_PROVIDERS
+            and embedding_provider != _normalize_embedding_provider_choice(_model_default("embedding_provider"))
+        ):
+            merged["embedding_provider"] = embedding_provider
+            changed = True
+
+        deepseek_block = _seed_provider_block_from_runtime(
+            merged.get("deepseek", {}),
+            {
+                "api_key": _normalize_text(settings.deepseek_api_key),
+                "base_url": (
+                    settings.deepseek_base_url
+                    if _normalize_text(settings.deepseek_base_url) != _normalize_text(_model_default("deepseek_base_url"))
+                    else None
+                ),
+                "model": settings.deepseek_model if _normalize_text(settings.deepseek_model) != _normalize_text(_model_default("deepseek_model")) else None,
+            },
+        )
+        if deepseek_block and deepseek_block != merged.get("deepseek", {}):
+            merged["deepseek"] = deepseek_block
+            changed = True
+
+        qwen_block = _seed_provider_block_from_runtime(
+            merged.get("qwen", {}),
+            {
+                "api_key": _normalize_text(settings.qwen_api_key),
+                "base_url": (
+                    settings.qwen_base_url
+                    if _normalize_text(settings.qwen_base_url) != _normalize_text(_model_default("qwen_base_url"))
+                    else None
+                ),
+                "model": settings.qwen_model if _normalize_text(settings.qwen_model) != _normalize_text(_model_default("qwen_model")) else None,
+                "embedding_model": (
+                    settings.qwen_embedding_model
+                    if _normalize_text(settings.qwen_embedding_model) != _normalize_text(_model_default("qwen_embedding_model"))
+                    else None
+                ),
+                "region": (
+                    _resolve_qwen_region(settings.qwen_base_url)
+                    if _normalize_text(settings.qwen_base_url) != _normalize_text(_model_default("qwen_base_url"))
+                    else None
+                ),
+            },
+            allow_region=True,
+        )
+        if qwen_block and qwen_block != merged.get("qwen", {}):
+            merged["qwen"] = qwen_block
+            changed = True
+
+        dashscope_base_url = _normalize_text(settings.dashscope_base_url) or str(
+            DASHSCOPE_REGION_PRESETS["china"]["base_url"] or ""
+        )
+        dashscope_block = _seed_provider_block_from_runtime(
+            merged.get("dashscope", {}),
+            {
+                "base_url": (
+                    dashscope_base_url
+                    if _normalize_text(settings.dashscope_base_url) != _normalize_text(_model_default("dashscope_base_url"))
+                    else None
+                ),
+                "embedding_model": (
+                    settings.dashscope_embedding_model
+                    if _normalize_text(settings.dashscope_embedding_model) != _normalize_text(_model_default("dashscope_embedding_model"))
+                    else None
+                ),
+                "region": (
+                    _resolve_dashscope_region(dashscope_base_url)
+                    if _normalize_text(settings.dashscope_base_url) != _normalize_text(_model_default("dashscope_base_url"))
+                    else None
+                ),
+            },
+            allow_region=True,
+        )
+        if dashscope_block and dashscope_block != merged.get("dashscope", {}):
+            merged["dashscope"] = dashscope_block
+            changed = True
+
+        normalized = _normalize_persisted_config(merged)
+        if changed and normalized != current:
+            _persist_json_file(_provider_file_path(), normalized)
+        return deepcopy(normalized)
+
+
 def _provider_missing_fields(provider: str, *, target: str) -> list[str]:
     missing: list[str] = []
     if target == "llm":
@@ -320,10 +449,6 @@ def _provider_missing_fields(provider: str, *, target: str) -> list[str]:
                 missing.append("qwen.base_url")
             if not _normalize_text(settings.qwen_model):
                 missing.append("qwen.model")
-        elif provider == "openai" and not _normalize_text(settings.openai_api_key):
-            missing.append("openai.api_key")
-        elif provider == "gemini" and not _normalize_text(settings.google_api_key):
-            missing.append("gemini.api_key")
         elif provider == _UNCONFIGURED_PROVIDER:
             missing.extend(["deepseek.api_key", "qwen.api_key"])
         return missing
@@ -345,10 +470,6 @@ def _provider_missing_fields(provider: str, *, target: str) -> list[str]:
             missing.append("dashscope.base_url")
         if not _normalize_text(settings.dashscope_embedding_model):
             missing.append("dashscope.embedding_model")
-    elif provider == "openai" and not _normalize_text(settings.openai_api_key):
-        missing.append("openai.api_key")
-    elif provider == "gemini" and not _normalize_text(settings.google_api_key):
-        missing.append("gemini.api_key")
     elif provider == _UNCONFIGURED_PROVIDER:
         missing.extend(_provider_missing_fields("qwen", target="embedding"))
     return missing
@@ -377,18 +498,31 @@ def provider_setup_status() -> dict[str, Any]:
     }
 
 
-def _is_read_only_effective_provider() -> str | None:
-    setup = provider_setup_status()
-    llm_provider = setup["current_llm_provider"]
-    embedding_provider = setup["current_embedding_provider"]
-    if llm_provider in {"openai", "gemini"} or embedding_provider in {"openai", "gemini"}:
-        return "当前生效 provider 为 OpenAI/Gemini，本期前端基础配置仅支持国产系，请继续通过 backend/.env 维护。"
-    return None
+def get_provider_compatibility_notices() -> list[str]:
+    notices: list[str] = []
+    current_llm_provider = _normalize_text(settings.llm_provider)
+    current_embedding_provider = _normalize_text(settings.embedding_provider)
+    base_llm_provider = _normalize_text(_BASE_PROVIDER_VALUES.get("llm_provider"))
+    base_embedding_provider = _normalize_text(_BASE_PROVIDER_VALUES.get("embedding_provider"))
+    raw_llm_provider = current_llm_provider if current_llm_provider in {"openai", "gemini"} else base_llm_provider
+    raw_embedding_provider = (
+        current_embedding_provider if current_embedding_provider in {"openai", "gemini"} else base_embedding_provider
+    )
+
+    if raw_llm_provider in {"openai", "gemini"}:
+        notices.append(
+            f"检测到旧的对话 provider 配置 {raw_llm_provider}，学生设置页已不再提供该选项，系统已自动降级为 auto。"
+        )
+    if raw_embedding_provider in {"openai", "gemini"}:
+        notices.append(
+            f"检测到旧的向量 provider 配置 {raw_embedding_provider}，学生设置页已不再提供该选项，系统已自动降级为 auto。"
+        )
+    return notices
 
 
 def get_provider_config_payload() -> dict[str, Any]:
     setup = provider_setup_status()
-    effective_llm_provider = _normalize_text(settings.llm_provider) or "auto"
+    effective_llm_provider = _normalize_llm_provider_choice(settings.llm_provider) or "auto"
     effective_embedding_provider = _normalize_embedding_provider_choice(settings.embedding_provider) or "auto"
     qwen_base_url = _normalize_text(settings.qwen_base_url)
     dashscope_base_url = _normalize_text(settings.dashscope_base_url) or str(
@@ -396,8 +530,8 @@ def get_provider_config_payload() -> dict[str, Any]:
     )
 
     return {
-        "editable": _is_read_only_effective_provider() is None,
-        "read_only_reason": _is_read_only_effective_provider(),
+        "editable": True,
+        "read_only_reason": None,
         "supported_llm_providers": list(SUPPORTED_LLM_PROVIDERS),
         "supported_embedding_providers": list(SUPPORTED_EMBEDDING_PROVIDERS),
         "region_presets": {
@@ -456,8 +590,9 @@ def _merge_provider_block(current: dict[str, Any], patch: dict[str, Any] | None,
 
 def _merge_provider_config(current: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
     merged = deepcopy(current or {})
-    if "llm_provider" in values and _normalize_text(values.get("llm_provider")) in SUPPORTED_LLM_PROVIDERS:
-        merged["llm_provider"] = _normalize_text(values.get("llm_provider"))
+    normalized_llm_provider = _normalize_llm_provider_choice(values.get("llm_provider"))
+    if "llm_provider" in values and normalized_llm_provider in SUPPORTED_LLM_PROVIDERS:
+        merged["llm_provider"] = normalized_llm_provider
     normalized_embedding_provider = _normalize_embedding_provider_choice(values.get("embedding_provider"))
     if "embedding_provider" in values and normalized_embedding_provider in SUPPORTED_EMBEDDING_PROVIDERS:
         merged["embedding_provider"] = normalized_embedding_provider

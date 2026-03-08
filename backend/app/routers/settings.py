@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.core.knowledge_bases import ensure_kb
 from app.core.llm import embedding_provider_status, llm_provider_status
 from app.core.provider_config import (
+    get_provider_compatibility_notices,
     get_provider_config_payload,
     patch_provider_config,
     provider_setup_status,
@@ -149,11 +150,9 @@ def _system_status() -> SettingsSystemStatus:
     llm_status = llm_provider_status()
     embedding_status = embedding_provider_status(resolved_llm_provider=llm_status["resolved"])
     secrets_configured = {
-        "openai_api_key": bool(settings.openai_api_key),
-        "google_api_key": bool(settings.google_api_key),
         "deepseek_api_key": bool(settings.deepseek_api_key),
         "qwen_api_key": bool(settings.qwen_api_key),
-        "auth_secret_key_customized": bool(settings.auth_secret_key and settings.auth_secret_key != "gradtutor-dev-secret"),
+        "auth_secret_key_configured": bool(settings.auth_secret_key),
     }
     return SettingsSystemStatus(
         llm_provider=llm_status["resolved"],
@@ -162,7 +161,7 @@ def _system_status() -> SettingsSystemStatus:
         embedding_provider_configured=embedding_status["configured"],
         llm_provider_source=llm_status["source"],
         embedding_provider_source=embedding_status["source"],
-        qa_defaults_from_env={
+        qa_defaults={
             "qa_top_k": settings.qa_top_k,
             "qa_fetch_k": settings.qa_fetch_k,
             "qa_bm25_k": settings.qa_bm25_k,
@@ -179,6 +178,7 @@ def _system_status() -> SettingsSystemStatus:
         auth_require_login=bool(settings.auth_require_login),
         secrets_configured=secrets_configured,
         provider_setup=provider_setup_status(),
+        notices=get_provider_compatibility_notices(),
         version_info={"app_name": settings.app_name},
     )
 

@@ -63,7 +63,7 @@
             </div>
             <h2 class="text-xl font-black tracking-tight">模型服务配置</h2>
             <p class="text-sm text-muted-foreground max-w-3xl leading-relaxed">
-              密钥会安全保存，页面仅用于填写、更新和显示掩码。完成配置后即可使用摘要、问答和测验。
+              配置会安全保存在本地持久化文件中，无需手动修改 `.env`。完成配置后即可使用摘要、问答和测验。
             </p>
           </div>
           <div class="rounded-2xl border border-border bg-background/70 px-4 py-3 text-sm space-y-1 min-w-[220px]">
@@ -78,24 +78,18 @@
         </div>
 
         <div
-          v-if="providerConfig.readOnlyReason"
+          v-if="Array.isArray(systemStatus?.notices) && systemStatus.notices.length > 0"
           class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900 space-y-2"
         >
-          <p class="font-semibold">当前使用的是 OpenAI / Gemini 配置</p>
-          <p class="leading-relaxed">
-            {{ providerConfig.readOnlyReason }}
-          </p>
-          <div class="flex flex-wrap gap-2 text-xs">
-            <span class="px-2 py-1 rounded-full border border-amber-300 bg-white">
-              当前对话服务：{{ providerSetup?.current_llm_provider || '—' }}
-            </span>
-            <span class="px-2 py-1 rounded-full border border-amber-300 bg-white">
-              当前向量服务：{{ providerSetup?.current_embedding_provider || '—' }}
-            </span>
-          </div>
+          <p class="font-semibold">检测到旧配置，系统已自动兼容处理</p>
+          <ul class="list-disc pl-5 space-y-1">
+            <li v-for="notice in systemStatus.notices" :key="notice">
+              {{ notice }}
+            </li>
+          </ul>
         </div>
 
-        <template v-else>
+        <div class="space-y-5">
           <div v-if="!providerFeaturesReady" class="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-4 space-y-2">
             <p class="text-sm font-semibold text-amber-900">继续使用前，请先完成模型接入配置</p>
             <p class="text-sm text-amber-900/80 leading-relaxed">
@@ -324,7 +318,7 @@
             <div class="space-y-1">
               <p class="text-sm font-semibold">保存后立即生效</p>
               <p class="text-xs text-muted-foreground">
-                配置会保存到系统设置中，页面仅显示掩码，不会回显 API 密钥明文。
+                配置会保存到本地持久化文件中，页面仅显示掩码，不会回显 API 密钥明文。
               </p>
               <p v-if="providerTestResult" class="text-xs" :class="providerTestResult.ok ? 'text-green-700' : 'text-destructive'">
                 {{ providerTestResult.message }}
@@ -357,7 +351,7 @@
               </button>
             </div>
           </div>
-        </template>
+        </div>
       </div>
     </section>
 
@@ -429,15 +423,15 @@
           <div class="grid grid-cols-2 gap-2 text-sm">
             <div class="rounded-lg border border-border bg-background/50 px-3 py-2">
               <div class="text-xs text-muted-foreground">{{ UX_TEXT.referenceCountLabel }}</div>
-              <div class="font-semibold">{{ systemStatus?.qa_defaults_from_env?.qa_top_k ?? '—' }}</div>
+              <div class="font-semibold">{{ systemStatus?.qa_defaults?.qa_top_k ?? '—' }}</div>
             </div>
             <div class="rounded-lg border border-border bg-background/50 px-3 py-2">
               <div class="text-xs text-muted-foreground">{{ UX_TEXT.candidateRangeLabel }}</div>
-              <div class="font-semibold">{{ systemStatus?.qa_defaults_from_env?.qa_fetch_k ?? '—' }}</div>
+              <div class="font-semibold">{{ systemStatus?.qa_defaults?.qa_fetch_k ?? '—' }}</div>
             </div>
             <div class="rounded-lg border border-border bg-background/50 px-3 py-2 col-span-2">
               <div class="text-xs text-muted-foreground">{{ UX_TEXT.retrievalStrategyLabel }}</div>
-              <div class="font-semibold">{{ systemStatus?.qa_defaults_from_env?.rag_mode ?? '—' }}</div>
+              <div class="font-semibold">{{ systemStatus?.qa_defaults?.rag_mode ?? '—' }}</div>
             </div>
           </div>
         </div>
@@ -477,7 +471,7 @@
                 class="px-2 py-1 rounded-full text-[10px] font-semibold border"
                 :class="ok ? 'border-green-200 bg-green-50 text-green-700' : 'border-border bg-background text-muted-foreground'"
               >
-                {{ key }}: {{ ok ? 'OK' : '未配置' }}
+                {{ secretStatusLabel(key) }}: {{ ok ? 'OK' : '未配置' }}
               </span>
             </div>
           </div>
@@ -489,7 +483,7 @@
           <div>
             <h3 class="text-sm font-bold uppercase tracking-widest text-muted-foreground">系统高级参数（可编辑）</h3>
             <p class="mt-1 text-xs text-muted-foreground">
-              这里的值会覆盖系统默认参数并持久化保存，适合在页面内集中维护常用设置。
+              这里的值会在系统默认值之上应用本地覆盖并持久化保存，适合在页面内集中维护常用设置。
             </p>
           </div>
           <div class="text-xs text-muted-foreground space-y-1">
@@ -1062,8 +1056,15 @@ function providerMissingLabel(value) {
     'qwen.embedding_model': 'Qwen 向量模型',
     'dashscope.base_url': 'DashScope 服务地址',
     'dashscope.embedding_model': 'DashScope 向量模型',
-    'openai.api_key': 'OpenAI API 密钥',
-    'gemini.api_key': 'Gemini API 密钥',
+  }
+  return labels[value] || value
+}
+
+function secretStatusLabel(value) {
+  const labels = {
+    deepseek_api_key: 'DeepSeek API 密钥',
+    qwen_api_key: 'Qwen API 密钥',
+    auth_secret_key_configured: '系统认证密钥',
   }
   return labels[value] || value
 }

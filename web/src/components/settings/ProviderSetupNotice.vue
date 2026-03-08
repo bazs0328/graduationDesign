@@ -46,8 +46,6 @@ const FIELD_LABEL_MAP = {
   'qwen.embedding_model': 'Qwen 向量模型',
   'dashscope.base_url': 'DashScope 服务地址',
   'dashscope.embedding_model': 'DashScope 向量模型',
-  'openai.api_key': 'OpenAI API 密钥',
-  'gemini.api_key': 'Gemini API 密钥',
 }
 
 const props = defineProps({

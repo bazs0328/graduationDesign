@@ -185,7 +185,7 @@ describe('settings store', () => {
           qwen: {
             api_key_configured: true,
             api_key_masked: '••••9999',
-            region: 'intl',
+            region: 'international',
             base_url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
             model: 'qwen-plus',
           },
@@ -219,7 +219,7 @@ describe('settings store', () => {
       llm_provider: 'qwen',
       qwen: {
         api_key_input: 'sk-test-9999',
-        region: 'intl',
+        region: 'international',
         base_url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
         model: 'qwen-plus',
       },
@@ -234,7 +234,7 @@ describe('settings store', () => {
           llm_provider: 'qwen',
           qwen: expect.objectContaining({
             api_key: 'sk-test-9999',
-            region: 'intl',
+            region: 'international',
           }),
         }),
       }),
@@ -247,7 +247,7 @@ describe('settings store', () => {
           llm_provider: 'qwen',
           qwen: expect.objectContaining({
             api_key: 'sk-test-9999',
-            region: 'intl',
+            region: 'international',
           }),
         }),
       }),

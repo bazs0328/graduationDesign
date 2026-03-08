@@ -1,16 +1,18 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEFAULT_AUTH_SECRET_KEY = "gradtutor-dev-secret"
+
 
 class Settings(BaseSettings):
     app_name: str = "StudyCompass"
     data_dir: str = "data"
-    auth_secret_key: str = "gradtutor-dev-secret"
+    auth_secret_key: str = DEFAULT_AUTH_SECRET_KEY
     auth_token_ttl_hours: int = 72
     auth_require_login: bool = True
     auth_allow_legacy_user_id: bool = False
 
-    llm_provider: str = "auto"  # auto, openai, gemini, deepseek, qwen
-    embedding_provider: str = "auto"  # auto, openai, gemini, qwen, dashscope
+    llm_provider: str = "auto"  # auto, deepseek, qwen
+    embedding_provider: str = "auto"  # auto, qwen, dashscope
 
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
