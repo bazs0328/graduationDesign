@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     deepseek_embedding_model: str | None = None
 
     qwen_api_key: str | None = None
-    qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     qwen_model: str = "qwen-plus"
     qwen_embedding_model: str = "text-embedding-v4"
     dashscope_embedding_model: str = "qwen3-vl-embedding"

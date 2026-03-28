@@ -163,7 +163,7 @@ function normalizeProviderConfigShape(value = {}) {
       qwen: {
         api_key_configured: Boolean(qwen?.api_key_configured),
         api_key_masked: typeof qwen?.api_key_masked === 'string' ? qwen.api_key_masked : '',
-        region: typeof qwen?.region === 'string' ? qwen.region : 'custom',
+        region: typeof qwen?.region === 'string' ? qwen.region : 'china',
         base_url: typeof qwen?.base_url === 'string' ? qwen.base_url : '',
         model: typeof qwen?.model === 'string' ? qwen.model : '',
         embedding_model: typeof qwen?.embedding_model === 'string' ? qwen.embedding_model : '',
@@ -209,7 +209,7 @@ function buildProviderDraft(config = normalizeProviderConfigShape()) {
       editing_api_key: !qwen?.api_key_configured,
       api_key_configured: Boolean(qwen?.api_key_configured),
       api_key_masked: typeof qwen?.api_key_masked === 'string' ? qwen.api_key_masked : '',
-      region: typeof qwen?.region === 'string' ? qwen.region : 'custom',
+      region: typeof qwen?.region === 'string' ? qwen.region : 'china',
       base_url: typeof qwen?.base_url === 'string' ? qwen.base_url : '',
       model: typeof qwen?.model === 'string' ? qwen.model : '',
       embedding_model: typeof qwen?.embedding_model === 'string' ? qwen.embedding_model : '',
@@ -237,7 +237,7 @@ function buildProviderComparableShape(draft = {}) {
       api_key_action: draft?.deepseek?.clear_api_key ? 'clear' : (trimText(draft?.deepseek?.api_key_input) ? 'replace' : 'keep'),
     },
     qwen: {
-      region: draft?.qwen?.region ?? 'custom',
+      region: draft?.qwen?.region ?? 'china',
       base_url: trimText(draft?.qwen?.base_url),
       model: trimText(draft?.qwen?.model),
       embedding_model: trimText(draft?.qwen?.embedding_model),
@@ -261,7 +261,7 @@ function buildProviderPatchPayload(draft = {}) {
       embedding_model: trimText(draft?.deepseek?.embedding_model) || null,
     },
     qwen: {
-      region: draft?.qwen?.region ?? 'custom',
+      region: draft?.qwen?.region ?? 'china',
       base_url: trimText(draft?.qwen?.base_url) || null,
       model: trimText(draft?.qwen?.model) || null,
       embedding_model: trimText(draft?.qwen?.embedding_model) || null,
