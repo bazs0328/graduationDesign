@@ -4,6 +4,8 @@ import { test, expect } from '@playwright/test'
 
 const apiBase = process.env.E2E_API_BASE || 'http://localhost:8000'
 const runLLM = process.env.E2E_LLM === '1'
+const forcedUsername = process.env.E2E_USERNAME || ''
+const forcedPassword = process.env.E2E_PASSWORD || 'e2e-password-123'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const fixturePath = path.resolve(__dirname, '../fixtures/sample.txt')
@@ -24,15 +26,16 @@ async function ensureBackendHealthy(request) {
 }
 
 async function ensureAuthUser(request, username = 'e2e_quiz_feedback_user') {
-  const password = 'e2e-password-123'
+  const resolvedUsername = forcedUsername || username
+  const password = forcedPassword
   const registerResp = await request.post(`${apiBase}/api/auth/register`, {
-    data: { username, password, name: username }
+    data: { username: resolvedUsername, password, name: resolvedUsername }
   })
   if (registerResp.ok()) {
     return registerResp.json()
   }
   const loginResp = await request.post(`${apiBase}/api/auth/login`, {
-    data: { username, password }
+    data: { username: resolvedUsername, password }
   })
   if (!loginResp.ok()) {
     throw new Error('Failed to create/login E2E user')

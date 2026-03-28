@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test'
 
 const apiBase = process.env.E2E_API_BASE || 'http://localhost:8000'
+const forcedUsername = process.env.E2E_USERNAME || ''
+const forcedPassword = process.env.E2E_PASSWORD || 'e2e-password-123'
 
 async function ensureBackendHealthy(request) {
   try {
@@ -12,15 +14,16 @@ async function ensureBackendHealthy(request) {
 }
 
 async function ensureAuthUser(request, username = 'e2e_context_sync_user') {
-  const password = 'e2e-password-123'
+  const resolvedUsername = forcedUsername || username
+  const password = forcedPassword
   const registerResp = await request.post(`${apiBase}/api/auth/register`, {
-    data: { username, password, name: username },
+    data: { username: resolvedUsername, password, name: resolvedUsername },
   })
   if (registerResp.ok()) {
     return registerResp.json()
   }
   const loginResp = await request.post(`${apiBase}/api/auth/login`, {
-    data: { username, password },
+    data: { username: resolvedUsername, password },
   })
   if (!loginResp.ok()) {
     throw new Error('Failed to create/login E2E user')

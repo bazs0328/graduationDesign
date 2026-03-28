@@ -1,23 +1,36 @@
-.venv
-backend/.venv
-backend/data
-data/
+# Python / backend
+/.venv/
+/backend/.venv/
+/backend/data/
+/data/
 **/__pycache__/
 *.pyc
 *.pyo
 *.pyd
-.pytest_cache
-.tmp_vite_check_out/
-web/node_modules
-web/dist
-web/playwright-report
-web/test-results
+/.pytest_cache/
+
+# Frontend build and test artifacts
+/.tmp_vite_check_out/
+/web/node_modules/
+/web/dist/
+/web/playwright-report/
+/web/test-results/
+
+# Local env and editor noise
 .env
-tmp/
-.claude/
-.cursor/
+*.swp
+.DS_Store
+
+# Local scratch and archived non-project materials
+/tmp/
+/.cursor/
 # Cursor 规则参考仓库（已筛选并入 .cursor/rules，可按需克隆）
-cursor_prompts/
-cursor-skills/
-doc/
-deliverables/
+/cursor_prompts/
+/cursor-skills/
+/__to_move_out__/
+/.venv-doccheck/
+/tmp_font_test/
+
+# Thesis-only helper scripts
+/backend/scripts/collect_evidence.py
+/web/scripts/capture_thesis_screenshots.mjs
