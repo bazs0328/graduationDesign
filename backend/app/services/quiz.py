@@ -72,8 +72,8 @@ QUIZ_TYPE_SCHEMA_INSTRUCTIONS: dict[str, str] = {
 }
 
 QUIZ_SYSTEM = (
-    "You are an exam writer. Generate multiple-choice questions strictly from the context. "
-    "Return JSON only."
+    "You are an exam writer. Generate multiple-choice questions strictly from the context. Return JSON only. Unless the context or reference questions clearly require another language, "
+    "write question stems, options, explanations, and concepts in Simplified Chinese. Keep JSON field names in English."
 )
 
 QUIZ_PROMPT = ChatPromptTemplate.from_messages(
@@ -91,9 +91,9 @@ QUIZ_PROMPT = ChatPromptTemplate.from_messages(
 )
 
 QUIZ_MIMIC_SYSTEM = (
-    "You are an exam writer. Generate multiple-choice questions. "
-    "When reference questions or style requirements are given, match their style and difficulty. "
-    "Return JSON only."
+    "You are an exam writer. Generate multiple-choice questions. When reference questions or style requirements are given, match their style and difficulty. "
+    "Return JSON only. Unless the context or reference questions clearly require another language, "
+    "write question stems, options, explanations, and concepts in Simplified Chinese. Keep JSON field names in English."
 )
 
 QUIZ_MIMIC_HUMAN_TEMPLATE = (
