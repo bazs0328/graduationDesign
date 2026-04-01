@@ -26,11 +26,11 @@
 /.cursor/
 /cursor_prompts/
 /cursor-skills/
+/AGENTS.md
+/TODO.md
 /__to_move_out__/
 /.venv-doccheck/
 /tmp_font_test/
-/TODO.md
-/AGENTS.md
 
 # Thesis-only helper scripts
 /backend/scripts/collect_evidence.py
