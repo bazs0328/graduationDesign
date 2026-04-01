@@ -1990,6 +1990,7 @@ watch(
 )
 
 watch(selectedKbId, async () => {
+  if (busy.value.init) return
   if (!syncingFromSession.value && selectedSessionId.value) {
     selectedSessionId.value = ''
     sessionTitleInput.value = ''

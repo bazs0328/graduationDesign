@@ -53,7 +53,7 @@
               </div>
             </div>
             <p v-if="selectedKbId" class="text-xs text-muted-foreground">
-              重命名和删除已移入“{{ UI_NAMING.kbSettings }}”，避免误操作打断上传流程。
+              重命名和删除请在“{{ UI_NAMING.kbSettings }}”中完成，上传区仅保留创建与上传操作。
             </p>
             <p class="text-xs text-muted-foreground">
               系统级文档识别能力与解析策略由管理员维护；问答与测验常用偏好可在
