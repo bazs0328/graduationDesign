@@ -2,13 +2,13 @@
   <div class="flex h-screen bg-background text-foreground overflow-hidden">
     <AppSidebar />
     <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
-      <header class="border-b border-border/70 bg-background/72 backdrop-blur-xl">
+      <header class="workspace-topbar">
         <div class="flex items-center justify-between gap-4 px-4 py-3 md:px-6 lg:px-8">
           <div class="min-w-0 flex items-center gap-3">
             <div class="flex items-center gap-2 min-w-0">
               <button
                 type="button"
-                class="p-2 rounded-full hover:bg-accent transition-colors"
+                class="p-2 rounded-full hover:bg-accent/80 transition-colors"
                 @click="toggleSidebarDrawer"
                 aria-label="切换导航菜单"
                 title="切换导航菜单"
@@ -24,14 +24,14 @@
           <div class="flex items-center gap-2 md:gap-4 flex-shrink-0">
             <button
             @click="toggleTheme"
-            class="inline-flex items-center gap-2 px-2.5 py-2 rounded-full hover:bg-accent transition-colors text-sm"
+            class="inline-flex items-center gap-2 px-2.5 py-2 rounded-full hover:bg-accent/80 transition-colors text-sm"
             title="切换主题"
             aria-label="切换主题"
           >
             <component :is="isDark ? Sun : Moon" class="w-5 h-5" />
             <span class="hidden md:inline font-medium">{{ isDark ? '浅色' : '深色' }}</span>
           </button>
-            <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-card/80 border border-border rounded-full text-sm font-medium shadow-sm">
+            <div class="hidden sm:flex workspace-user-pill">
               <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
               {{ displayName }}
             </div>

@@ -66,7 +66,7 @@
             <label class="text-sm font-medium text-muted-foreground uppercase tracking-wider">选择文件</label>
             <div
               v-if="!uploadBackendReady"
-              class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+              class="workspace-alert workspace-alert-warning px-4 py-3 text-sm"
             >
               上传与解析前，请先到设置中心完成当前账号的模型接入配置。
             </div>
@@ -132,7 +132,7 @@
               </div>
               <span
                 class="text-xs font-bold px-2 py-1 rounded-full"
-                :class="uploadProgress.phase === 'uploading' ? 'bg-primary/10 text-primary' : 'bg-blue-500/10 text-blue-600 animate-pulse'"
+                :class="uploadProgress.phase === 'uploading' ? 'bg-primary/10 text-primary' : 'bg-sky-500/10 text-sky-700 animate-pulse dark:bg-sky-400/15 dark:text-sky-100'"
               >
                 {{ uploadProgress.phase === 'uploading' ? `${uploadProgress.percent}%` : '解析中' }}
               </span>
@@ -140,7 +140,7 @@
             <div class="h-2 rounded-full bg-accent overflow-hidden">
               <div
                 class="h-full rounded-full transition-all duration-300"
-                :class="uploadProgress.phase === 'uploading' ? 'bg-primary' : 'bg-blue-500 animate-pulse'"
+                :class="uploadProgress.phase === 'uploading' ? 'bg-primary' : 'bg-sky-500 dark:bg-sky-400 animate-pulse'"
                 :style="{ width: uploadProgressWidth }"
               ></div>
             </div>
@@ -175,7 +175,7 @@
             <button
               type="button"
               class="px-3 py-1.5 rounded-full border text-xs font-semibold transition-colors"
-              :class="isDocStatusActive('processing') ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-border bg-background text-muted-foreground hover:bg-accent'"
+              :class="isDocStatusActive('processing') ? 'border-sky-300/70 bg-sky-50 text-sky-700 dark:border-sky-400/25 dark:bg-sky-500/12 dark:text-sky-100' : 'border-border bg-background text-muted-foreground hover:bg-accent'"
               @click="setDocStatusFilter('processing')"
             >
               处理中 {{ taskCenter.processing_count }}
@@ -264,14 +264,14 @@
                 </span>
                 <RefreshCw
                   v-if="doc.status === 'processing' && pollingIntervals.has(doc.id)"
-                  class="w-3 h-3 text-blue-500 animate-spin"
+                  class="w-3 h-3 text-sky-500 dark:text-sky-300 animate-spin"
                 />
               </div>
             </div>
             <div class="flex flex-wrap gap-2 mb-3">
               <span class="text-[10px] bg-accent px-2 py-0.5 rounded-full">{{ kbNameById(doc.kb_id) }}</span>
               <template v-if="doc.status === 'processing'">
-                <span class="text-[10px] bg-blue-500/20 text-blue-500 px-2 py-0.5 rounded-full animate-pulse">
+                <span class="text-[10px] bg-sky-500/15 text-sky-600 dark:bg-sky-400/15 dark:text-sky-100 px-2 py-0.5 rounded-full animate-pulse">
                   正在处理中...
                 </span>
               </template>
@@ -283,7 +283,7 @@
             <div class="flex items-center justify-between text-[10px] text-muted-foreground">
               <span>{{ new Date(doc.created_at).toLocaleDateString() }}</span>
               <span v-if="doc.error_message" class="text-destructive truncate max-w-[150px]">{{ doc.error_message }}</span>
-              <span v-else-if="doc.status === 'processing'" class="text-blue-500">
+              <span v-else-if="doc.status === 'processing'" class="text-sky-600 dark:text-sky-200">
                 自动更新中...
               </span>
             </div>
@@ -374,7 +374,7 @@
           当前资料：{{ lastUploadedDoc?.filename || '刚上传的文档' }}
         </div>
       </div>
-      <div v-if="!providerFeaturesReady" class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+      <div v-if="!providerFeaturesReady" class="workspace-alert workspace-alert-warning px-4 py-3 text-sm">
         文档上传已完成；如需继续使用摘要、问答和测验，请先到设置中心完成模型接入配置。
       </div>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1289,8 +1289,8 @@ function statusLabel(status) {
 
 function statusClass(status) {
   switch (status) {
-    case 'ready': return 'bg-green-500/20 text-green-500'
-    case 'processing': return 'bg-blue-500/20 text-blue-500 animate-pulse'
+    case 'ready': return 'bg-emerald-500/15 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-100'
+    case 'processing': return 'bg-sky-500/15 text-sky-700 dark:bg-sky-400/15 dark:text-sky-100 animate-pulse'
     case 'error': return 'bg-destructive/20 text-destructive'
     default: return 'bg-muted/20 text-muted-foreground'
   }

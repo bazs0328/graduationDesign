@@ -36,6 +36,7 @@
 
 @layer base {
   :root {
+    color-scheme: light;
     --background: 215 33% 97%;
     --foreground: 222 47% 11%;
     --card: 0 0% 100%;
@@ -61,55 +62,56 @@
   }
 
   .dark {
-    --color-background: hsl(222 40% 10%);
+    color-scheme: dark;
+    --color-background: hsl(224 34% 9%);
     --color-foreground: hsl(210 40% 98%);
 
-    --color-card: hsl(222 36% 12%);
+    --color-card: hsl(222 30% 12%);
     --color-card-foreground: hsl(210 40% 98%);
 
-    --color-popover: hsl(222 36% 12%);
+    --color-popover: hsl(222 30% 12%);
     --color-popover-foreground: hsl(210 40% 98%);
 
-    --color-primary: hsl(217 91% 60%);
+    --color-primary: hsl(217 92% 64%);
     --color-primary-foreground: hsl(210 40% 98%);
 
-    --color-secondary: hsl(221 24% 18%);
+    --color-secondary: hsl(220 24% 16%);
     --color-secondary-foreground: hsl(210 40% 98%);
 
-    --color-muted: hsl(221 24% 18%);
-    --color-muted-foreground: hsl(215 20% 71%);
+    --color-muted: hsl(220 22% 15%);
+    --color-muted-foreground: hsl(214 18% 74%);
 
-    --color-accent: hsl(221 24% 18%);
+    --color-accent: hsl(220 22% 17%);
     --color-accent-foreground: hsl(210 40% 98%);
 
-    --color-destructive: hsl(0 63% 41%);
+    --color-destructive: hsl(0 72% 58%);
     --color-destructive-foreground: hsl(210 40% 98%);
 
-    --color-border: hsl(221 22% 24%);
-    --color-input: hsl(221 22% 24%);
-    --color-ring: hsl(217 91% 60%);
+    --color-border: hsl(218 20% 24%);
+    --color-input: hsl(218 20% 24%);
+    --color-ring: hsl(217 92% 64%);
 
-    --background: 222 40% 10%;
+    --background: 224 34% 9%;
     --foreground: 210 40% 98%;
-    --card: 222 36% 12%;
+    --card: 222 30% 12%;
     --card-foreground: 210 40% 98%;
-    --popover: 222 36% 12%;
+    --popover: 222 30% 12%;
     --popover-foreground: 210 40% 98%;
-    --primary: 217 91% 60%;
+    --primary: 217 92% 64%;
     --primary-foreground: 210 40% 98%;
-    --secondary: 221 24% 18%;
+    --secondary: 220 24% 16%;
     --secondary-foreground: 210 40% 98%;
-    --muted: 221 24% 18%;
-    --muted-foreground: 215 20% 71%;
-    --accent: 221 24% 18%;
+    --muted: 220 22% 15%;
+    --muted-foreground: 214 18% 74%;
+    --accent: 220 22% 17%;
     --accent-foreground: 210 40% 98%;
-    --destructive: 0 63% 41%;
+    --destructive: 0 72% 58%;
     --destructive-foreground: 210 40% 98%;
-    --border: 221 22% 24%;
-    --input: 221 22% 24%;
-    --ring: 217 91% 60%;
-    --panel-shadow: 0 28px 60px -34px rgba(15, 23, 42, 0.72);
-    --panel-shadow-soft: 0 18px 42px -28px rgba(15, 23, 42, 0.6);
+    --border: 218 20% 24%;
+    --input: 218 20% 24%;
+    --ring: 217 92% 64%;
+    --panel-shadow: 0 32px 70px -40px rgba(2, 8, 23, 0.82);
+    --panel-shadow-soft: 0 20px 44px -30px rgba(2, 8, 23, 0.7);
   }
 }
 
@@ -121,9 +123,19 @@
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
     background-image:
-      radial-gradient(circle at top left, rgba(59, 130, 246, 0.11), transparent 28%),
-      radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 22%);
+      radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 30%),
+      radial-gradient(circle at 88% 0%, rgba(14, 165, 233, 0.09), transparent 24%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0) 22%);
+    background-attachment: fixed;
     min-height: 100vh;
+  }
+
+  .dark body {
+    background-image:
+      radial-gradient(circle at top left, rgba(56, 189, 248, 0.16), transparent 30%),
+      radial-gradient(circle at 85% 8%, rgba(99, 102, 241, 0.14), transparent 24%),
+      radial-gradient(circle at bottom right, rgba(15, 23, 42, 0.32), transparent 28%),
+      linear-gradient(180deg, rgba(12, 18, 34, 0.96) 0%, rgba(7, 11, 21, 0.98) 100%);
   }
 
   #app {
@@ -135,6 +147,11 @@
   textarea,
   select {
     @apply transition-colors duration-200;
+  }
+
+  ::selection {
+    background: rgba(59, 130, 246, 0.2);
+    color: inherit;
   }
 }
 
@@ -173,8 +190,118 @@
     box-shadow: var(--panel-shadow-soft);
   }
 
+  .workspace-toolbar-info {
+    @apply border-primary/15;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(255, 255, 255, 0.86));
+  }
+
+  .dark .workspace-toolbar-info {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.18), rgba(15, 23, 42, 0.82));
+  }
+
+  .workspace-toolbar-soft {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(255, 255, 255, 0.78));
+  }
+
+  .dark .workspace-toolbar-soft {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(15, 23, 42, 0.72));
+  }
+
   .workspace-chip {
     @apply inline-flex items-center gap-2 rounded-full border border-border bg-background/92 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm;
+  }
+
+  .workspace-topbar {
+    @apply border-b border-border/70 bg-background/72 backdrop-blur-xl;
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0));
+  }
+
+  .dark .workspace-topbar {
+    background-image: linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(255, 255, 255, 0));
+  }
+
+  .workspace-sidebar {
+    @apply border-r border-border/80 bg-card/88 backdrop-blur-xl;
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0));
+    box-shadow: var(--panel-shadow);
+  }
+
+  .dark .workspace-sidebar {
+    background-image: linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(255, 255, 255, 0));
+  }
+
+  .workspace-nav-item {
+    @apply relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-foreground/88 transition-all duration-200 hover:bg-accent/75 hover:text-foreground;
+  }
+
+  .workspace-nav-item-active {
+    @apply border border-border/80 bg-card text-foreground;
+    box-shadow: var(--panel-shadow-soft);
+  }
+
+  .workspace-user-pill {
+    @apply inline-flex items-center gap-2 rounded-full border border-border bg-card/82 px-3 py-1.5 text-sm font-medium;
+    box-shadow: var(--panel-shadow-soft);
+  }
+
+  .workspace-alert {
+    @apply rounded-2xl border px-4 py-4;
+  }
+
+  .workspace-alert-warning {
+    @apply border-amber-300/65 bg-amber-50/92 text-amber-950;
+  }
+
+  .dark .workspace-alert-warning {
+    @apply border-amber-400/20 bg-amber-500/10 text-amber-100;
+  }
+
+  .workspace-alert-success {
+    @apply border-emerald-300/65 bg-emerald-50/92 text-emerald-950;
+  }
+
+  .dark .workspace-alert-success {
+    @apply border-emerald-400/20 bg-emerald-500/10 text-emerald-100;
+  }
+
+  .workspace-alert-info {
+    @apply border-sky-300/65 bg-sky-50/92 text-sky-950;
+  }
+
+  .dark .workspace-alert-info {
+    @apply border-sky-400/20 bg-sky-500/10 text-sky-100;
+  }
+
+  .workspace-badge-success {
+    @apply border-emerald-300/65 bg-emerald-50/90 text-emerald-800;
+  }
+
+  .dark .workspace-badge-success {
+    @apply border-emerald-400/25 bg-emerald-500/12 text-emerald-100;
+  }
+
+  .workspace-badge-warning {
+    @apply border-amber-300/65 bg-amber-50/90 text-amber-800;
+  }
+
+  .dark .workspace-badge-warning {
+    @apply border-amber-400/25 bg-amber-500/12 text-amber-100;
+  }
+
+  .workspace-badge-info {
+    @apply border-sky-300/65 bg-sky-50/90 text-sky-800;
+  }
+
+  .dark .workspace-badge-info {
+    @apply border-sky-400/25 bg-sky-500/12 text-sky-100;
+  }
+
+  .workspace-badge-danger {
+    @apply border-red-300/65 bg-red-50/90 text-red-800;
+  }
+
+  .dark .workspace-badge-danger {
+    @apply border-red-400/25 bg-red-500/12 text-red-100;
   }
 
   .workspace-label {
@@ -326,7 +453,7 @@
   }
 
   .quiz-feedback-markdown {
-    @apply break-words text-sm leading-7 text-amber-700;
+    @apply break-words text-sm leading-7 text-current;
   }
 
   .quiz-feedback-markdown p,

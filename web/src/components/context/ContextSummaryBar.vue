@@ -99,9 +99,9 @@ const containerClass = computed(() => {
     return 'workspace-toolbar border-border/80 bg-background/82'
   }
   if (props.tone === 'soft') {
-    return 'workspace-toolbar border-primary/10 bg-primary/[0.05]'
+    return 'workspace-toolbar workspace-toolbar-soft border-primary/10'
   }
-  return 'workspace-toolbar border-primary/12 bg-[linear-gradient(135deg,rgba(59,130,246,0.08),rgba(255,255,255,0.82))] dark:bg-[linear-gradient(135deg,rgba(59,130,246,0.14),rgba(15,23,42,0.78))]'
+  return 'workspace-toolbar workspace-toolbar-info'
 })
 
 const titleClass = computed(() => {

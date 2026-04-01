@@ -4,19 +4,19 @@ const ABILITY_LEVEL_META = {
   beginner: {
     text: '基础模式',
     code: 'BEGINNER',
-    badgeClass: 'text-green-700 bg-green-100 border-green-200',
+    badgeClass: 'text-green-700 bg-green-100 border-green-200 dark:text-green-100 dark:bg-green-500/12 dark:border-green-400/25',
     description: '当前更适合以通俗讲解和基础巩固为主，先稳住学习节奏。',
   },
   intermediate: {
     text: '进阶模式',
     code: 'INTERMEDIATE',
-    badgeClass: 'text-blue-700 bg-blue-100 border-blue-200',
+    badgeClass: 'text-blue-700 bg-blue-100 border-blue-200 dark:text-blue-100 dark:bg-blue-500/12 dark:border-blue-400/25',
     description: '当前处于能力提升区间，系统会在巩固与挑战之间保持平衡。',
   },
   advanced: {
     text: '专家模式',
     code: 'ADVANCED',
-    badgeClass: 'text-amber-700 bg-amber-100 border-amber-200',
+    badgeClass: 'text-amber-700 bg-amber-100 border-amber-200 dark:text-amber-100 dark:bg-amber-500/12 dark:border-amber-400/25',
     description: '当前具备较高学习稳定性，可增加高难度题目推进进阶。',
   },
 }
@@ -173,4 +173,3 @@ export function buildAdaptiveInsight({ profile = {}, plan = null } = {}) {
     weakConceptsTop3: weakConcepts.slice(0, 3),
   }
 }
-

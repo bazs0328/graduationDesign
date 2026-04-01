@@ -52,7 +52,7 @@
             <div class="flex flex-wrap items-center gap-2 sm:justify-end">
               <span
                 v-if="qaFlow.usedFallback"
-                class="px-2 py-1 rounded-full border border-amber-300 bg-amber-50 text-amber-700 text-[10px] font-semibold tracking-wide"
+                class="px-2 py-1 rounded-full border workspace-badge-warning text-[10px] font-semibold tracking-wide"
               >
                 已自动回退
               </span>
@@ -132,7 +132,7 @@
                     </span>
                     <span
                       v-if="msg.explainIncomplete"
-                      class="px-1.5 py-0.5 rounded-full border border-amber-300 bg-amber-50 text-amber-700 font-semibold"
+                      class="px-1.5 py-0.5 rounded-full border workspace-badge-warning font-semibold"
                     >
                       结构容错展示
                     </span>
@@ -220,7 +220,7 @@
           <p v-if="!selectedKbId" class="text-[10px] text-destructive mt-1 text-center font-bold uppercase tracking-widest">
             请先在右侧选择资料范围
           </p>
-          <p v-else-if="qaActionBlocked" class="text-[10px] text-amber-700 mt-1 text-center font-bold uppercase tracking-widest">
+          <p v-else-if="qaActionBlocked" class="text-[10px] text-amber-700 dark:text-amber-300 mt-1 text-center font-bold uppercase tracking-widest">
             先完成模型接入配置再开始提问
           </p>
           <AdvancedPanel
@@ -942,16 +942,16 @@ const qaFlowPanelBadgeText = computed(() => {
 const qaFlowPanelBadgeClass = computed(() => {
   const phase = qaFlow.value.phase
   if (phase === 'retrieving' || phase === 'generating' || phase === 'saving') {
-    return 'border-blue-200 bg-blue-50 text-blue-700'
+    return 'border-sky-300/70 bg-sky-50 text-sky-700 dark:border-sky-400/25 dark:bg-sky-500/12 dark:text-sky-100'
   }
   if (phase === 'done' && qaFlow.value.result === 'no_results') {
-    return 'border-amber-200 bg-amber-50 text-amber-700'
+    return 'border-amber-300/70 bg-amber-50 text-amber-700 dark:border-amber-400/25 dark:bg-amber-500/12 dark:text-amber-100'
   }
   if (phase === 'done') {
-    return 'border-green-200 bg-green-50 text-green-700'
+    return 'border-emerald-300/70 bg-emerald-50 text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-500/12 dark:text-emerald-100'
   }
   if (phase === 'failed') {
-    return 'border-red-200 bg-red-50 text-red-700'
+    return 'border-red-300/70 bg-red-50 text-red-700 dark:border-red-400/25 dark:bg-red-500/12 dark:text-red-100'
   }
   return 'border-border text-muted-foreground'
 })
@@ -1073,10 +1073,10 @@ function qaMessageStatusText(msg) {
 
 function qaMessageStatusBadgeClass(msg) {
   if (!msg) return 'border-border text-muted-foreground'
-  if (msg.status === 'fallback') return 'border-amber-300 bg-amber-50 text-amber-700'
-  if (msg.status === 'error') return 'border-red-300 bg-red-50 text-red-700'
-  if (msg.status === 'streaming' || msg.status === 'pending') return 'border-blue-300 bg-blue-50 text-blue-700'
-  return 'border-green-300 bg-green-50 text-green-700'
+  if (msg.status === 'fallback') return 'border-amber-300/70 bg-amber-50 text-amber-700 dark:border-amber-400/25 dark:bg-amber-500/12 dark:text-amber-100'
+  if (msg.status === 'error') return 'border-red-300/70 bg-red-50 text-red-700 dark:border-red-400/25 dark:bg-red-500/12 dark:text-red-100'
+  if (msg.status === 'streaming' || msg.status === 'pending') return 'border-sky-300/70 bg-sky-50 text-sky-700 dark:border-sky-400/25 dark:bg-sky-500/12 dark:text-sky-100'
+  return 'border-emerald-300/70 bg-emerald-50 text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-500/12 dark:text-emerald-100'
 }
 
 function normalizeQaSource(raw) {

@@ -39,6 +39,7 @@ export function applyTheme(theme) {
   const root = document.documentElement
   root.classList.toggle('dark', resolved === 'dark')
   root.classList.toggle('light', resolved === 'light')
+  root.style.colorScheme = resolved
   themeState.value = resolved
 }
 

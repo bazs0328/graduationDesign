@@ -306,10 +306,10 @@
               </div>
             </div>
 
-            <div class="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 space-y-2">
+            <div class="workspace-alert workspace-alert-success space-y-2">
               <div class="flex items-center justify-between gap-2">
-                <h3 class="text-sm font-bold text-emerald-800">当前可学队列</h3>
-                <span class="text-[11px] text-emerald-700">
+                <h3 class="text-sm font-bold text-emerald-800 dark:text-emerald-100">当前可学队列</h3>
+                <span class="text-[11px] text-emerald-700 dark:text-emerald-200">
                   {{ currentLearnableQueue.length }} / {{ learningPath.filter((item) => item.priority !== 'completed').length }} 项可直接推进
                 </span>
               </div>
@@ -317,14 +317,14 @@
                 <button
                   v-for="item in currentLearnableQueue"
                   :key="item.keypoint_id"
-                  class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-emerald-200 bg-white text-xs hover:bg-emerald-50 transition-colors"
+                  class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-emerald-200/80 bg-white/92 text-xs hover:bg-emerald-50 transition-colors dark:border-emerald-400/20 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/40"
                   @click="goToAction(item)"
                 >
-                  <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-bold">{{ item.step }}</span>
+                  <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-bold dark:bg-emerald-500/15 dark:text-emerald-100">{{ item.step }}</span>
                   <span class="max-w-[180px] truncate">{{ item.text }}</span>
                 </button>
               </div>
-              <p v-else class="text-xs text-emerald-700/80">
+              <p v-else class="text-xs text-emerald-700/80 dark:text-emerald-200/80">
                 当前没有已解锁且未完成的知识点，先完成前置项后会自动解锁后续内容。
               </p>
             </div>
@@ -415,7 +415,7 @@
                 </div>
                 <span class="text-border">|</span>
                 <div class="flex items-center gap-3">
-                  <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full border border-border bg-white inline-block"></span> 节点显示步骤号</span>
+                  <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full border border-border bg-background inline-block"></span> 节点显示步骤号</span>
                   <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rotate-45 bg-primary/40 inline-block"></span> 里程碑</span>
                 </div>
               </div>
@@ -1428,11 +1428,11 @@ function recommendationStatusLabel(status) {
 
 function recommendationStatusClass(status) {
   switch (status) {
-    case 'blocked': return 'text-red-700 bg-red-50 border-red-200'
-    case 'ready_for_practice': return 'text-amber-700 bg-amber-50 border-amber-200'
-    case 'needs_practice': return 'text-orange-700 bg-orange-50 border-orange-200'
-    case 'ready_for_challenge': return 'text-emerald-700 bg-emerald-50 border-emerald-200'
-    case 'on_track': return 'text-blue-700 bg-blue-50 border-blue-200'
+    case 'blocked': return 'text-red-700 bg-red-50 border-red-200 dark:text-red-100 dark:bg-red-500/12 dark:border-red-400/25'
+    case 'ready_for_practice': return 'text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-100 dark:bg-amber-500/12 dark:border-amber-400/25'
+    case 'needs_practice': return 'text-orange-700 bg-orange-50 border-orange-200 dark:text-orange-100 dark:bg-orange-500/12 dark:border-orange-400/25'
+    case 'ready_for_challenge': return 'text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-100 dark:bg-emerald-500/12 dark:border-emerald-400/25'
+    case 'on_track': return 'text-sky-700 bg-sky-50 border-sky-200 dark:text-sky-100 dark:bg-sky-500/12 dark:border-sky-400/25'
     default: return 'text-muted-foreground bg-accent border-border'
   }
 }
@@ -1563,8 +1563,8 @@ function learningPathItemStateLabel(item) {
 function learningPathItemStateClass(item) {
   if (!item) return 'text-muted-foreground bg-accent border-border'
   if (item.priority === 'completed') return 'text-muted-foreground bg-accent border-border'
-  if (isLearningPathItemBlocked(item)) return 'text-orange-700 bg-orange-50 border-orange-200'
-  return 'text-emerald-700 bg-emerald-50 border-emerald-200'
+  if (isLearningPathItemBlocked(item)) return 'text-orange-700 bg-orange-50 border-orange-200 dark:text-orange-100 dark:bg-orange-500/12 dark:border-orange-400/25'
+  return 'text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-100 dark:bg-emerald-500/12 dark:border-emerald-400/25'
 }
 
 function learningPathNodeState(item) {
@@ -1826,9 +1826,9 @@ const pathChartOption = computed(() => {
 
 function stepBadgeClass(priority) {
   const map = {
-    high: 'bg-red-500/15 text-red-600 border border-red-500/30',
-    medium: 'bg-yellow-500/15 text-yellow-600 border border-yellow-500/30',
-    low: 'bg-green-500/15 text-green-600 border border-green-500/30',
+    high: 'bg-red-500/15 text-red-600 border border-red-500/30 dark:text-red-200 dark:bg-red-500/12 dark:border-red-400/25',
+    medium: 'bg-yellow-500/15 text-yellow-700 border border-yellow-500/30 dark:text-yellow-200 dark:bg-yellow-500/12 dark:border-yellow-400/25',
+    low: 'bg-green-500/15 text-green-700 border border-green-500/30 dark:text-green-200 dark:bg-green-500/12 dark:border-green-400/25',
     completed: 'bg-muted text-muted-foreground border border-border',
   }
   return map[priority] || map.medium

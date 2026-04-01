@@ -7,7 +7,7 @@
   <aside
     :aria-hidden="sidebarInteractive ? 'false' : 'true'"
     :inert="sidebarInteractive ? null : ''"
-    class="flex flex-col h-screen transition-all duration-300 fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] shadow-2xl lg:static lg:translate-x-0 lg:w-64 lg:max-w-none lg:shadow-none bg-slate-50/92 dark:bg-slate-900/90 border-r border-border/80 backdrop-blur-xl"
+    class="workspace-sidebar flex flex-col h-screen transition-all duration-300 fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] shadow-2xl lg:static lg:translate-x-0 lg:w-64 lg:max-w-none lg:shadow-none"
     :class="[
       mobileOpen ? 'translate-x-0' : '-translate-x-full',
       collapsed ? 'lg:hidden' : 'lg:w-64'
@@ -17,14 +17,14 @@
       <div class="flex items-center gap-3 min-w-0">
         <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold shrink-0 shadow-lg shadow-blue-500/20">G</div>
         <div v-if="showExpandedLabels" class="min-w-0">
-          <p class="text-[10px] font-bold uppercase tracking-[0.26em] text-slate-500 dark:text-slate-400">Workspace</p>
+          <p class="text-[10px] font-bold uppercase tracking-[0.26em] text-muted-foreground">Workspace</p>
           <h1 class="text-lg font-bold tracking-tight truncate">StudyCompass</h1>
         </div>
       </div>
       <button
         ref="mobileCloseButtonRef"
         type="button"
-        class="lg:hidden p-2 rounded-md hover:bg-accent transition-colors"
+        class="lg:hidden p-2 rounded-md hover:bg-accent/80 transition-colors"
         @click="closeMobileDrawer"
         aria-label="关闭导航菜单"
       >
@@ -43,8 +43,8 @@
         v-for="item in navItems"
         :key="item.path"
         :to="item.path"
-        class="relative flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 hover:bg-white/80 hover:text-primary dark:hover:bg-slate-800/90 group"
-        :class="{ 'bg-white text-slate-950 hover:bg-white shadow-[0_16px_28px_-22px_rgba(15,23,42,0.35)] dark:bg-slate-800 dark:text-slate-100': $route.path === item.path }"
+        class="workspace-nav-item group"
+        :class="{ 'workspace-nav-item-active text-primary': $route.path === item.path }"
         @click="closeMobileDrawer"
       >
         <component :is="item.icon" class="w-5 h-5 shrink-0" :class="$route.path === item.path ? 'text-primary' : 'text-muted-foreground'" />
@@ -65,7 +65,7 @@
         </button>
       </div>
       <button
-        class="hidden lg:flex w-full items-center justify-center p-2 rounded-xl hover:bg-white/80 dark:hover:bg-slate-800 transition-colors"
+        class="hidden lg:flex w-full items-center justify-center p-2 rounded-xl hover:bg-accent/80 transition-colors"
         @click="collapsed = !collapsed"
         aria-label="隐藏导航栏"
         title="隐藏导航栏"

@@ -19,7 +19,7 @@
           </div>
           <div class="workspace-card-soft px-3 py-2">
             <div class="text-muted-foreground">状态</div>
-            <div class="font-semibold" :class="settingsStore.error ? 'text-amber-600' : 'text-green-600'">
+            <div class="font-semibold" :class="settingsStore.error ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300'">
               {{ settingsStore.error ? '已回退到默认配置' : '配置可用' }}
             </div>
           </div>
@@ -68,7 +68,7 @@
           </div>
           <div class="rounded-2xl border border-border bg-background/70 px-4 py-3 text-sm space-y-1 min-w-[220px]">
             <div class="text-xs font-bold uppercase tracking-widest text-muted-foreground">当前状态</div>
-            <div class="font-semibold" :class="providerFeaturesReady ? 'text-green-600' : 'text-amber-700'">
+            <div class="font-semibold" :class="providerFeaturesReady ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'">
               {{ providerFeaturesReady ? '模型接入已就绪' : '仍需完成基础配置' }}
             </div>
             <div class="text-xs text-muted-foreground">
@@ -79,7 +79,7 @@
 
         <div
           v-if="Array.isArray(systemStatus?.notices) && systemStatus.notices.length > 0"
-          class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900 space-y-2"
+          class="workspace-alert workspace-alert-warning text-sm space-y-2"
         >
           <p class="font-semibold">检测到旧的全局配置，已改为兼容提示模式</p>
           <ul class="list-disc pl-5 space-y-1">
@@ -90,12 +90,12 @@
         </div>
 
         <div class="space-y-5">
-          <div v-if="!providerFeaturesReady" class="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-4 space-y-2">
-            <p class="text-sm font-semibold text-amber-900">继续使用前，请先完成模型接入配置</p>
-            <p class="text-sm text-amber-900/80 leading-relaxed">
+          <div v-if="!providerFeaturesReady" class="workspace-alert workspace-alert-warning space-y-2">
+            <p class="text-sm font-semibold">继续使用前，请先完成模型接入配置</p>
+            <p class="text-sm text-current/80 leading-relaxed">
               当前仍缺少部分基础配置。完成后，摘要、问答和测验功能会自动恢复可用。
             </p>
-            <p v-if="providerMissingSummary" class="text-xs text-amber-800">
+            <p v-if="providerMissingSummary" class="text-xs text-current/70">
               缺少项：{{ providerMissingSummary }}
             </p>
           </div>
@@ -146,7 +146,7 @@
                   <p class="text-sm font-medium">已保存 {{ providerDraft.deepseek.api_key_masked || '••••' }}</p>
                   <div class="flex flex-wrap gap-2">
                     <button type="button" class="px-3 py-2 rounded-lg border border-input text-sm font-semibold hover:bg-accent" @click="beginProviderKeyEdit('deepseek')">更换密钥</button>
-                    <button type="button" class="px-3 py-2 rounded-lg border border-amber-300 text-sm font-semibold text-amber-700 hover:bg-amber-50" @click="clearProviderKey('deepseek')">清除密钥</button>
+                    <button type="button" class="px-3 py-2 rounded-lg border border-amber-300/70 text-sm font-semibold text-amber-700 hover:bg-amber-50 dark:border-amber-400/25 dark:text-amber-200 dark:hover:bg-amber-500/10" @click="clearProviderKey('deepseek')">清除密钥</button>
                   </div>
                 </div>
                 <input
@@ -157,7 +157,7 @@
                   class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
                   @input="updateProviderSection('deepseek', { api_key_input: $event.target.value, clear_api_key: false })"
                 />
-                <p v-if="providerDraft.deepseek.clear_api_key" class="text-xs text-amber-700">
+                <p v-if="providerDraft.deepseek.clear_api_key" class="text-xs text-amber-700 dark:text-amber-300">
                   保存后将清除当前 DeepSeek API 密钥。
                 </p>
               </div>
@@ -201,7 +201,7 @@
                   <p class="text-sm font-medium">已保存 {{ providerDraft.qwen.api_key_masked || '••••' }}</p>
                   <div class="flex flex-wrap gap-2">
                     <button type="button" class="px-3 py-2 rounded-lg border border-input text-sm font-semibold hover:bg-accent" @click="beginProviderKeyEdit('qwen')">更换密钥</button>
-                    <button type="button" class="px-3 py-2 rounded-lg border border-amber-300 text-sm font-semibold text-amber-700 hover:bg-amber-50" @click="clearProviderKey('qwen')">清除密钥</button>
+                    <button type="button" class="px-3 py-2 rounded-lg border border-amber-300/70 text-sm font-semibold text-amber-700 hover:bg-amber-50 dark:border-amber-400/25 dark:text-amber-200 dark:hover:bg-amber-500/10" @click="clearProviderKey('qwen')">清除密钥</button>
                   </div>
                 </div>
                 <input
@@ -212,7 +212,7 @@
                   class="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
                   @input="updateProviderSection('qwen', { api_key_input: $event.target.value, clear_api_key: false })"
                 />
-                <p v-if="providerDraft.qwen.clear_api_key" class="text-xs text-amber-700">
+                <p v-if="providerDraft.qwen.clear_api_key" class="text-xs text-amber-700 dark:text-amber-300">
                   保存后将清除当前 Qwen / DashScope API 密钥。
                 </p>
               </div>
@@ -320,7 +320,7 @@
               <p class="text-xs text-muted-foreground">
                 配置只对当前账号生效，页面仅显示掩码，不会回显 API 密钥明文。
               </p>
-              <p v-if="providerTestResult" class="text-xs" :class="providerTestResult.ok ? 'text-green-700' : 'text-destructive'">
+              <p v-if="providerTestResult" class="text-xs" :class="providerTestResult.ok ? 'text-emerald-700 dark:text-emerald-300' : 'text-destructive'">
                 {{ providerTestResult.message }}
               </p>
             </div>
@@ -443,7 +443,7 @@
               <span class="text-muted-foreground">文档识别能力</span>
               <span
                 class="px-2 py-1 rounded-full text-[10px] font-semibold border"
-                :class="systemStatus?.ocr_enabled ? 'border-green-200 bg-green-50 text-green-700' : 'border-border bg-background text-muted-foreground'"
+                :class="systemStatus?.ocr_enabled ? 'workspace-badge-success' : 'border-border bg-background text-muted-foreground'"
               >
                 {{ systemStatus?.ocr_enabled ? '开启' : '关闭' }}
               </span>
@@ -452,7 +452,7 @@
               <span class="text-muted-foreground">需要登录</span>
               <span
                 class="px-2 py-1 rounded-full text-[10px] font-semibold border"
-                :class="systemStatus?.auth_require_login ? 'border-green-200 bg-green-50 text-green-700' : 'border-border bg-background text-muted-foreground'"
+                :class="systemStatus?.auth_require_login ? 'workspace-badge-success' : 'border-border bg-background text-muted-foreground'"
               >
                 {{ systemStatus?.auth_require_login ? '开启' : '关闭' }}
               </span>
@@ -469,7 +469,7 @@
                 v-for="(ok, key) in (systemStatus?.secrets_configured || {})"
                 :key="key"
                 class="px-2 py-1 rounded-full text-[10px] font-semibold border"
-                :class="ok ? 'border-green-200 bg-green-50 text-green-700' : 'border-border bg-background text-muted-foreground'"
+                :class="ok ? 'workspace-badge-success' : 'border-border bg-background text-muted-foreground'"
               >
                 {{ secretStatusLabel(key) }}: {{ ok ? 'OK' : '未配置' }}
               </span>

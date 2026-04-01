@@ -380,7 +380,7 @@
             <div class="grid grid-cols-2 gap-3 text-xs font-semibold">
               <div class="bg-accent/40 rounded-lg p-3 space-y-1">
                 <p class="text-muted-foreground">准确率</p>
-                <p :class="profileDelta.recent_accuracy_delta >= 0 ? 'text-green-600' : 'text-red-600'">
+                <p :class="profileDelta.recent_accuracy_delta >= 0 ? 'text-emerald-600 dark:text-emerald-300' : 'text-red-600 dark:text-red-300'">
                   <span>{{ profileDelta.recent_accuracy_delta >= 0 ? '+' : '' }}</span>
                   <AnimatedNumber :value="profileDelta.recent_accuracy_delta * 100" :decimals="1" />
                   %
@@ -389,7 +389,7 @@
               </div>
               <div class="bg-accent/40 rounded-lg p-3 space-y-1">
                 <p class="text-muted-foreground">挫败感</p>
-                <p :class="profileDelta.frustration_delta <= 0 ? 'text-green-600' : 'text-red-600'">
+                <p :class="profileDelta.frustration_delta <= 0 ? 'text-emerald-600 dark:text-emerald-300' : 'text-red-600 dark:text-red-300'">
                   <span>{{ profileDelta.frustration_delta >= 0 ? '+' : '' }}</span>
                   <AnimatedNumber :value="profileDelta.frustration_delta" :decimals="2" />
                   <span class="ml-1">{{ profileDelta.frustration_delta <= 0 ? '↓' : '↑' }}</span>
@@ -400,13 +400,13 @@
               能力等级更新！继续保持进步节奏。
             </div>
           </div>
-          <div v-if="quizResult.feedback" class="mt-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-left space-y-2">
-            <p class="text-xs font-bold uppercase tracking-widest text-amber-600">学习建议</p>
+          <div v-if="quizResult.feedback" class="workspace-alert workspace-alert-warning mt-4 text-left space-y-2">
+            <p class="text-xs font-bold uppercase tracking-widest text-amber-700 dark:text-amber-200">学习建议</p>
             <div
               class="quiz-feedback-markdown markdown-content"
               v-html="renderMarkdown(quizResult.feedback.message)"
             ></div>
-            <div v-if="quizResult.next_quiz_recommendation" class="text-xs text-amber-700">
+            <div v-if="quizResult.next_quiz_recommendation" class="text-xs text-amber-700 dark:text-amber-200">
               下次建议：{{ quizResult.next_quiz_recommendation.difficulty }} 难度
               <span v-if="quizResult.next_quiz_recommendation.focus_concepts?.length">
                 （重点：{{ quizResult.next_quiz_recommendation.focus_concepts.join('、') }}）
@@ -488,7 +488,7 @@
                     >
                       <span
                         v-if="isChoiceOptionMissedCorrect(q, idx, optIdx)"
-                        class="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
+                        class="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:border-amber-400/25 dark:bg-amber-500/12 dark:text-amber-100"
                       >
                         漏选
                       </span>

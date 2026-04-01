@@ -1,28 +1,28 @@
 <template>
   <section
-    class="rounded-2xl border shadow-sm"
-    :class="compact ? 'border-amber-200 bg-amber-50/90 p-4' : 'border-amber-200 bg-[linear-gradient(135deg,rgba(251,191,36,0.14),rgba(255,255,255,0.94))] p-5 sm:p-6'"
+    class="workspace-alert workspace-alert-warning shadow-sm"
+    :class="compact ? 'p-4' : 'p-5 sm:p-6'"
   >
     <div class="flex flex-wrap items-start justify-between gap-4">
       <div class="space-y-2 max-w-3xl">
-        <div class="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-white/80 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-amber-700">
+        <div class="inline-flex items-center gap-2 rounded-full border workspace-badge-warning px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em]">
           <Settings2 class="w-3.5 h-3.5" />
           模型接入未完成
         </div>
         <div class="space-y-1">
-          <h3 class="text-base sm:text-lg font-bold tracking-tight text-slate-900">{{ title }}</h3>
-          <p class="text-sm text-slate-700 leading-relaxed">
+          <h3 class="text-base sm:text-lg font-bold tracking-tight">{{ title }}</h3>
+          <p class="text-sm leading-relaxed text-current/80">
             {{ description }}
           </p>
         </div>
-        <p v-if="missingSummary" class="text-xs text-slate-600">
+        <p v-if="missingSummary" class="text-xs text-current/70">
           缺少项：{{ missingSummary }}
         </p>
       </div>
 
       <button
         type="button"
-        class="inline-flex items-center gap-2 rounded-xl border border-slate-900/10 bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+        class="inline-flex items-center gap-2 rounded-xl border border-amber-900/10 bg-amber-950 px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition-opacity dark:border-amber-200/10 dark:bg-amber-100 dark:text-amber-950"
         @click="router.push('/settings')"
       >
         去设置中心
