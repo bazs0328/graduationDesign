@@ -1690,6 +1690,7 @@ async function syncFromRoute(options = {}) {
       await appContext.applyRouteContext(route.query, {
         ensureKbs: options.ensureKbs === true,
         fallbackToFirstKb: true,
+        clearDocIfMissing: true,
       })
     } catch {
       // error toast handled globally

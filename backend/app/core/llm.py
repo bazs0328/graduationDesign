@@ -14,6 +14,12 @@ EMBEDDING_AUTO_FALLBACK_PRIORITY = ("qwen", "dashscope")
 LEGACY_LLM_PROVIDERS = {"openai", "gemini"}
 LEGACY_EMBEDDING_PROVIDERS = {"openai", "gemini", "deepseek"}
 _UNCONFIGURED_PROVIDER = "unconfigured"
+_EMBEDDING_BATCH_SIZE = 10
+
+
+def _iter_embedding_batches(texts: list[str], batch_size: int = _EMBEDDING_BATCH_SIZE):
+    for start in range(0, len(texts), batch_size):
+        yield texts[start : start + batch_size]
 
 
 class QwenEmbeddings(Embeddings):
@@ -23,9 +29,12 @@ class QwenEmbeddings(Embeddings):
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         payload = [str(text) for text in texts]
-        response = self.client.embeddings.create(model=self.model, input=payload)
-        data = sorted(response.data, key=lambda item: item.index)
-        return [item.embedding for item in data]
+        embeddings: list[list[float]] = []
+        for batch in _iter_embedding_batches(payload):
+            response = self.client.embeddings.create(model=self.model, input=batch)
+            data = sorted(response.data, key=lambda item: item.index)
+            embeddings.extend(item.embedding for item in data)
+        return embeddings
 
     def embed_query(self, text: str) -> list[float]:
         return self.embed_documents([text])[0]
