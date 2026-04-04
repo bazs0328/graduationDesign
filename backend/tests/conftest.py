@@ -20,7 +20,7 @@ os.environ.setdefault("QWEN_EMBEDDING_MODEL", "text-embedding-v4")
 os.environ.setdefault("DASHSCOPE_EMBEDDING_MODEL", "qwen3-vl-embedding")
 os.environ.setdefault("AUTH_ALLOW_LEGACY_USER_ID", "true")
 
-# Ensure backend is on path (conftest lives in tests/backend/)
+# Ensure backend is on path (conftest lives in backend/tests/)
 _project_root = Path(__file__).resolve().parent.parent.parent
 _backend = _project_root / "backend"
 if str(_backend) not in sys.path:

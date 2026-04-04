@@ -1,107 +1,75 @@
 # StudyCompass
 
-StudyCompass 是一个面向高校学生自学场景的 LLM 个性化学习辅助系统原型。
-系统围绕“学生自有学习资料”工作，支持上传课件、讲义、笔记等文档，并提供摘要、问答、测验、学习进度跟踪、学习路径和个性化推荐。
+StudyCompass 是一个面向高校学生自学场景的 LLM 个性化学习辅助系统原型。系统围绕“学生自有学习资料”工作，支持上传课件、讲义、笔记等文档，并将其转化为摘要、问答、测验、进度跟踪、学习路径与推荐动作，覆盖从资料导入到复盘巩固的完整学习闭环。
 
-项目当前采用：
-
-- 后端：FastAPI + SQLite + Chroma + LangChain
-- 前端：Vue 3 + Vite + Pinia
-- 大模型接入：DeepSeek / Qwen / DashScope
-- 检索方案：向量检索 + 词法检索 + RAG
-
-## 项目定位
-
-本项目不是面向固定教材的单功能问答工具，而是一个围绕学生上传资料构建学习空间的学习助手原型，重点覆盖完整学习闭环：
-
-1. 上传资料并解析
-2. 生成摘要和知识点
-3. 围绕资料进行问答
-4. 生成并提交测验
-5. 跟踪学习进度、学习路径和推荐动作
-
-## 当前功能
-
-### 核心学习功能
+## 核心能力
 
 - 文档上传与解析：支持 `PDF / TXT / MD / DOCX / PPTX`
 - 扫描版 PDF OCR 兜底识别
-- 文档摘要生成
-- 知识点提取与掌握度跟踪
-- 基于资料范围的智能问答
-- 题目生成、自动评分与错题反馈
-- 学习进度、活动流、推荐与学习路径可视化
+- 单文档摘要与知识点提取
+- 基于资料范围的问答与分步讲解
+- 题目生成、自动评分、错题反馈与针对性再练
+- 学习进度、活动流、知识点掌握度、推荐与学习路径展示
+- 用户登录、JWT 鉴权、多用户数据隔离
+- 当前账号独立保存模型接入配置和高级参数覆盖
 
-### 个性化能力
+## 技术栈
 
-- 用户登录与多用户隔离
-- 每个账号独立保存模型接入配置
-- 每个账号独立保存高级参数覆盖
-- 轻量学习者画像：
-  - `ability_level`
-  - `theta`
-  - `frustration_score`
-  - `weak_concepts`
-- QA 按学习者能力层级调整讲解策略
-- Quiz 支持自适应难度分配
-- Progress 页根据掌握度和行为数据生成推荐与学习路径
+- 后端：FastAPI + SQLAlchemy + SQLite + Chroma + LangChain
+- 前端：Vue 3 + Vite + Pinia + Tailwind CSS 4
+- 检索：向量检索 + BM25 词法检索 + Hybrid RAG
+- 文档处理：PyMuPDF / pdfplumber / python-docx / python-pptx / RapidOCR / Tesseract
+- 测试：pytest + Vitest + Playwright
 
-### 工程能力
+## 典型使用流程
 
-- 账号体系与 JWT 登录
-- 自动建库、自动补齐 SQLite schema
-- 用户级数据隔离
-- 后端单测、前端单测、E2E 测试
-- Docker 开发方式
-
-## 页面与模块
-
-- `上传`：创建资料库、上传和管理文档
-- `摘要`：查看摘要与知识点
-- `问答`：基于资料范围进行普通问答或讲解模式问答
-- `测验`：生成试卷、提交作答、查看反馈
-- `进度`：查看资料库统计、学习活动、推荐、学习路径、画像信息
-- `设置中心`：配置模型接入、学习偏好和当前账号高级参数
+1. 在 `上传` 页面创建资料库并上传学习资料
+2. 在 `摘要` 页面生成摘要和知识点
+3. 在 `问答` 页面围绕资料进行普通问答或讲解模式问答
+4. 在 `测验` 页面生成题目并提交作答
+5. 在 `进度` 页面查看活动、掌握度、推荐和学习路径
+6. 在 `设置中心` 页面维护当前账号的模型接入、学习偏好和高级诊断配置
 
 ## 快速开始
 
-### 方式一：后端 Docker + 前端本地开发
+### 推荐方式：后端 Docker + 前端本地开发
 
-这是当前最推荐的启动方式。
+这是当前最推荐的开发方式。
 
-#### 1. 准备后端环境变量
+### 前置要求
+
+- Docker 与 Docker Compose
+- Node.js 18 及以上版本
+
+### 1. 准备后端部署级配置
 
 ```bash
 cp backend/.env.example backend/.env
 ```
 
-`backend/.env` 只用于部署级配置，不需要在这里填写 API Key。
+`backend/.env` 只用于部署级配置，不需要在这里填写模型 API Key。
 
-#### 2. 启动后端
+### 2. 启动后端
+
+首次启动或改过 `backend/Dockerfile` / 系统依赖时：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
-日常开发如果没有改 Dockerfile 或系统依赖，可以直接：
+日常开发可直接：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 ```
 
-后端默认地址：
+默认地址：
 
-```text
-http://localhost:8000
-```
+- 后端 API：`http://localhost:8000`
+- 健康检查：`http://localhost:8000/api/health`
+- Swagger 文档：`http://localhost:8000/docs`
 
-健康检查：
-
-```text
-GET /api/health
-```
-
-#### 3. 启动前端
+### 3. 启动前端
 
 ```bash
 cd web
@@ -109,19 +77,23 @@ npm install
 npm run dev
 ```
 
-前端默认地址：
+默认地址：
 
-```text
-http://localhost:5173
+- 前端：`http://localhost:5173`
+
+如果后端不在默认地址，可以显式指定：
+
+```bash
+cd web
+VITE_API_BASE=http://localhost:8000 npm run dev
 ```
 
-#### 4. 首次使用
+### 4. 首次使用
 
-1. 打开前端页面
-2. 注册账号并登录
-3. 进入 `设置中心 -> 模型接入`
-4. 为当前账号填写 DeepSeek / Qwen / DashScope 配置
-5. 返回 `上传` 页面开始使用
+1. 打开前端页面并注册账号
+2. 登录后进入 `设置中心 -> 模型接入`
+3. 为当前账号填写对话模型和向量模型配置
+4. 返回 `上传` 页面创建资料库并上传文档
 
 ## 本地开发（不使用 Docker）
 
@@ -140,18 +112,19 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 ### 前端
 
-建议使用 Node.js 18 及以上版本。
-
 ```bash
 cd web
 npm install
 npm run dev
 ```
 
-## OCR 依赖
+### WSL 说明
 
-Docker 镜像已经内置 OCR 相关系统依赖。
-如果你在本地直接运行后端，需要额外安装：
+如果项目位于 `/mnt/*` 挂载盘下，前端开发服务器已经自动启用 polling 以减少 Vite 热更新失效问题。
+
+## OCR 与本地系统依赖
+
+Docker 镜像已经内置 OCR 相关系统依赖。如果直接在本地运行后端，需要额外安装：
 
 ### Ubuntu / Debian
 
@@ -182,49 +155,43 @@ brew install tesseract-lang
 
 默认模板见 [backend/.env.example](backend/.env.example)。
 
+默认情况下：
+
+- `AUTH_REQUIRE_LOGIN=true`
+- `AUTH_ALLOW_LEGACY_USER_ID=false`
+
+也就是除 `/api/auth/*` 和 `/api/health` 外，其余 API 默认都要求登录。
+
 ### 2. 账号级配置：设置中心
 
-普通用户不需要改 `.env` 填模型密钥。
-当前账号的模型和高级参数统一在前端设置页维护：
+普通用户不需要修改 `.env` 填模型密钥。当前账号的模型和高级参数统一在前端设置页维护：
 
 - `设置中心 -> 模型接入`
-- `设置中心 -> 当前账号高级参数`
+- `设置中心 -> 学习偏好`
+- `设置中心 -> 高级诊断`
 
 这些配置会按用户隔离保存，不会共享给其他账号。
 
-### 3. 当前支持的模型提供商
+### 3. 当前主路径支持的模型提供商
 
-设置页当前支持：
+设置页当前主路径支持：
 
 - 对话模型：`DeepSeek`、`Qwen`
 - 向量模型：`Qwen`、`DashScope`
 
-项目底层保留了一些历史兼容字段，但当前正式使用路径以上述提供商为主。
+后端仍保留部分历史兼容字段，但当前推荐使用路径以上述提供商为主。
 
-## 多用户与数据隔离
+## 多用户与个性化能力
 
-系统当前已经具备基础多用户隔离能力：
+系统当前已经具备基础多用户隔离与轻量个性化闭环：
 
 - 用户通过账号登录访问系统
-- 文档、知识库、进度、画像按用户隔离
-- 模型接入配置按用户隔离
-- 高级参数覆盖按用户隔离
-- 后台文档处理任务也会加载对应用户的运行配置
-
-这意味着：
-
-- 用户 A 的 API Key 不会自动继承给用户 B
-- 用户 A 的检索/OCR/分块高级参数不会影响用户 B
-
-## 个性化策略说明
-
-当前项目的个性化能力是“轻量画像 + 规则/模型联动”的实现方式，不是复杂知识追踪平台，但已经形成可说明的闭环：
-
-1. 系统根据测验表现更新学习者画像
-2. 画像包含能力层级、最近正确率、挫败感、弱项概念等信息
-3. QA 会根据画像调整讲解强度与解释粒度
-4. Quiz 会根据画像生成难度分配方案
-5. Progress 页会结合掌握度与行为记录生成推荐和学习路径
+- 文档、知识库、进度、画像、模型配置按用户隔离
+- 后台文档处理任务会加载对应用户的运行时配置
+- 学习者画像包含 `ability_level`、`theta`、`frustration_score`、`weak_concepts`
+- QA 会根据画像调整讲解粒度与风格
+- Quiz 会根据画像进行自适应难度分配
+- Progress 会结合掌握度和行为记录生成推荐与学习路径
 
 相关实现可参考：
 
@@ -234,38 +201,27 @@ brew install tesseract-lang
 - [backend/app/routers/recommendations.py](backend/app/routers/recommendations.py)
 - [backend/app/routers/profile.py](backend/app/routers/profile.py)
 
-## 数据目录
-
-默认数据目录为 `backend/data`。
-
-常见内容包括：
-
-```text
-backend/data/
-  app.db
-  system_bootstrap.json
-  users/<user_id>/
-    uploads/
-    text/
-    chroma/
-    lexical/
-    kb/
-```
-
-其中：
-
-- `app.db`：SQLite 数据库
-- `users/<user_id>/uploads`：原始上传文件
-- `users/<user_id>/text`：解析后的文本
-- `users/<user_id>/chroma`：向量库
-- `users/<user_id>/lexical`：词法检索缓存
-
 ## 测试
+
+### 测试目录约定
+
+- `backend/tests/`：后端 pytest 测试
+- `web/tests/unit/`：前端 Vitest 单元测试
+- `web/tests/e2e/`：前端 Playwright E2E 测试
+- `tests/`：项目级脚本，如 smoke、回归、压测脚本
 
 ### 后端测试
 
+在仓库根目录运行：
+
 ```bash
-python3 -m pytest tests/backend -q
+python3 -m pytest backend/tests -q
+```
+
+如果是在后端开发容器中运行，由于容器工作目录是 `/app`，命令应为：
+
+```bash
+pytest tests -q
 ```
 
 ### 前端单元测试
@@ -282,30 +238,44 @@ cd web
 npm run build
 ```
 
-### E2E
+### 前端 E2E
 
 ```bash
 cd web
 npm run test:e2e
 ```
 
-如果要运行依赖真实 LLM 的完整流程测试：
+常用 E2E 环境变量：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `E2E_BASE_URL` | `http://localhost:5173` | Playwright 访问的前端地址 |
+| `E2E_API_BASE` | `http://localhost:8000` | E2E 用于检查和调用的后端地址 |
+| `E2E_LLM` | `0` | 设为 `1` 时运行依赖真实模型的完整流程 |
+| `E2E_USERNAME` | 空 | 指定已有测试账号用户名 |
+| `E2E_PASSWORD` | `e2e-password-123` | 指定测试账号密码 |
+
+示例：
 
 ```bash
 cd web
-E2E_LLM=1 npm run test:e2e
+E2E_API_BASE=http://localhost:8000 E2E_LLM=1 npm run test:e2e
 ```
 
-如果后端不在默认地址，可以指定：
+### 项目级脚本
 
 ```bash
-cd web
-E2E_API_BASE=http://localhost:8000 npm run test:e2e
+bash tests/smoke/dev_smoke.sh
+python3 tests/qa_regression.py
+python3 tests/quiz_paper_regression.py
+bash tests/loadtest_qa.sh
 ```
+
+这些脚本主要用于 smoke、回归和压测，不属于 `pytest` / `vitest` / `playwright` 的标准测试发现目录。
 
 ## 常用开发命令
 
-### 进入后端容器
+### 进入后端开发容器
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml exec backend bash
@@ -325,26 +295,66 @@ cd web
 npm install
 ```
 
+## 数据目录
+
+默认数据目录为 `backend/data`。常见内容包括：
+
+```text
+backend/data/
+  app.db
+  system_bootstrap.json
+  users/<user_id>/
+    uploads/
+    text/
+    chroma/
+    lexical/
+    kb/
+```
+
+其中：
+
+- `app.db`：SQLite 数据库
+- `system_bootstrap.json`：系统启动期初始化信息
+- `users/<user_id>/uploads`：原始上传文件
+- `users/<user_id>/text`：解析后的文本
+- `users/<user_id>/chroma`：向量库
+- `users/<user_id>/lexical`：词法检索缓存
+- `users/<user_id>/kb`：资料库相关元数据
+
 ## 项目结构
 
 ```text
 backend/
   app/
-    core/        # 配置、认证、运行时上下文、底层能力
-    routers/     # API 路由
-    services/    # 业务逻辑
-    models.py    # 数据模型
-    schemas.py   # Pydantic schema
-  scripts/       # 数据清理与迁移脚本
+    core/          # 配置、认证、运行时上下文、底层能力
+    routers/       # API 路由
+    services/      # 业务逻辑
+    utils/         # 通用工具
+    models.py      # SQLAlchemy 模型
+    schemas.py     # Pydantic schema
+    main.py        # FastAPI 入口
+  scripts/         # 数据清理、迁移、辅助脚本
+  tests/           # 后端 pytest
   requirements.txt
+  Dockerfile
 
 web/
   src/
-    views/       # 页面
-    components/  # UI 组件
-    stores/      # Pinia 状态管理
-    composables/ # 复用逻辑
-    utils/       # 工具函数
+    views/         # 页面
+    components/    # 组件
+    composables/   # 复用逻辑
+    stores/        # Pinia 状态管理
+    router/        # 前端路由
+    utils/         # 工具函数
+    styles/        # 样式入口
+  tests/
+    unit/          # Vitest
+    e2e/           # Playwright
+  scripts/         # 前端辅助脚本
+
+tests/
+  smoke/           # smoke 脚本
+  *.py / *.sh      # 回归、压测等项目级脚本
 ```
 
 ## 适用边界
